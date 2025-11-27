@@ -60,6 +60,21 @@ FRONTEND_PORT=4000 pnpm dev
 BACKEND_PORT=9000 ./run_uvicorn.sh
 ```
 
+Run both services together
+
+You can run both the frontend and backend dev servers together with `run-dev.sh` at the repository root. The script starts both servers, writes logs to `./logs/`, and stops both cleanly if it is interrupted (SIGINT/SIGTERM).
+
+```bash
+# default ports (frontend:3000, backend:8000)
+./run-dev.sh
+
+# custom ports
+./run-dev.sh -f 4000 -b 9000
+```
+
+Logs are written to `./logs/frontend.log` and `./logs/backend.log`.
+Follow them with: `tail -F logs/frontend.log logs/backend.log`.
+
 ---
 
 ## Production Deployment

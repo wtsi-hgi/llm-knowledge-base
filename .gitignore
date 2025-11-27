@@ -217,6 +217,8 @@ frontend/.env.local
 frontend/.env
 frontend/build/
 
+logs/
+
 # OS / editor
 .DS_Store
 *.log
