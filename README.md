@@ -22,14 +22,15 @@ shadcn/ui) and a FastAPI backend.
 ### 1. Frontend Setup
 ```bash
 cd frontend
-pnpm install
-# (Optional) Install shadcn/ui:
-pnpm dlx shadcn-ui@latest init
-# Add a component, e.g.:
-pnpm dlx shadcn-ui@latest add button
+
+# (optional) Scaffold the shadcn components (this will add files to `frontend/components/ui`):
+pnpm dlx shadcn@latest init
+pnpm dlx shadcn@latest add button
+
 pnpm dev
 ```
-Visit http://localhost:3000 to see the Hello World page.
+
+Visit `http://localhost:3000` to see the Hello World page.
 
 ### 2. Backend Setup
 ```bash
@@ -40,7 +41,24 @@ pip install --upgrade pip
 pip install -r requirements.txt
 uvicorn main:app --reload
 ```
-Visit http://localhost:8000 to see the FastAPI Hello World endpoint.
+
+Visit `http://localhost:8000` to see the FastAPI Hello World endpoint, and try the example query endpoint:
+
+- `http://localhost:8000/hello?name=YourName` => { "message": "Hello, YourName from FastAPI!" }
+
+## Port configuration
+
+- Frontend: set `FRONTEND_PORT` environment variable to choose the dev port (default `3000`). Example:
+
+```bash
+FRONTEND_PORT=4000 pnpm dev
+```
+
+- Backend: set `BACKEND_PORT` environment variable (default `8000`). Example:
+
+```bash
+BACKEND_PORT=9000 ./run_uvicorn.sh
+```
 
 ---
 
@@ -68,4 +86,3 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 - Do not share virtual environments between users.
 - The `pnpm` binary can be shared, but each user’s global packages/cache are
   separate by default.
-- For shadcn/ui usage, see https://ui.shadcn.com/docs/installation

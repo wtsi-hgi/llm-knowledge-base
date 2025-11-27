@@ -15,3 +15,9 @@ app.add_middleware(
 @app.get("/")
 def read_root():
     return {"message": "Hello World from FastAPI!"}
+
+
+@app.get("/hello")
+def hello(name: str = "World"):
+    """Example endpoint that accepts a query parameter `name` and returns a greeting."""
+    return {"message": f"Hello, {name} from FastAPI!"}
