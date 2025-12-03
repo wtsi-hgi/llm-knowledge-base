@@ -4,16 +4,18 @@
 
 @import "tw-animate-css";
 
-:root {
-	--radius: 0.5rem;
-}
+@layer base {
+	:root {
+		--radius: 0.5rem;
+	}
 
-html,
-body,
-#__next {
-	height: 100%;
-}
+	html,
+	body,
+	#__next {
+		height: 100%;
+	}
 
-body {
-	@apply bg-white text-slate-900 antialiased;
+	body {
+		@apply bg-white text-slate-900 antialiased;
+	}
 }
