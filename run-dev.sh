@@ -57,7 +57,7 @@ setsid bash -lc "cd backend && BACKEND_PORT=${BACKEND_PORT} ./run_uvicorn.sh" > 
 BACK_PID=$!
 
 echo "Starting frontend on port ${FRONTEND_PORT} (logs: logs/frontend.log)"
-setsid bash -lc "cd frontend && FRONTEND_PORT=${FRONTEND_PORT} pnpm dev" > logs/frontend.log 2>&1 &
+setsid bash -lc "cd frontend && FRONTEND_PORT=${FRONTEND_PORT} BACKEND_PORT=${BACKEND_PORT} pnpm dev" > logs/frontend.log 2>&1 &
 FRONT_PID=$!
 
 echo "Frontend PID: ${FRONT_PID}, Backend PID: ${BACK_PID}"
