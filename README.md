@@ -1,13 +1,16 @@
 # Next.js + shadcn/ui → FastAPI Monorepo
 
-This project is a full-stack app with a Next.js (React) frontend (with
-shadcn/ui) and a FastAPI backend.
+This project is a full-stack app with a Next.js (React) frontend using the
+**App Router**, shadcn/ui, and a FastAPI backend.
 
 ---
 
 ## Directory Structure
 
-- `frontend/` — Next.js 16 + React 19 + shadcn/ui (TypeScript)
+- `frontend/` — Next.js 15+ (App Router) + React 19 + shadcn/ui + Tailwind CSS v4 (TypeScript)
+  - `app/` — App Router pages, layouts, and API routes
+  - `components/` — React components including shadcn/ui
+  - `lib/` — Utility functions
 - `backend/` — FastAPI + Uvicorn (Python 3.11)
 
 ---
@@ -15,17 +18,17 @@ shadcn/ui) and a FastAPI backend.
 ## Developer Setup
 
 ### Prerequisites
-- Node.js 24.x (in your PATH)
-- Python 3.11.x (in your PATH)
+- Node.js 20+ (in your PATH)
+- Python 3.11+ (in your PATH)
 - pnpm (in your PATH)
 
 ### 1. Frontend Setup
 ```bash
 cd frontend
+pnpm install
 
-# (optional) Scaffold the shadcn components (this will add files to `frontend/components/ui`):
-pnpm dlx shadcn@latest init
-pnpm dlx shadcn@latest add button
+# (optional) Add more shadcn components:
+pnpm dlx shadcn@latest add [component-name]
 
 pnpm dev
 ```

@@ -1,17 +1,18 @@
-import { useState } from 'react';
-import { Button } from '../components/ui/button';
+'use client'
+
+import { useState } from 'react'
+import { Button } from '@/components/ui/button'
 
 export default function Home() {
-	const [msg, setMsg] = useState<string | null>(null);
+	const [msg, setMsg] = useState<string | null>(null)
 
 	async function callBackend() {
 		try {
-			// Call the Next.js API proxy route (avoids CORS issues)
-			const res = await fetch('/api/hello');
-			const data = await res.json();
-			setMsg(data.message || JSON.stringify(data));
+			const res = await fetch('/api/hello')
+			const data = await res.json()
+			setMsg(data.message || JSON.stringify(data))
 		} catch (err) {
-			setMsg('Error calling backend');
+			setMsg('Error calling backend')
 		}
 	}
 
@@ -31,5 +32,5 @@ export default function Home() {
 				</div>
 			)}
 		</main>
-	);
+	)
 }
