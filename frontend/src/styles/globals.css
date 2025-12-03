@@ -1,13 +1,36 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
+@import "tailwindcss";
 @import "tw-animate-css";
 
+@source "../../pages/**/*.{js,ts,jsx,tsx}";
+@source "../../components/**/*.{js,ts,jsx,tsx}";
+
+@theme {
+	--radius-sm: 0.25rem;
+	--radius-md: 0.375rem;
+	--radius-lg: 0.5rem;
+	--radius-xl: 0.75rem;
+
+	--color-background: #ffffff;
+	--color-foreground: #0f172a;
+
+	--color-primary: #0f172a;
+	--color-primary-foreground: #f8fafc;
+
+	--color-secondary: #f1f5f9;
+	--color-secondary-foreground: #0f172a;
+
+	--color-accent: #f1f5f9;
+	--color-accent-foreground: #0f172a;
+
+	--color-destructive: #ef4444;
+	--color-destructive-foreground: #ffffff;
+
+	--color-border: #e2e8f0;
+	--color-input: #e2e8f0;
+	--color-ring: #0f172a;
+}
+
 @layer base {
-	:root {
-		--radius: 0.5rem;
-	}
 
 	html,
 	body,
@@ -16,6 +39,9 @@
 	}
 
 	body {
-		@apply bg-white text-slate-900 antialiased;
+		background-color: var(--color-background);
+		color: var(--color-foreground);
+		-webkit-font-smoothing: antialiased;
+		-moz-osx-font-smoothing: grayscale;
 	}
 }
