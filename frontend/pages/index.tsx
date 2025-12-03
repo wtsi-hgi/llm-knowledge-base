@@ -6,8 +6,8 @@ export default function Home() {
 
 	async function callBackend() {
 		try {
-			// call backend running on localhost:8000 in development
-			const res = await fetch('http://localhost:8000/hello');
+			// Call the Next.js API proxy route (avoids CORS issues)
+			const res = await fetch('/api/hello');
 			const data = await res.json();
 			setMsg(data.message || JSON.stringify(data));
 		} catch (err) {
