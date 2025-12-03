@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import Button from '../components/ui/button';
+import { Button } from '../components/ui/button';
 
 export default function Home() {
 	const [msg, setMsg] = useState<string | null>(null);
@@ -16,16 +16,18 @@ export default function Home() {
 	}
 
 	return (
-		<main style={{ padding: 40, fontFamily: 'Inter, system-ui, -apple-system, Roboto, sans-serif' }}>
-			<h1 className="text-2xl font-semibold">Hello World from Next.js + shadcn-style UI</h1>
-			<p className="mt-2 text-sm text-slate-600">This page uses a shadcn-style `components/ui/button.tsx` (Tailwind required).</p>
-			<div className="mt-3">
+		<main className="p-10 font-sans">
+			<h1 className="text-2xl font-semibold">Hello World from Next.js + shadcn/ui</h1>
+			<p className="mt-2 text-sm text-muted-foreground">
+				This page uses a shadcn/ui Button component with Tailwind CSS v4.
+			</p>
+			<div className="mt-4">
 				<Button onClick={callBackend}>Call FastAPI /hello</Button>
 			</div>
 			{msg && (
-				<div style={{ marginTop: 16, color: '#111827' }}>
+				<div className="mt-4">
 					<strong>Backend response:</strong>
-					<div>{msg}</div>
+					<p className="mt-1">{msg}</p>
 				</div>
 			)}
 		</main>

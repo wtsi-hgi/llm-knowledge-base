@@ -22,6 +22,9 @@
 	--color-accent: #f1f5f9;
 	--color-accent-foreground: #0f172a;
 
+	--color-muted: #f1f5f9;
+	--color-muted-foreground: #64748b;
+
 	--color-destructive: #ef4444;
 	--color-destructive-foreground: #ffffff;
 
