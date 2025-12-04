@@ -2,6 +2,7 @@ import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 app = FastAPI()
 
@@ -17,12 +18,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.get("/")
-def read_root():
+
+class MessageResponse(BaseModel):
+    message: str
+
+
+@app.get("/", response_model=MessageResponse)
+async def read_root():
     return {"message": "Hello World from FastAPI!"}
 
 
-@app.get("/hello")
-def hello(name: str = "World"):
+@app.get("/hello", response_model=MessageResponse)
+async def hello(name: str = "World"):
     """Example endpoint that accepts a query parameter `name` and returns a greeting."""
     return {"message": f"Hello, {name} from FastAPI!"}
