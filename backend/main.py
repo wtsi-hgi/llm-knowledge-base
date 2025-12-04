@@ -1,32 +1,50 @@
-"""FastAPI application entry point.
+"""FastAPI application entry point with structured lifespan management."""
 
-This module wires together the application, configuration, middleware,
-and versioned API routers. The actual endpoint implementations live in
-the :mod:`api.v1` package to keep ``main.py`` focused on composition.
-"""
-
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from httpx import AsyncClient
 
 from api import api_v1_router
 from config import settings
 
+logger = logging.getLogger("llm_kb.api")
+
+
+def configure_logging() -> None:
+    """Ensure loggers emit structured, leveled messages."""
+
+    if logging.getLogger().handlers:
+        # Respect host application's logging configuration (e.g., uvicorn)
+        logging.getLogger().setLevel(settings.log_level.upper())
+        return
+
+    logging.basicConfig(
+        level=settings.log_level.upper(),
+        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+    )
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Application lifespan context manager for startup/shutdown events.
+    """Application lifespan context manager for startup/shutdown events."""
 
-    Initialize and tear down shared resources here (database connections,
-    model loaders, queues, etc.). Keeping this logic in a single place
-    makes it easier to evolve as the app grows.
-    """
+    configure_logging()
+    logger.info(
+        "Starting %s", settings.app_name, extra={"version": settings.app_version}
+    )
 
-    print(f"Starting {settings.app_name} v{settings.app_version}")
-    yield
-    print("Shutting down application")
+    app.state.http_client = AsyncClient(timeout=settings.http_client_timeout)
+
+    try:
+        yield
+    finally:
+        http_client: AsyncClient = app.state.http_client
+        await http_client.aclose()
+        logger.info("Shutting down application")
 
 
 app = FastAPI(
@@ -40,7 +58,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins_list,
-    allow_credentials=True,
+    allow_credentials=settings.cors_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )

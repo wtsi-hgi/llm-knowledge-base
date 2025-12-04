@@ -1,60 +1,98 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
+import { type ZodSchema } from 'zod'
 
-function getBackendUrl(): string {
-	if (process.env.BACKEND_URL) {
-		return process.env.BACKEND_URL
-	}
-	const port = process.env.BACKEND_PORT ?? '8000'
-	return `http://localhost:${port}`
+import { buildBackendUrl } from '@/lib/backend-client'
+import { errorResponseSchema } from '@/lib/contracts'
+
+const forwardedHeaders = ['authorization', 'content-type', 'accept', 'cookie']
+
+type ProxyOptions<T> = {
+  backendPath: string | ((request: NextRequest) => string)
+  schema?: ZodSchema<T>
+  forwardSearchParams?: boolean
 }
 
-type ProxyOptions = {
-	/**
-	 * Optional function to transform the JSON body for non-OK responses.
-	 * Allows each route to keep its specific error shape.
-	 */
-	mapErrorBody?: (json: unknown) => unknown
-	/**
-	 * Optional fallback body when the backend cannot be reached.
-	 */
-	fallbackBody?: unknown
-}
+export async function proxyRequest<T>(
+  request: NextRequest,
+  options: ProxyOptions<T>
+): Promise<NextResponse> {
+  const backendPath =
+    typeof options.backendPath === 'function'
+      ? options.backendPath(request)
+      : options.backendPath
 
-export async function proxyGetJson(
-	pathOrUrl: string | URL,
-	options: ProxyOptions = {}
-) {
-	const backendUrl = getBackendUrl()
+  const url = buildBackendUrl(backendPath)
 
-	try {
-		const url =
-			pathOrUrl instanceof URL ? pathOrUrl : new URL(pathOrUrl, backendUrl)
+  if (options.forwardSearchParams !== false) {
+    for (const [key, value] of request.nextUrl.searchParams.entries()) {
+      if (!url.searchParams.has(key)) {
+        url.searchParams.set(key, value)
+      }
+    }
+  }
 
-		const response = await fetch(url.toString(), {
-			method: 'GET',
-			headers: {
-				'Content-Type': 'application/json',
-			},
-			cache: 'no-store',
-		})
+  const init: RequestInit = {
+    method: request.method,
+    headers: Object.fromEntries(
+      forwardedHeaders
+        .map((header) => [header, request.headers.get(header)])
+        .filter(([, value]) => Boolean(value)) as Array<[string, string]>
+    ),
+    cache: 'no-store',
+  }
 
-		if (!response.ok) {
-			const raw = await response.json().catch(() => ({}))
-			const body = options.mapErrorBody ? options.mapErrorBody(raw) : raw
-			return NextResponse.json(body, { status: response.status })
-		}
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    const body = await request.arrayBuffer()
+    init.body = body
+    // Needed for streaming requests in Edge runtime
+    // @ts-expect-error -- duplex is still experimental in types
+    init.duplex = 'half'
+  }
 
-		const data = await response.json()
-		return NextResponse.json(data)
-	} catch (error) {
-		console.error('Backend proxy error:', error)
+  try {
+    const response = await fetch(url, init)
+    const contentType = response.headers.get('content-type') ?? ''
+    const isJson = contentType.includes('application/json')
+    const payload = isJson ? await response.json() : await response.text()
 
-		const body =
-			options.fallbackBody ??
-			(error instanceof Error
-				? { message: error.message }
-				: { message: 'Failed to connect to backend' })
+    if (!response.ok) {
+      const parsed = isJson ? errorResponseSchema.safeParse(payload) : null
+      const body = parsed?.success
+        ? parsed.data
+        : {
+            message:
+              typeof payload === 'string' ? payload : 'Backend request failed',
+          }
+      return NextResponse.json(body, { status: response.status })
+    }
 
-		return NextResponse.json(body, { status: 503 })
-	}
+    if (!isJson) {
+      return new NextResponse(payload as string, {
+        status: response.status,
+        headers: response.headers,
+      })
+    }
+
+    if (options.schema) {
+      const parsed = options.schema.safeParse(payload)
+      if (!parsed.success) {
+        return NextResponse.json(
+          {
+            message: 'Response validation failed',
+            issues: parsed.error.issues,
+          },
+          { status: 502 }
+        )
+      }
+      return NextResponse.json(parsed.data)
+    }
+
+    return NextResponse.json(payload)
+  } catch (error) {
+    console.error('Backend proxy error:', error)
+    return NextResponse.json(
+      { message: 'Failed to connect to backend' },
+      { status: 503 }
+    )
+  }
 }

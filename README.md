@@ -1,13 +1,24 @@
 # Next.js + shadcn/ui → FastAPI Monorepo
 
 This project is a full-stack app with a Next.js (React) frontend using the
-**App Router**, shadcn/ui, and a FastAPI backend.
+**App Router**, Tailwind CSS v4 + shadcn/ui, and a FastAPI backend.
+
+### Highlights
+
+- **Server Actions** call FastAPI directly from the server without exposing
+  backend URLs to the browser.
+- **Typed contracts**: FastAPI responses are validated on the frontend with
+  `zod` so regressions are caught immediately.
+- **Modern styling**: Tailwind v4 `@theme` tokens power shadcn/ui components,
+  theme switching, and animation primitives.
+- **Tests built-in**: Vitest covers the shared contracts, while pytest + httpx
+  validate the FastAPI routers.
 
 ---
 
 ## Directory Structure
 
-- `frontend/` — Next.js 15+ (App Router) + React 19 + shadcn/ui + Tailwind CSS v4 (TypeScript)
+- `frontend/` — Next.js 16 (App Router) + React 19 + shadcn/ui + Tailwind CSS v4 (TypeScript)
   - `app/` — App Router pages, layouts, and API routes
   - `components/` — React components including shadcn/ui
   - `lib/` — Utility functions
@@ -33,7 +44,11 @@ pnpm dlx shadcn@latest add [component-name]
 pnpm dev
 ```
 
-Visit `http://localhost:3000` to see the Hello World page.
+Visit `http://localhost:3000` to see the Server Action-powered greeting page.
+
+Server Actions call `FastAPI` via the shared `backendJson` helper. If you still
+need a browser-accessible endpoint, the `/app/api/*` routes proxy requests with
+response validation before returning data to the client.
 
 ### 2. Backend Setup
 ```bash
@@ -68,17 +83,29 @@ The app will work with defaults, but you can customize:
 - `FRONTEND_PORT` - Frontend dev server port (default: 3000)
 - `BACKEND_PORT` - Backend server port (default: 8000)
 - `BACKEND_URL` - Full backend URL (optional, overrides BACKEND_PORT)
-- `CORS_ORIGINS` - Comma-separated CORS origins (default: "*")
+- `CORS_ORIGINS` - Comma/semicolon-separated CORS origins. Defaults to
+  `http://localhost:3000`. Wildcards are rejected automatically when
+  `CORS_ALLOW_CREDENTIALS=true`.
+- `CORS_ALLOW_CREDENTIALS` - Whether credentials/cookies are allowed. Defaults
+  to `false` for safety.
+- `LOG_LEVEL` - Backend logging level (default `INFO`).
 
-### 4. Linting & Formatting
+### 4. Linting, Formatting & Tests
 
 To ensure code quality, run the following commands in the `frontend/` directory:
 
 - **Linting**: `pnpm lint` (Checks for errors)
 - **Formatting**: `pnpm format` (Fixes formatting issues)
+- **Unit tests**: `pnpm test`
 
-The `run-dev.sh` script will automatically run the lint check before starting
-the development servers. If linting fails, the servers will not start.
+In the `backend/` directory run:
+
+- **Unit tests**: `pytest`
+
+The `run-dev.sh` script automatically runs linting **and** the relevant unit
+tests (frontend Vitest + backend pytest) before starting the development
+servers. If any check fails, the script reruns it with full output and aborts
+the startup.
 
 ## Port configuration
 

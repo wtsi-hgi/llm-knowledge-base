@@ -1,54 +1,37 @@
-'use client'
+import { HelloForm } from '@/components/hello-form'
+import { HealthStatus } from '@/components/health-status'
 
-import { useState, useTransition } from 'react'
-import { Button } from '@/components/ui/button'
+import { fetchHealth, fetchInitialGreeting } from './actions'
 
-export default function Home() {
-	const [message, setMessage] = useState<string | null>(null)
-	const [error, setError] = useState<string | null>(null)
-	const [isPending, startTransition] = useTransition()
+export default async function Home() {
+  const [greeting, health] = await Promise.all([
+    fetchInitialGreeting(),
+    fetchHealth(),
+  ])
 
-	function callBackend() {
-		startTransition(async () => {
-			setError(null)
-			try {
-				const response = await fetch('/api/hello')
-				if (!response.ok) {
-					throw new Error(`HTTP ${response.status}`)
-				}
-				const data = await response.json()
-				setMessage(data.message ?? JSON.stringify(data))
-			} catch (err) {
-				setError(err instanceof Error ? err.message : 'Error calling backend')
-				setMessage(null)
-			}
-		})
-	}
-
-	return (
-		<main className="container mx-auto max-w-2xl px-4 py-10">
-			<h1 className="text-2xl font-semibold tracking-tight">
-				Hello World from Next.js + shadcn/ui
-			</h1>
-			<p className="mt-2 text-sm text-muted-foreground">
-				This page uses a shadcn/ui Button component with Tailwind CSS v4.
-			</p>
-			<div className="mt-6">
-				<Button onClick={callBackend} disabled={isPending}>
-					{isPending ? 'Loading...' : 'Call FastAPI /hello'}
-				</Button>
-			</div>
-			{message && (
-				<div className="mt-4 rounded-lg border border-border bg-card p-4">
-					<p className="text-sm font-medium">Backend response:</p>
-					<p className="mt-1 text-muted-foreground">{message}</p>
-				</div>
-			)}
-			{error && (
-				<div className="mt-4 rounded-lg border border-destructive bg-destructive/10 p-4 text-destructive">
-					<p className="text-sm font-medium">Error: {error}</p>
-				</div>
-			)}
-		</main>
-	)
+  return (
+    <main className="container mx-auto max-w-4xl px-4 py-12">
+      <section className="space-y-4">
+        <p className="text-primary text-sm tracking-[0.3em] uppercase">
+          Next.js + FastAPI
+        </p>
+        <h1 className="text-4xl font-semibold tracking-tight text-balance sm:text-5xl">
+          Full-stack starter with Server Actions and shadcn/ui
+        </h1>
+        <p className="text-muted-foreground max-w-2xl text-lg">
+          This template calls FastAPI directly from the server layer, validates
+          every payload with Zod, and keeps client components focused on UX.
+        </p>
+        <div className="flex items-center gap-3">
+          <HealthStatus status={health.status} />
+          <p className="text-muted-foreground text-sm">
+            FastAPI `/api/v1/health` check
+          </p>
+        </div>
+      </section>
+      <section className="mt-10">
+        <HelloForm initialMessage={greeting.message} />
+      </section>
+    </main>
+  )
 }

@@ -85,6 +85,19 @@ else
     echo "No changed frontend files to check."
 fi
 
+# Frontend tests (only when relevant files changed)
+if [ -n "$CHANGED_FILES" ]; then
+  echo "Running frontend unit tests on changed tree..."
+  if ! (cd frontend && pnpm test > /dev/null 2>&1); then
+    echo "Frontend unit tests failed. Running again with output:"
+    (cd frontend && pnpm test)
+    exit 1
+  fi
+  echo "Frontend unit tests passed."
+else
+  echo "No frontend changes requiring unit tests."
+fi
+
 # Backend linting with ruff (if installed)
 echo "Running backend lint check..."
 BACKEND_CHANGED=$(git diff --name-only --diff-filter=d HEAD | grep "^backend/.*\.py$" || true)
@@ -107,6 +120,32 @@ if [ -n "$BACKEND_CHANGED" ]; then
     fi
 else
     echo "No changed backend files to check."
+fi
+
+# Backend tests (only when Python files changed)
+if [ -n "$BACKEND_CHANGED" ]; then
+  echo "Running backend unit tests..."
+  if ! (cd backend && { if [ -f .venv/bin/activate ]; then \
+      # shellcheck disable=SC1091
+      . .venv/bin/activate; \
+    fi; command -v pytest > /dev/null 2>&1; }); then
+    echo "pytest is not available. Install backend dev dependencies (pip install -r backend/requirements-dev.txt)."
+    exit 1
+  fi
+  if ! (cd backend && { if [ -f .venv/bin/activate ]; then \
+      # shellcheck disable=SC1091
+      . .venv/bin/activate; \
+    fi; pytest > /dev/null 2>&1; }); then
+    echo "Backend unit tests failed. Running again with output:"
+    (cd backend && { if [ -f .venv/bin/activate ]; then \
+      # shellcheck disable=SC1091
+      . .venv/bin/activate; \
+    fi; pytest; })
+    exit 1
+  fi
+  echo "Backend unit tests passed."
+else
+  echo "No backend changes requiring unit tests."
 fi
 
 mkdir -p logs

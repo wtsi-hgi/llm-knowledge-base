@@ -1,10 +1,12 @@
-import { proxyGetJson } from '../_backendProxy'
+import { NextRequest } from 'next/server'
 
-export async function GET() {
-  return proxyGetJson('/api/v1/health', {
-    mapErrorBody: (raw: any) => ({
-      status: raw?.detail ?? 'unhealthy',
-    }),
-    fallbackBody: { status: 'unhealthy' },
+import { proxyRequest } from '../_backendProxy'
+import { healthResponseSchema } from '@/lib/contracts'
+
+export async function GET(request: NextRequest) {
+  return proxyRequest(request, {
+    backendPath: '/api/v1/health',
+    schema: healthResponseSchema,
+    forwardSearchParams: false,
   })
 }
