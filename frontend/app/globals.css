@@ -1,48 +1,49 @@
-@import "tailwindcss";
-@import "tw-animate-css";
+@import 'tailwindcss';
+@import 'tw-animate-css';
 
 @source "../components/**/*.{js,ts,jsx,tsx}";
 
 @theme {
-	--font-sans: var(--font-sans), ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --font-sans:
+    var(--font-sans), ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji',
+    'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
 
-	--radius-sm: 0.25rem;
-	--radius-md: 0.375rem;
-	--radius-lg: 0.5rem;
-	--radius-xl: 0.75rem;
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
 
-	--color-background: #ffffff;
-	--color-foreground: #0f172a;
+  --color-background: #ffffff;
+  --color-foreground: #0f172a;
 
-	--color-primary: #0f172a;
-	--color-primary-foreground: #f8fafc;
+  --color-primary: #0f172a;
+  --color-primary-foreground: #f8fafc;
 
-	--color-secondary: #f1f5f9;
-	--color-secondary-foreground: #0f172a;
+  --color-secondary: #f1f5f9;
+  --color-secondary-foreground: #0f172a;
 
-	--color-accent: #f1f5f9;
-	--color-accent-foreground: #0f172a;
+  --color-accent: #f1f5f9;
+  --color-accent-foreground: #0f172a;
 
-	--color-muted: #f1f5f9;
-	--color-muted-foreground: #64748b;
+  --color-muted: #f1f5f9;
+  --color-muted-foreground: #64748b;
 
-	--color-destructive: #ef4444;
-	--color-destructive-foreground: #ffffff;
+  --color-destructive: #ef4444;
+  --color-destructive-foreground: #ffffff;
 
-	--color-border: #e2e8f0;
-	--color-input: #e2e8f0;
-	--color-ring: #0f172a;
+  --color-border: #e2e8f0;
+  --color-input: #e2e8f0;
+  --color-ring: #0f172a;
 }
 
 @layer base {
+  html,
+  body {
+    height: 100%;
+  }
 
-	html,
-	body {
-		height: 100%;
-	}
-
-	body {
-		background-color: var(--color-background);
-		color: var(--color-foreground);
-	}
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+  }
 }
