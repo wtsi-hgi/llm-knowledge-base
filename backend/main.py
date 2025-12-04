@@ -1,34 +1,36 @@
-import os
+"""FastAPI application entry point."""
+
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+
+from config import settings
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Application lifespan context manager for startup/shutdown events."""
     # Startup: Initialize resources here (database connections, ML models, etc.)
+    print(f"Starting {settings.app_name} v{settings.app_version}")
     yield
     # Shutdown: Clean up resources here
+    print("Shutting down application")
 
 
 app = FastAPI(
-    title="LLM Knowledge Base API",
-    description="FastAPI backend for the Next.js + shadcn/ui frontend",
-    version="0.1.0",
+    title=settings.app_name,
+    description=settings.app_description,
+    version=settings.app_version,
     lifespan=lifespan,
 )
 
 # CORS configuration
-# In production, replace "*" with specific origins like ["https://yourdomain.com"]
-CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*").split(",")
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=CORS_ORIGINS,
+    allow_origins=settings.cors_origins_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -61,5 +63,5 @@ async def read_root() -> MessageResponse:
 
 @app.get("/hello", response_model=MessageResponse, tags=["greetings"])
 async def hello(name: str = "World") -> MessageResponse:
-    """Greeting endpoint that accepts a query parameter `name` and returns a greeting."""
+    """Greeting endpoint that accepts a query parameter `name`."""
     return MessageResponse(message=f"Hello, {name} from FastAPI!")

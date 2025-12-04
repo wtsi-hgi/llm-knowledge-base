@@ -42,6 +42,13 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip
 pip install -r requirements.txt
+
+# For development (linting, testing):
+pip install -r requirements-dev.txt
+```
+
+**Start the server:**
+```bash
 uvicorn main:app --reload
 ```
 
@@ -50,7 +57,20 @@ the example query endpoint:
 
 - `http://localhost:8000/hello?name=YourName` => { "message": "Hello, YourName from FastAPI!" }
 
-### 3. Linting & Formatting
+### 3. Environment Variables
+
+Copy `.env.example` to `.env` and customize as needed:
+```bash
+cp .env.example .env
+```
+
+The app will work with defaults, but you can customize:
+- `FRONTEND_PORT` - Frontend dev server port (default: 3000)
+- `BACKEND_PORT` - Backend server port (default: 8000)
+- `BACKEND_URL` - Full backend URL (optional, overrides BACKEND_PORT)
+- `CORS_ORIGINS` - Comma-separated CORS origins (default: "*")
+
+### 4. Linting & Formatting
 
 To ensure code quality, run the following commands in the `frontend/` directory:
 

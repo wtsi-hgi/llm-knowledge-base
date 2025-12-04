@@ -53,19 +53,60 @@ echo "Running frontend format and lint check on changed files..."
 
 # Get list of changed files in frontend directory that match supported extensions
 CHANGED_FILES=$(git diff --name-only --diff-filter=d HEAD | grep "^frontend/.*\.\(ts\|tsx\|js\|jsx\|json\|css\)$" || true)
+# ESLint only runs on JS/TS files (not JSON/CSS)
+ESLINT_FILES=$(git diff --name-only --diff-filter=d HEAD | grep "^frontend/.*\.\(ts\|tsx\|js\|jsx\)$" || true)
 
 if [ -n "$CHANGED_FILES" ]; then
     # Strip 'frontend/' prefix for running commands inside the directory
     RELATIVE_FILES=$(echo "$CHANGED_FILES" | sed 's/^frontend\///')
+    RELATIVE_ESLINT_FILES=$(echo "$ESLINT_FILES" | sed 's/^frontend\///' || true)
     
-    if ! (cd frontend && echo "$RELATIVE_FILES" | xargs pnpm prettier --write > /dev/null 2>&1 && echo "$RELATIVE_FILES" | xargs pnpm eslint > /dev/null 2>&1); then
+    # Run prettier on all files, eslint only on JS/TS files
+    LINT_FAILED=0
+    if ! (cd frontend && echo "$RELATIVE_FILES" | xargs pnpm prettier --write > /dev/null 2>&1); then
+        LINT_FAILED=1
+    fi
+    if [ -n "$RELATIVE_ESLINT_FILES" ]; then
+        if ! (cd frontend && echo "$RELATIVE_ESLINT_FILES" | xargs pnpm eslint > /dev/null 2>&1); then
+            LINT_FAILED=1
+        fi
+    fi
+    
+    if [ "$LINT_FAILED" -eq 1 ]; then
         echo "Format or lint check failed on changed files. Running again with output:"
-        (cd frontend && echo "$RELATIVE_FILES" | xargs pnpm prettier --write && echo "$RELATIVE_FILES" | xargs pnpm eslint)
+        (cd frontend && echo "$RELATIVE_FILES" | xargs pnpm prettier --write)
+        if [ -n "$RELATIVE_ESLINT_FILES" ]; then
+            (cd frontend && echo "$RELATIVE_ESLINT_FILES" | xargs pnpm eslint)
+        fi
         exit 1
     fi
-    echo "Checks passed on $(echo "$CHANGED_FILES" | wc -l) file(s)."
+    echo "Frontend checks passed on $(echo "$CHANGED_FILES" | wc -l) file(s)."
 else
     echo "No changed frontend files to check."
+fi
+
+# Backend linting with ruff (if installed)
+echo "Running backend lint check..."
+BACKEND_CHANGED=$(git diff --name-only --diff-filter=d HEAD | grep "^backend/.*\.py$" || true)
+
+if [ -n "$BACKEND_CHANGED" ]; then
+    if command -v ruff &> /dev/null || [ -x "backend/.venv/bin/ruff" ]; then
+        RUFF_CMD="ruff"
+        if [ -x "backend/.venv/bin/ruff" ]; then
+            RUFF_CMD="backend/.venv/bin/ruff"
+        fi
+        
+        if ! $RUFF_CMD check backend/ > /dev/null 2>&1; then
+            echo "Backend lint check failed:"
+            $RUFF_CMD check backend/
+            exit 1
+        fi
+        echo "Backend checks passed on $(echo "$BACKEND_CHANGED" | wc -l) file(s)."
+    else
+        echo "Skipping backend lint (ruff not installed - run: pip install -r backend/requirements-dev.txt)"
+    fi
+else
+    echo "No changed backend files to check."
 fi
 
 mkdir -p logs
