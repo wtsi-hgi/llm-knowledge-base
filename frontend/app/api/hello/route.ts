@@ -21,7 +21,7 @@ export async function GET(request: NextRequest) {
 
 	try {
 		const { searchParams } = new URL(request.url)
-		const url = new URL('/hello', backendUrl)
+		const url = new URL('/api/v1/hello', backendUrl)
 
 		// Forward query parameters
 		const name = searchParams.get('name')

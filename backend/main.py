@@ -1,22 +1,31 @@
-"""FastAPI application entry point."""
+"""FastAPI application entry point.
+
+This module wires together the application, configuration, middleware,
+and versioned API routers. The actual endpoint implementations live in
+the :mod:`api.v1` package to keep ``main.py`` focused on composition.
+"""
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
 
+from api import api_v1_router
 from config import settings
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Application lifespan context manager for startup/shutdown events."""
-    # Startup: Initialize resources here (database connections, ML models, etc.)
+    """Application lifespan context manager for startup/shutdown events.
+
+    Initialize and tear down shared resources here (database connections,
+    model loaders, queues, etc.). Keeping this logic in a single place
+    makes it easier to evolve as the app grows.
+    """
+
     print(f"Starting {settings.app_name} v{settings.app_version}")
     yield
-    # Shutdown: Clean up resources here
     print("Shutting down application")
 
 
@@ -37,31 +46,6 @@ app.add_middleware(
 )
 
 
-class MessageResponse(BaseModel):
-    """Standard message response model."""
+# Mount versioned API router
+app.include_router(api_v1_router, prefix="/api/v1")
 
-    message: str
-
-
-class HealthResponse(BaseModel):
-    """Health check response model."""
-
-    status: str
-
-
-@app.get("/health", response_model=HealthResponse, tags=["health"])
-async def health_check() -> HealthResponse:
-    """Health check endpoint for monitoring and load balancers."""
-    return HealthResponse(status="healthy")
-
-
-@app.get("/", response_model=MessageResponse, tags=["root"])
-async def read_root() -> MessageResponse:
-    """Root endpoint returning a welcome message."""
-    return MessageResponse(message="Hello World from FastAPI!")
-
-
-@app.get("/hello", response_model=MessageResponse, tags=["greetings"])
-async def hello(name: str = "World") -> MessageResponse:
-    """Greeting endpoint that accepts a query parameter `name`."""
-    return MessageResponse(message=f"Hello, {name} from FastAPI!")
