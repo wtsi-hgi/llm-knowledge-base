@@ -49,9 +49,24 @@ while [[ ${#} -gt 0 ]]; do
   esac
 done
 
-echo "Running frontend lint check..."
-(cd frontend && pnpm lint)
-echo "Lint check passed."
+echo "Running frontend format and lint check on changed files..."
+
+# Get list of changed files in frontend directory that match supported extensions
+CHANGED_FILES=$(git diff --name-only --diff-filter=d HEAD | grep "^frontend/.*\.\(ts\|tsx\|js\|jsx\|json\|css\)$" || true)
+
+if [ -n "$CHANGED_FILES" ]; then
+    # Strip 'frontend/' prefix for running commands inside the directory
+    RELATIVE_FILES=$(echo "$CHANGED_FILES" | sed 's/^frontend\///')
+    
+    if ! (cd frontend && echo "$RELATIVE_FILES" | xargs pnpm prettier --write > /dev/null 2>&1 && echo "$RELATIVE_FILES" | xargs pnpm eslint > /dev/null 2>&1); then
+        echo "Format or lint check failed on changed files. Running again with output:"
+        (cd frontend && echo "$RELATIVE_FILES" | xargs pnpm prettier --write && echo "$RELATIVE_FILES" | xargs pnpm eslint)
+        exit 1
+    fi
+    echo "Checks passed on $(echo "$CHANGED_FILES" | wc -l) file(s)."
+else
+    echo "No changed frontend files to check."
+fi
 
 mkdir -p logs
 
