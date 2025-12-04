@@ -45,9 +45,20 @@ pip install -r requirements.txt
 uvicorn main:app --reload
 ```
 
-Visit `http://localhost:8000` to see the FastAPI Hello World endpoint, and try the example query endpoint:
+Visit `http://localhost:8000` to see the FastAPI Hello World endpoint, and try
+the example query endpoint:
 
 - `http://localhost:8000/hello?name=YourName` => { "message": "Hello, YourName from FastAPI!" }
+
+### 3. Linting & Formatting
+
+To ensure code quality, run the following commands in the `frontend/` directory:
+
+- **Linting**: `pnpm lint` (Checks for errors)
+- **Formatting**: `pnpm format` (Fixes formatting issues)
+
+The `run-dev.sh` script will automatically run the lint check before starting
+the development servers. If linting fails, the servers will not start.
 
 ## Port configuration
 
@@ -65,7 +76,9 @@ BACKEND_PORT=9000 ./run_uvicorn.sh
 
 Run both services together
 
-You can run both the frontend and backend dev servers together with `run-dev.sh` at the repository root. The script starts both servers, writes logs to `./logs/`, and stops both cleanly if it is interrupted (SIGINT/SIGTERM).
+You can run both the frontend and backend dev servers together with `run-dev.sh`
+at the repository root. The script starts both servers, writes logs to
+`./logs/`, and stops both cleanly if it is interrupted (SIGINT/SIGTERM).
 
 ```bash
 # default ports (frontend:3000, backend:8000)

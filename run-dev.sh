@@ -49,6 +49,10 @@ while [[ ${#} -gt 0 ]]; do
   esac
 done
 
+echo "Running frontend lint check..."
+(cd frontend && pnpm lint)
+echo "Lint check passed."
+
 mkdir -p logs
 
 echo "Starting backend on port ${BACKEND_PORT} (logs: logs/backend.log)"
