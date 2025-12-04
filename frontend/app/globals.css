@@ -3,47 +3,88 @@
 
 @source "../components/**/*.{js,ts,jsx,tsx}";
 
-@theme {
-  --font-sans:
-    var(--font-sans), ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji',
-    'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+@theme inline {
+	--font-sans:
+		var(--font-sans), ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji',
+		'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
 
-  --radius-sm: 0.25rem;
-  --radius-md: 0.375rem;
-  --radius-lg: 0.5rem;
-  --radius-xl: 0.75rem;
+	--radius-sm: 0.25rem;
+	--radius-md: 0.375rem;
+	--radius-lg: 0.5rem;
+	--radius-xl: 0.75rem;
 
-  --color-background: #ffffff;
-  --color-foreground: #0f172a;
+	/* Light mode (default) */
+	--color-background: #ffffff;
+	--color-foreground: #0f172a;
 
-  --color-primary: #0f172a;
-  --color-primary-foreground: #f8fafc;
+	--color-primary: #0f172a;
+	--color-primary-foreground: #f8fafc;
 
-  --color-secondary: #f1f5f9;
-  --color-secondary-foreground: #0f172a;
+	--color-secondary: #f1f5f9;
+	--color-secondary-foreground: #0f172a;
 
-  --color-accent: #f1f5f9;
-  --color-accent-foreground: #0f172a;
+	--color-accent: #f1f5f9;
+	--color-accent-foreground: #0f172a;
 
-  --color-muted: #f1f5f9;
-  --color-muted-foreground: #64748b;
+	--color-muted: #f1f5f9;
+	--color-muted-foreground: #64748b;
 
-  --color-destructive: #ef4444;
-  --color-destructive-foreground: #ffffff;
+	--color-destructive: #ef4444;
+	--color-destructive-foreground: #ffffff;
 
-  --color-border: #e2e8f0;
-  --color-input: #e2e8f0;
-  --color-ring: #0f172a;
+	--color-border: #e2e8f0;
+	--color-input: #e2e8f0;
+	--color-ring: #0f172a;
+
+	--color-card: #ffffff;
+	--color-card-foreground: #0f172a;
+
+	--color-popover: #ffffff;
+	--color-popover-foreground: #0f172a;
+}
+
+/* Dark mode */
+@media (prefers-color-scheme: dark) {
+	:root {
+		--color-background: #0f172a;
+		--color-foreground: #f8fafc;
+
+		--color-primary: #f8fafc;
+		--color-primary-foreground: #0f172a;
+
+		--color-secondary: #1e293b;
+		--color-secondary-foreground: #f8fafc;
+
+		--color-accent: #1e293b;
+		--color-accent-foreground: #f8fafc;
+
+		--color-muted: #1e293b;
+		--color-muted-foreground: #94a3b8;
+
+		--color-destructive: #dc2626;
+		--color-destructive-foreground: #f8fafc;
+
+		--color-border: #334155;
+		--color-input: #334155;
+		--color-ring: #f8fafc;
+
+		--color-card: #1e293b;
+		--color-card-foreground: #f8fafc;
+
+		--color-popover: #1e293b;
+		--color-popover-foreground: #f8fafc;
+	}
 }
 
 @layer base {
-  html,
-  body {
-    height: 100%;
-  }
 
-  body {
-    background-color: var(--color-background);
-    color: var(--color-foreground);
-  }
+	html,
+	body {
+		height: 100%;
+	}
+
+	body {
+		background-color: var(--color-background);
+		color: var(--color-foreground);
+	}
 }
