@@ -83,11 +83,6 @@ The app will work with defaults, but you can customize:
 - `FRONTEND_PORT` - Frontend dev server port (default: 3000)
 - `BACKEND_PORT` - Backend server port (default: 8000)
 - `BACKEND_URL` - Full backend URL (optional, overrides BACKEND_PORT)
-- `CORS_ORIGINS` - Comma/semicolon-separated CORS origins. Defaults to
-  `http://localhost:3000`. Wildcards are rejected automatically when
-  `CORS_ALLOW_CREDENTIALS=true`.
-- `CORS_ALLOW_CREDENTIALS` - Whether credentials/cookies are allowed. Defaults
-  to `false` for safety.
 - `LOG_LEVEL` - Backend logging level (default `INFO`).
 
 ### 4. Linting, Formatting & Tests
