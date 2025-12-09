@@ -138,6 +138,15 @@ at the repository root. The script starts both servers, writes logs to
 Logs are written to `./logs/frontend.log` and `./logs/backend.log`.
 Follow them with: `tail -F logs/frontend.log logs/backend.log`.
 
+To update dependencies:
+
+```bash
+cd frontend && pnpm update --latest
+
+cd ..
+source backend/.venv/bin/activate && pip install --upgrade pip && pip install --upgrade -r backend/requirements.txt -r backend/requirements-dev.txt
+```
+
 ---
 
 ## Production Deployment
