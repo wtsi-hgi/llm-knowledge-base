@@ -5,8 +5,8 @@ This project is a full-stack app with a Next.js (React) frontend using the
 
 ### Highlights
 
-- **Server Actions** call FastAPI directly from the server without exposing
-  backend URLs to the browser.
+- **Server Actions first**: Next.js Server Actions call FastAPI directly from
+  the server without exposing backend URLs to the browser.
 - **Typed contracts**: FastAPI responses are validated on the frontend with
   `zod` so regressions are caught immediately.
 - **Modern styling**: Tailwind v4 `@theme` tokens power shadcn/ui components,
@@ -14,15 +14,37 @@ This project is a full-stack app with a Next.js (React) frontend using the
 - **Tests built-in**: Vitest covers the shared contracts, while pytest + httpx
   validate the FastAPI routers.
 
+If you are new to this stack, think of it as:
+
+- Next.js handles **routing, rendering, and UI**.
+- FastAPI exposes a **typed JSON API**.
+- Zod bridges the two by validating **everything that crosses the boundary**.
+
 ---
 
 ## Directory Structure
 
-- `frontend/` — Next.js 16 (App Router) + React 19 + shadcn/ui + Tailwind CSS v4 (TypeScript)
+-- `frontend/` — Next.js 16 (App Router) + React 19 + shadcn/ui + Tailwind CSS v4 (TypeScript)
   - `app/` — App Router pages, layouts, and API routes
+    - `app/page.tsx` — Home page that calls Server Actions
+    - `app/actions.ts` — Server Actions that talk to FastAPI
+    - `app/api/health/route.ts` — Health check proxy for external monitors
   - `components/` — React components including shadcn/ui
-  - `lib/` — Utility functions
-- `backend/` — FastAPI + Uvicorn (Python 3.11)
+    - `components/hello-form.tsx` — Client component with a form that calls a Server Action
+    - `components/health-status.tsx` — Small status indicator for backend health
+    - `components/ui/` — shadcn/ui primitives (button, card, input, etc.)
+  - `lib/` — Shared frontend utilities and contracts
+    - `lib/backend-client.ts` — Thin `fetch` wrapper used by Server Actions
+    - `lib/contracts.ts` — Zod schemas mirroring FastAPI responses
+    - `lib/greeting-state.ts` — State machine for the greeting form
+-- `backend/` — FastAPI + Uvicorn (Python 3.11)
+  - `main.py` — FastAPI app with lifespan + logging
+  - `config.py` — Pydantic settings (ports, URLs, log level, etc.)
+  - `api/` — Versioned routers and schemas
+    - `api/v1/greetings.py` — `GET /api/v1/hello` greeting endpoint
+    - `api/v1/health.py` — `GET /api/v1/health` health endpoint
+    - `api/schemas.py` — Pydantic models shared across routers
+  - `tests/` — pytest suite using `httpx.AsyncClient`
 
 ---
 
@@ -49,6 +71,26 @@ Visit `http://localhost:3000` to see the Server Action-powered greeting page.
 Server Actions call `FastAPI` via the shared `backendJson` helper. If you still
 need a browser-accessible endpoint, the `/app/api/*` routes proxy requests with
 response validation before returning data to the client.
+
+### How the pieces fit together
+
+At a high level, a greeting request flows like this:
+
+1. User types a name into `HelloForm` (`components/hello-form.tsx`) and submits.
+2. The form calls the `requestGreeting` Server Action in `app/actions.ts`.
+3. `requestGreeting` calls `backendJson` from `lib/backend-client.ts` with the
+  FastAPI URL and the relevant Zod schema from `lib/contracts.ts`.
+4. FastAPI serves the request from `backend/api/v1/greetings.py` and returns
+  a JSON payload.
+5. `backendJson` validates the JSON with Zod and returns a typed object to the
+  Server Action, which updates the greeting state.
+
+The health check uses a slightly different path:
+
+1. `Home` (`app/page.tsx`) calls the `fetchHealth` Server Action.
+2. `fetchHealth` calls the FastAPI `/api/v1/health` endpoint using `backendJson`.
+3. The `/app/api/health/route.ts` API Route exists **only** for external
+  monitors that need a simple unauthenticated `GET /api/health` endpoint.
 
 ### 2. Backend Setup
 ```bash
