@@ -167,6 +167,39 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 
 ---
 
+## Health Checks & Monitoring
+
+### External Monitoring
+External monitoring services (e.g., AWS ALB, UptimeRobot) should check the
+frontend's health endpoint:
+
+- **URL**: `GET /api/health`
+- **Success**: `200 OK` `{"status": "healthy"}`
+- **Failure**: `503 Service Unavailable` `{"status": "unhealthy"}`
+
+### Why a Proxy Route?
+While most of the application uses **Server Actions** to communicate with the
+backend, the health check requires a dedicated API Route
+(`/app/api/health/route.ts`) for specific reasons:
+
+1.  **Protocol Compatibility**: Server Actions use a specialized POST protocol
+    internal to Next.js. Standard load balancers and monitoring tools expect a
+    simple HTTP `GET` request returning a 200 OK status code.
+2.  **Network Isolation**: In production, the FastAPI backend is often deployed
+    in a private network, inaccessible to the public internet. The frontend acts
+    as a gateway.
+3.  **Status Codes**: The proxy route explicitly translates backend connectivity
+    issues into standard HTTP 503 status codes, which automated monitors rely on
+    to detect failures.
+
+**Note**: Other application features do **not** use proxy routes. They use
+Server Actions to communicate directly from the Next.js server to the FastAPI
+backend. This keeps the backend API private, reduces the public attack surface,
+and maintains type safety without manually defining API routes for every
+feature.
+
+---
+
 ## Notes
 - Each developer should create their own `.venv` in `backend/` and install
   dependencies there.
