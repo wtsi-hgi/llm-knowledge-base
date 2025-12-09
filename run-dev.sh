@@ -160,6 +160,37 @@ setsid bash -lc "cd frontend && FRONTEND_PORT=${FRONTEND_PORT} BACKEND_PORT=${BA
 FRONT_PID=$!
 
 echo "Frontend PID: ${FRONT_PID}, Backend PID: ${BACK_PID}"
+
+# Wait for services to be ready
+if command -v curl >/dev/null; then
+    wait_for_url() {
+        local url="$1"
+        local name="$2"
+        local max_attempts=60
+        local attempt=1
+
+        echo -n "Waiting for $name to be ready at $url..."
+        while [ $attempt -le $max_attempts ]; do
+            if curl -s -o /dev/null -w "%{http_code}" "$url" | grep -q "200"; then
+                echo " Ready!"
+                return 0
+            fi
+            echo -n "."
+            sleep 1
+            attempt=$((attempt + 1))
+        done
+        echo " Timeout!"
+        return 1
+    }
+
+    wait_for_url "http://localhost:${BACKEND_PORT}/api/v1/health" "Backend"
+    wait_for_url "http://localhost:${FRONTEND_PORT}/api/health" "Frontend"
+    # Warm up the main page so the first browser visit is fast
+    wait_for_url "http://localhost:${FRONTEND_PORT}/" "Frontend (Warmup)"
+else
+    echo "curl not found, skipping health checks."
+fi
+
 echo "Tail logs with: tail -F logs/frontend.log logs/backend.log"
 
 cleanup() {
