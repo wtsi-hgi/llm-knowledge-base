@@ -26,6 +26,26 @@ EOF
 
 FRONTEND_PORT=3000
 BACKEND_PORT=8000
+FRONT_PID=""
+BACK_PID=""
+
+cleanup() {
+  echo "Stopping services..."
+  # kill process groups if possible
+  if [[ -n "${FRONT_PID:-}" ]]; then
+    echo "Killing frontend group (PID ${FRONT_PID})"
+    kill -TERM -"${FRONT_PID}" 2>/dev/null || kill -TERM "${FRONT_PID}" 2>/dev/null || true
+  fi
+  if [[ -n "${BACK_PID:-}" ]]; then
+    echo "Killing backend group (PID ${BACK_PID})"
+    kill -TERM -"${BACK_PID}" 2>/dev/null || kill -TERM "${BACK_PID}" 2>/dev/null || true
+  fi
+  # wait for processes to exit
+  wait 2>/dev/null || true
+  echo "Stopped."
+}
+
+trap 'cleanup; exit' INT TERM EXIT
 
 while [[ ${#} -gt 0 ]]; do
   case "$1" in
@@ -166,11 +186,16 @@ if command -v curl >/dev/null; then
     wait_for_url() {
         local url="$1"
         local name="$2"
+    local pid="${3:-}"
         local max_attempts=60
         local attempt=1
 
         echo -n "Waiting for $name to be ready at $url..."
         while [ $attempt -le $max_attempts ]; do
+      if [[ -n "$pid" ]] && ! kill -0 "$pid" 2>/dev/null; then
+        echo " Failed! $name process exited early (PID $pid)."
+        return 1
+      fi
             if curl -s -o /dev/null -w "%{http_code}" "$url" | grep -q "200"; then
                 echo " Ready!"
                 return 0
@@ -183,33 +208,15 @@ if command -v curl >/dev/null; then
         return 1
     }
 
-    wait_for_url "http://localhost:${BACKEND_PORT}/api/v1/health" "Backend"
-    wait_for_url "http://localhost:${FRONTEND_PORT}/api/health" "Frontend"
+    wait_for_url "http://localhost:${BACKEND_PORT}/api/v1/health" "Backend" "${BACK_PID}"
+    wait_for_url "http://localhost:${FRONTEND_PORT}/api/health" "Frontend" "${FRONT_PID}"
     # Warm up the main page so the first browser visit is fast
-    wait_for_url "http://localhost:${FRONTEND_PORT}/" "Frontend (Warmup)"
+    wait_for_url "http://localhost:${FRONTEND_PORT}/" "Frontend (Warmup)" "${FRONT_PID}"
 else
     echo "curl not found, skipping health checks."
 fi
 
 echo "Tail logs with: tail -F logs/frontend.log logs/backend.log"
-
-cleanup() {
-  echo "Stopping services..."
-  # kill process groups if possible
-  if [[ -n "${FRONT_PID:-}" ]]; then
-    echo "Killing frontend group (PID ${FRONT_PID})"
-    kill -TERM -"${FRONT_PID}" 2>/dev/null || kill -TERM "${FRONT_PID}" 2>/dev/null || true
-  fi
-  if [[ -n "${BACK_PID:-}" ]]; then
-    echo "Killing backend group (PID ${BACK_PID})"
-    kill -TERM -"${BACK_PID}" 2>/dev/null || kill -TERM "${BACK_PID}" 2>/dev/null || true
-  fi
-  # wait for processes to exit
-  wait 2>/dev/null || true
-  echo "Stopped."
-}
-
-trap 'cleanup; exit' INT TERM EXIT
 
 # Wait until signals are received; sleep in a loop so trap can fire.
 while true; do
