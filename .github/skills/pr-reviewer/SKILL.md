@@ -7,10 +7,15 @@ description: Reviews committed and uncommitted changes on the current branch com
 
 ## Prerequisites
 
-Before starting any work, read and follow the agent-conduct skill
-(`.github/skills/agent-conduct/SKILL.md`). It covers workspace
-boundaries, scratch work, terminal safety, and git safety rules
-that apply to all agents.
+Before starting any work:
+
+1. Read and follow the agent-conduct skill
+   (`.github/skills/agent-conduct/SKILL.md`). It covers workspace
+   boundaries, scratch work, terminal safety, and git safety rules.
+2. Read the conventions skill
+   (`.github/skills/conventions/SKILL.md`). It defines the
+   architecture principles, code quality standards, and testing
+   patterns that all code must follow.
 
 ---
 
@@ -101,25 +106,15 @@ Review every change with the eye of an experienced full-stack
 developer and pragmatic engineer. For each modified file, assess:
 
 #### Code quality
-- **Architecture (BFF pattern):** Browser must never call FastAPI
-  directly. All backend communication flows through Server Actions
-  or API Routes. Server Actions use `backendJson()` with Zod
-  schemas.
-- **Contract integrity:** Every endpoint has both a Pydantic
-  response model and a matching Zod schema. Contract tests exist.
-  `backendJson()` is used with the schema for all backend calls.
-- **Python (backend):** Type hints everywhere, `Annotated` for
-  FastAPI parameters, async handlers, 88-col lines, docstrings,
-  snake_case naming, PascalCase classes, ruff compliance.
-- **TypeScript (frontend):** Strict mode (no `any`), `z.infer<>`
-  for Zod-derived types, proper Server Component vs Client
-  Component separation, `useActionState` (not deprecated
-  `useFormState`), Tailwind v4 semantic tokens.
-- **Import grouping:** stdlib/framework first, third-party,
-  local - separated by blank lines (both Python and TypeScript).
-- **Error handling:** No swallowed errors. Backend uses
-  `HTTPException`, frontend Server Actions return typed error
-  states with try/catch.
+
+Apply all architecture and code quality rules from the conventions
+skill. In particular verify:
+
+- **BFF pattern:** Browser never calls FastAPI directly.
+- **Contract integrity:** Matching Pydantic + Zod schemas,
+  `backendJson()` usage, contract tests.
+- **Python + TypeScript quality:** Type safety, naming, style,
+  import grouping, error handling — all per conventions.
 
 #### Subtle bugs
 - Race conditions, resource leaks (unclosed clients, streams).
@@ -167,34 +162,13 @@ If the caller mentioned a spec document:
     linter, and return PASS or FAIL with specific feedback."
 - Incorporate the subagent's findings into the overall review.
 
-### 5. Run the linters
+### 5. Run linters and tests
 
-Backend:
-```
-cd backend && ruff check . && ruff format --check .
-```
+Run all lint checks and tests using the commands from the
+conventions skill. Note any failures or issues in modified files
+— these become review findings.
 
-Frontend:
-```
-cd frontend && pnpm lint
-```
-
-- Note any issues in modified files. These become review findings.
-
-### 6. Run tests for modified areas
-
-Backend:
-```
-cd backend && python -m pytest tests/ -v
-```
-
-Frontend:
-```
-cd frontend && pnpm test
-```
-- Note any failures. These become review findings.
-
-### 7. Compile findings
+### 6. Compile findings
 
 Produce a numbered list of findings, ordered by severity (bugs first,
 then quality issues, then style nits). Each finding must include:
@@ -206,19 +180,20 @@ then quality issues, then style nits). Each finding must include:
 
 If there are no findings, report that the changes look good and stop.
 
-### 8. Fix issues
+### 7. Fix issues
 
 For each finding, starting with the most severe:
 
-#### a. Read the implementor skill
+#### a. Read the implementor and conventions skills
 
-Read `.github/skills/implementor/SKILL.md` (if not already read).
+Read `.github/skills/implementor/SKILL.md` and
+`.github/skills/conventions/SKILL.md` (if not already read).
 
 #### b. Launch an implementor subagent
 
 Include in its prompt:
 
-- The full text of the implementor skill.
+- The full text of the implementor and conventions skills.
 - The specific finding to fix (file, lines, description, suggested
   fix).
 - The surrounding code context.
@@ -259,7 +234,7 @@ and related threads are updated.
 
 #### f. Repeat
 
-Move to the next finding and repeat from step 8b.
+Move to the next finding and repeat from step 7b.
 
 ## Rules
 

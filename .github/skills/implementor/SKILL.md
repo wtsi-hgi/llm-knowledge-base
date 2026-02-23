@@ -1,94 +1,22 @@
 ````skill
 ---
 name: implementor
-description: Full-stack implementation for this Next.js + FastAPI project. Provides the TDD cycle, code quality standards, architecture patterns (BFF, Server Actions, Zod contracts), testing patterns, and implementation workflow. Use when implementing features, writing tests, creating new components or endpoints, or following a phase plan.
+description: Full-stack implementation for this Next.js + FastAPI project. Provides the TDD cycle, contract workflow, and implementation process. References the conventions skill for architecture, code quality, testing standards, and commands. Use when implementing features, writing tests, creating new components or endpoints, or following a phase plan.
 ---
 
 # Implementor Skill
 
 ## Prerequisites
 
-Before starting any work, read and follow the agent-conduct skill
-(`.github/skills/agent-conduct/SKILL.md`). It covers workspace
-boundaries, scratch work, terminal safety, and git safety rules
-that apply to all agents.
+Before starting any work:
 
-## Project Stack
-
-This is a full-stack monorepo:
-
-- **Frontend:** Next.js 16 (App Router) + React 19 + shadcn/ui +
-  Tailwind CSS v4 (TypeScript, in `frontend/`)
-- **Backend:** FastAPI + Uvicorn + Pydantic (Python 3.11+, in
-  `backend/`)
-
-## Architecture Principles
-
-### Backend-for-Frontend (BFF) Pattern
-
-The browser NEVER calls the FastAPI backend directly. All backend
-communication flows through the Next.js server layer:
-
-- **Server Actions** (`app/actions.ts`) handle form submissions
-  and data mutations. Client components call these actions, which
-  run on the Next.js server and proxy requests to FastAPI.
-- **API Routes** (`app/api/*/route.ts`) exist ONLY for external
-  consumers (e.g. health check monitors). They are NOT used by
-  the frontend itself.
-
-This pattern eliminates CORS issues and keeps backend URLs and
-secrets hidden from the client.
-
-### Type Safety at the Boundary (Zod Contracts)
-
-Every FastAPI response is validated on the frontend with Zod:
-
-- `lib/contracts.ts` defines Zod schemas mirroring FastAPI's
-  Pydantic models.
-- `lib/backend-client.ts` provides `backendJson()`, which fetches
-  from FastAPI and validates the response against a Zod schema.
-- If the API contract breaks, the frontend fails fast with a
-  clear `BackendRequestError` rather than rendering undefined
-  states.
-
-When adding a new endpoint, ALWAYS:
-
-1. Add a Pydantic response model in `backend/api/schemas.py`.
-2. Add a matching Zod schema in `frontend/lib/contracts.ts`.
-3. Add a contract test in `frontend/tests/contracts.test.ts`.
-4. Use `backendJson()` with the schema in the Server Action.
-
-### Server Components vs Client Components
-
-- **Server Components** (default, no directive) fetch data on the
-  server and pass it as props to client components. Use for pages
-  and data-fetching wrappers.
-- **Client Components** (`'use client'` directive) handle
-  interactivity, browser APIs, and React hooks. Keep them focused
-  on UX; delegate data fetching to Server Actions.
-
-### React 19 Patterns
-
-- Use `useActionState` (not the deprecated `useFormState`) for
-  form submissions with pending states.
-- Define state types explicitly (e.g. `GreetingState` in
-  `lib/greeting-state.ts`) for Server Action return values.
-- Use `useEffect` for side effects like toast notifications on
-  state changes.
-
-### Backend Structure
-
-- **Lifespan management:** `main.py` uses the `@asynccontextmanager`
-  lifespan pattern for startup/shutdown logic (e.g. creating and
-  closing `httpx.AsyncClient`). NEVER use the deprecated
-  `@app.on_event` decorators.
-- **Pydantic Settings:** `config.py` uses `pydantic-settings` for
-  typed configuration from environment variables.
-- **Versioned routers:** Endpoints live under `api/v1/` with an
-  `APIRouter`. New endpoints go in new or existing router files
-  under `api/v1/`.
-- **Typed responses:** Every endpoint declares `response_model`
-  and returns a Pydantic model instance.
+1. Read and follow the agent-conduct skill
+   (`.github/skills/agent-conduct/SKILL.md`). It covers workspace
+   boundaries, scratch work, terminal safety, and git safety rules.
+2. Read the conventions skill
+   (`.github/skills/conventions/SKILL.md`). It defines the project
+   stack, architecture principles, code quality standards, testing
+   patterns, and commands that all implementation must follow.
 
 ## TDD Cycle
 
@@ -117,7 +45,9 @@ Do not skip any step.
 
 ### Contract Tests
 
-When adding or modifying an API endpoint:
+When adding or modifying an API endpoint, follow the contract
+flow defined in the conventions skill (Pydantic model -> Zod
+schema -> contract test -> `backendJson()` call):
 
 1. Add a Vitest test in `frontend/tests/contracts.test.ts` that
    validates the Zod schema against expected payloads.
@@ -126,82 +56,12 @@ When adding or modifying an API endpoint:
 3. Ensure both schemas (Pydantic and Zod) agree on field names,
    types, and constraints.
 
-## Code Quality Requirements
-
-### Python (Backend)
-
-- **Python 3.11+:** Use modern syntax - type hints everywhere,
-  `from __future__ import annotations` when needed, `|` union
-  syntax, `Annotated` for FastAPI dependencies.
-- **Async first:** All endpoint handlers must be `async def`.
-  Use `httpx.AsyncClient` (not `requests`) for outbound HTTP.
-- **Type hints:** Every function parameter and return value must
-  have type hints. Use `Annotated` for FastAPI query/path/body
-  parameters.
-- **Docstrings:** Every module, class, and public function must
-  have a docstring. Use imperative mood for function docstrings.
-- **Error handling:** Use FastAPI's `HTTPException` for API errors.
-  Use Pydantic validation for input validation. Never swallow
-  exceptions silently.
-- **Import grouping:** Standard library, blank line, third-party,
-  blank line, local imports.
-- **Line width:** 88-column limit (ruff default).
-- **Naming:** snake_case for functions and variables,
-  PascalCase for classes. Self-documenting names.
-
-### TypeScript (Frontend)
-
-- **Strict TypeScript:** The project uses `strict: true`. Never
-  use `any` unless absolutely unavoidable (and document why).
-  Prefer `unknown` with type narrowing.
-- **Zod for runtime validation:** Use Zod schemas for all external
-  data. Derive TypeScript types with `z.infer<>` rather than
-  defining types separately.
-- **Server Actions:** Mark with `'use server'` at the top of the
-  file. Return typed state objects, not raw data. Handle errors
-  with try/catch and return error states.
-- **Client Components:** Mark with `'use client'`. Keep them
-  focused on UI and interaction. Import from `@/` path alias.
-- **shadcn/ui:** Use existing shadcn/ui components from
-  `components/ui/`. Add new ones with
-  `pnpm dlx shadcn@latest add <component>`.
-- **Import grouping:** React/Next.js imports, blank line,
-  third-party, blank line, local `@/` imports. Within local
-  imports: components, then lib, then types.
-- **Tailwind CSS v4:** Use the CSS-first `@theme` configuration
-  in `globals.css`. Use semantic colour tokens
-  (`text-foreground`, `bg-muted`, `border-border`, etc.) not
-  raw colours. Respect dark mode via the `.dark` class.
-- **Naming:** PascalCase for components and types, camelCase for
-  functions and variables. File names match the primary export
-  (kebab-case for component files).
-
 ### Frontend Design
 
 For tasks involving UI design, component creation, or visual
 styling, also read and follow the frontend-design skill
 (`.github/skills/frontend-design/SKILL.md`) for design quality
 standards, aesthetic guidelines, and creative direction.
-
-### Testing
-
-#### Backend (pytest)
-
-- Use `pytest` with `pytest-asyncio` (mode: `auto`).
-- Test endpoints using `httpx.AsyncClient` with `ASGITransport`
-  against the FastAPI `app` directly (no live server needed).
-- Assert response status codes AND JSON payloads.
-- Use `@pytest.mark.anyio` for async tests.
-- Keep tests independent - no shared mutable state between tests.
-
-#### Frontend (Vitest)
-
-- Use Vitest with `environment: 'node'`.
-- Test files go in `frontend/tests/` with `.test.ts` extension.
-- Contract tests validate Zod schemas with `.parse()` and
-  `.safeParse()` against expected and malformed payloads.
-- Use `describe`/`it` blocks with clear scenario descriptions.
-- Assert with `expect()` matchers.
 
 ## Implementation Workflow
 
@@ -217,54 +77,5 @@ standards, aesthetic guidelines, and creative direction.
    test -> Server Action -> component integration.
 3. Consult spec.md for full acceptance test details, API designs,
    component specifications, and architecture decisions.
-
-## Test Commands
-
-### Backend
-
-Run all tests:
-```
-cd backend && python -m pytest tests/ -v
-```
-
-Run specific test:
-```
-cd backend && python -m pytest tests/ -v -k <test_name>
-```
-
-Run linter:
-```
-cd backend && ruff check --fix . && ruff format .
-```
-
-### Frontend
-
-Run all tests:
-```
-cd frontend && pnpm test
-```
-
-Run tests in watch mode:
-```
-cd frontend && pnpm test:watch
-```
-
-Run lint:
-```
-cd frontend && pnpm lint
-```
-
-Run format:
-```
-cd frontend && pnpm format
-```
-
-### Both (via run-dev.sh)
-
-The `run-dev.sh` script at the repo root runs linting and tests
-for both frontend and backend before starting dev servers:
-```
-./run-dev.sh
-```
 
 ````

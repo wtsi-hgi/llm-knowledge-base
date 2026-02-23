@@ -19,10 +19,10 @@ yourself — you launch subagents (via `runSubagent`) to do that work,
 embedding the relevant skill instructions in each subagent's prompt.
 This keeps your context clean and focused on coordination.
 
-Note: `implementor`, `code-reviewer`, and `pr-reviewer` are skills
-(instruction files in `.github/skills/`), not named agents. To use
-them, read their SKILL.md and include the full text in the `runSubagent`
-prompt.
+Note: `implementor`, `code-reviewer`, `pr-reviewer`, and
+`conventions` are skills (instruction files in `.github/skills/`), not
+named agents. To use them, read their SKILL.md and include the full
+text in the `runSubagent` prompt.
 
 ## Input
 
@@ -40,6 +40,8 @@ A phase MD file (e.g. `.docs/watchfofns/phase3.md`) containing:
 ### 1. Read context
 
 - Read the phase MD file.
+- Read the `conventions` skill
+  (`.github/skills/conventions/SKILL.md`).
 - Read the `implementor` skill
   (`.github/skills/implementor/SKILL.md`).
 - Read the `code-reviewer` skill
@@ -63,6 +65,8 @@ Respect the ordering and batch structure in the phase file:
 Launch a subagent with the **implementor** skill by including
 in its prompt:
 
+- The full text of the conventions skill (from
+  `.github/skills/conventions/SKILL.md`).
 - The full text of the implementor skill (from
   `.github/skills/implementor/SKILL.md`).
 - The item description from the phase file.
@@ -83,6 +87,8 @@ checkbox in the phase MD file:
 Launch a subagent with the **code-reviewer** skill by including
 in its prompt:
 
+- The full text of the conventions skill (from
+  `.github/skills/conventions/SKILL.md`).
 - The full text of the code-reviewer skill (from
   `.github/skills/code-reviewer/SKILL.md`).
 - The item description (or all items in the batch for parallel batches).

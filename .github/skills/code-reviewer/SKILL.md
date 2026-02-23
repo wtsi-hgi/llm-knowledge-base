@@ -1,17 +1,22 @@
 ````skill
 ---
 name: code-reviewer
-description: Review implementations in this Next.js + FastAPI project against spec acceptance tests. Provides the review checklist, test verification, lint checks, quality standards, and verdict format. Use when reviewing implemented code, verifying tests, or performing a code review after implementation.
+description: Review implementations in this Next.js + FastAPI project against spec acceptance tests. Provides the review checklist, test verification, and verdict format. References the conventions skill for architecture, code quality, and testing standards. Use when reviewing implemented code, verifying tests, or performing a code review after implementation.
 ---
 
 # Code Reviewer Skill
 
 ## Prerequisites
 
-Before starting any work, read and follow the agent-conduct skill
-(`.github/skills/agent-conduct/SKILL.md`). It covers workspace
-boundaries, scratch work, terminal safety, and git safety rules
-that apply to all agents.
+Before starting any work:
+
+1. Read and follow the agent-conduct skill
+   (`.github/skills/agent-conduct/SKILL.md`). It covers workspace
+   boundaries, scratch work, terminal safety, and git safety rules.
+2. Read the conventions skill
+   (`.github/skills/conventions/SKILL.md`). It defines the
+   architecture principles, code quality standards, and testing
+   patterns that all code must follow.
 
 ---
 
@@ -31,18 +36,8 @@ For each item under review:
 
 ### 2. Run the tests
 
-Backend:
-```
-cd backend && python -m pytest tests/ -v
-```
-
-Frontend:
-```
-cd frontend && pnpm test
-```
-
-- Run tests for every area that was modified.
-- Confirm all tests pass.
+Run backend and frontend tests using the commands from the
+conventions skill. Confirm all tests pass.
 
 ### 3. Verify acceptance test coverage
 
@@ -55,6 +50,9 @@ cd frontend && pnpm test
 - Do not accept test helpers that silently swallow failures.
 
 ### 4. Verify implementation correctness
+
+Check against the architecture principles in the conventions
+skill:
 
 #### Architecture (BFF pattern)
 
@@ -71,80 +69,35 @@ cd frontend && pnpm test
 #### Contract integrity
 
 - Confirm every new endpoint has BOTH a Pydantic response model
-  (`backend/api/schemas.py`) AND a matching Zod schema
-  (`frontend/lib/contracts.ts`).
+  AND a matching Zod schema.
 - Confirm `backendJson()` is used with the Zod schema for all
   backend calls.
-- Confirm contract tests exist in
-  `frontend/tests/contracts.test.ts` for new schemas.
+- Confirm contract tests exist for new schemas.
 - Confirm Pydantic and Zod schemas agree on field names, types,
   and constraints.
 
-#### Backend correctness
+#### Backend and frontend correctness
 
+- Verify code follows all quality rules from the conventions
+  skill (Python and TypeScript sections).
 - Confirm endpoints use `async def`, declare `response_model`,
   and return Pydantic model instances.
 - Confirm the lifespan pattern is used (not deprecated
   `@app.on_event`).
-- Confirm Pydantic Settings is used for configuration (not
-  raw `os.environ`).
-- Confirm routers are properly mounted under `api/v1/`.
-
-#### Frontend correctness
-
 - Confirm `useActionState` is used (not deprecated
   `useFormState`) for form handling.
-- Confirm Server Components fetch data on the server and pass
-  props to Client Components.
-- Confirm state types are explicitly defined for Server Action
-  return values.
 - Confirm Tailwind CSS v4 semantic tokens are used (not raw
   colour values).
-- Confirm shadcn/ui components are used where appropriate.
 
 ### 5. Verify code quality
 
-#### Python (backend)
-
-- **Modern Python 3.11+:** Type hints everywhere, `Annotated`
-  for FastAPI parameters, async handlers, proper imports.
-- **Style:** 88-col line width (ruff), docstrings on all modules
-  and public functions, snake_case naming, PascalCase for classes.
-- **Import grouping:** stdlib, third-party, local - separated by
-  blank lines.
-- **Error handling:** No swallowed errors, proper use of
-  `HTTPException`, Pydantic validation for inputs.
-- **Testing:** pytest + httpx AsyncClient with ASGITransport,
-  `@pytest.mark.anyio`, independent tests, status code AND
-  payload assertions.
-
-#### TypeScript (frontend)
-
-- **Strict TypeScript:** No `any` types, proper type narrowing,
-  `z.infer<>` for Zod-derived types.
-- **Import grouping:** React/Next.js, third-party, local `@/`
-  imports - separated by blank lines.
-- **Component patterns:** `'use client'` only where needed,
-  Server Components for data fetching, proper prop typing.
-- **Tailwind v4:** Semantic tokens from `@theme`, dark mode
-  support, responsive design with mobile-first breakpoints.
-- **Testing:** Vitest with `describe`/`it`, `.parse()` and
-  `.safeParse()` for contract tests, clear assertions.
+Apply all code quality rules from the conventions skill:
+Python (backend) and TypeScript (frontend) sections.
 
 ### 6. Run the linters
 
-Backend:
-```
-cd backend && ruff check . && ruff format --check .
-```
-
-Frontend:
-```
-cd frontend && pnpm lint
-```
-
-- Confirm no issues are reported for modified files.
-- If issues are found, report them in the verdict.
+Run lint checks using the commands from the conventions skill.
+Confirm no issues are reported for modified files.
 
 ### 7. Return verdict
 
