@@ -37,6 +37,13 @@ The orchestrator provides:
 
 Before writing (or revising) the spec, gather context:
 
+- Read the conventions skill
+  (`.github/skills/conventions/SKILL.md`). It defines the project
+  stack, architecture principles (BFF pattern, Zod contracts,
+  Server/Client Components), code quality standards, testing
+  patterns, and commands. The spec you produce must align with
+  these conventions - use the same patterns, naming, file
+  organisation, and testing approaches described there.
 - Read existing code that the feature will interact with or extend.
 - Understand existing patterns, types, interfaces, and conventions.
 - Identify code that can be reused vs code that must be written.
