@@ -354,15 +354,152 @@ Expected freshness targets:
   daily unless there is a stronger event source.
 - Full reconciliation: nightly or weekly, depending on tenant size.
 
+## Existing Systems To Evaluate
+
+There is already open-source and source-available work in this area. That does
+not remove the need for a Sanger-governed design, but it changes the
+implementation strategy: evaluate existing systems before building a custom
+Drive connector from scratch.
+
+### Onyx / Danswer
+
+Onyx, formerly Danswer, is the closest existing product shape. It is an
+enterprise search and AI assistant platform with RAG, chat, many connectors,
+Google Drive support, service-account setup, and source-system permission
+syncing.
+
+It is the first system to test because it already overlaps strongly with this
+architecture:
+
+- Google Drive connector.
+- Service account setup for Google Workspace.
+- Domain-wide delegation scopes for Drive metadata, Drive content, users, and
+  groups.
+- Automatic connector refresh and pruning controls.
+- Permission-aware retrieval across supported source systems.
+- A web AI/search product surface rather than only a backend library.
+
+Important caveat: Onyx should be treated as open-core or source-available for
+this use case, not assumed to be fully open source. Its public documentation
+states that permission-syncing connectors are an Enterprise Edition feature, and
+that Google Drive permission syncing requires a service account or Google
+Workspace Admin OAuth credentials. That may still be a good buy-or-adopt option,
+but it must be checked against Sanger's licensing, deployment, security, and
+customisation requirements.
+
+Onyx proof-of-fit questions:
+
+- Can Sanger self-host the edition that includes Google Drive permission sync?
+- Does Google Drive permission sync handle My Drive, shared drives, folder
+  inheritance, Google Groups, domain grants, and deleted or moved files as
+  required?
+- Can Okta identities map cleanly to Google Workspace users and groups?
+- Can the retrieval and citation paths be audited at the level Sanger needs?
+- Can MCP, CLI, MLWH, and Sanger-specific admin workflows be integrated without
+  fighting the product?
+
+### RAGFlow
+
+RAGFlow is an open-source RAG product with a documented Google Drive data source
+flow. It is useful for a fast document-RAG pilot and for comparing parsing,
+chunking, retrieval quality, citation behavior, and user experience.
+
+RAGFlow should not be assumed to satisfy the full Architecture 6 access-control
+model without testing. Its Google Drive setup appears oriented around OAuth and
+folder-based data source configuration. For Sanger, the key validation is
+whether it can enforce source Drive permissions before retrieval, generation,
+citation display, source display, cache lookup, and admin access, and whether
+incremental sync catches new, changed, moved, permission-changed, trashed, and
+deleted files reliably.
+
+### Pathway
+
+Pathway provides open-source live document indexing templates for RAG over file
+systems, Google Drive, SharePoint, S3, Kafka, PostgreSQL, and other sources.
+Its templates explicitly cover additions, updates, and deletions from connected
+sources and expose retriever-style APIs.
+
+Pathway is a strong candidate if Sanger wants a reusable live-indexing backend
+or wants to accelerate a custom connector. It is less directly a complete
+Sanger product because Sanger would still need Okta integration, Google Drive
+ACL normalization, policy enforcement, admin workflows, audit views, MCP tools,
+and MLWH integration.
+
+### LlamaIndex Google Drive Readers
+
+LlamaIndex has Google Drive readers and an example "live" RAG pipeline over
+Google Drive files, including incremental update behavior when the ingestion
+pipeline is rerun. This is a useful implementation reference and a quick way to
+prototype extraction and indexing.
+
+It is a library-level option, not a governed enterprise application. By itself,
+it does not solve domain-wide delegation governance, Drive ACL mirroring,
+Okta-to-Google identity mapping, source-link policy, audit, deletion guarantees,
+or Sanger admin workflows.
+
+### Paragon RAG Tutorials
+
+Paragon's public RAG tutorial repository includes Google Drive ingestion and a
+permissions-system tutorial that models Google Drive and Dropbox permissions,
+uses Okta FGA, and keeps permissions up to date. This is not a drop-in
+open-source Sanger product, and it depends on Paragon's integration platform,
+but it is a useful reference for how to model third-party permissions separately
+from the vector index.
+
+### Small Personal Drive RAG Projects
+
+There are small repositories that do personal Google Drive RAG with OAuth,
+LangChain or similar loaders, local vector stores such as Chroma, and simple
+Gradio or Streamlit UIs. These are useful as tutorials and smoke tests for file
+export, chunking, embedding, and local Q&A.
+
+They are not sufficient for this architecture because they generally handle one
+user's Drive, rely on explicit OAuth consent, and do not preserve enterprise
+Google Workspace ACLs across many users and shared drives.
+
+### Unstructured And Other Connectors
+
+Unstructured has a Google Drive ingestion connector for preprocessing pipelines.
+Commercial connector vendors also advertise Google Drive connectors with
+metadata, permissions, incremental crawling, personal drives, shared drives, and
+domain-wide delegation.
+
+These are useful signals that the connector pattern is feasible, but they do
+not remove the need to decide whether Sanger wants an open-source product, a
+commercial connector, or a custom connector under the Sanger Knowledge Gateway.
+
+## Adopt, Extend, Or Build
+
+Architecture 6 should start with a bake-off rather than immediate custom
+implementation.
+
+1. Test Onyx first if an enterprise/open-core dependency is acceptable. It is
+   the strongest candidate for avoiding custom RAG product work.
+2. Test RAGFlow for RAG quality and product fit, but treat Drive ACL correctness
+   as unproven until demonstrated.
+3. Test Pathway and LlamaIndex if Sanger expects to build the Sanger-specific
+   gateway but wants to reuse live indexing components.
+4. Build a custom Drive connector only if existing products cannot satisfy
+   permission correctness, auditability, deployment constraints, MLWH/MCP
+   integration, or licensing requirements.
+
+The acceptance bar for adopting an existing system should be the same as for a
+custom build: no forbidden chunk should be retrievable, included in prompts,
+shown as a citation, exposed as an excerpt, visible in source snapshots,
+downloadable from cache, or visible through admin/API bypasses.
+
 ## New Code Required
 
-- Google Workspace connector service.
-- Domain-wide delegation token broker.
-- User and shared-drive crawlers.
+- Google Workspace connector service, unless an adopted product supplies one
+  that passes the Drive ACL proof of concept.
+- Domain-wide delegation token broker, unless delegated credentials are wholly
+  managed by an adopted product in an acceptable way.
+- User and shared-drive crawlers, or integration with an existing live indexing
+  layer such as Onyx, Pathway, or another approved connector.
 - Drive change-feed workers.
 - Google Groups and shared-drive membership resolver.
 - Drive ACL normalizer and policy facts.
-- Drive export/download integration with Docling.
+- Drive export/download integration with Docling or an adopted parsing layer.
 - Re-index and vector-deletion workflows keyed by Drive `fileId`.
 - Admin UI for Drive sync status, failed files, ACL snapshots, and permission
   decisions.
@@ -373,7 +510,9 @@ Expected freshness targets:
 
 This removes the need for new object-storage workflows for original documents,
 but it does not remove the need for a governed RAG index, conversion pipeline,
-policy layer, audit trail, admin UI, or MCP tools.
+policy layer, audit trail, admin UI, or MCP tools. If Onyx or another existing
+system is adopted, some of this becomes configuration and integration work
+rather than new connector code.
 
 ## Strengths
 
@@ -418,12 +557,16 @@ files.
 
 Run a focused proof of concept before committing:
 
-1. Configure a dedicated service account with domain-wide delegation in a test
+1. Run a short existing-system bake-off:
+   - Onyx for full product and Drive permission-sync fit.
+   - RAGFlow for RAG quality and Drive data-source ergonomics.
+   - Pathway or LlamaIndex for reusable live-indexing components.
+2. Configure a dedicated service account with domain-wide delegation in a test
    Workspace or controlled organizational unit.
-2. Crawl three shared drives and 25 to 50 volunteer users.
-3. Index at least 10,000 mixed files, including Docs, Sheets, Slides, PDFs,
+3. Crawl three shared drives and 25 to 50 volunteer users.
+4. Index at least 10,000 mixed files, including Docs, Sheets, Slides, PDFs,
    DOCX, XLSX, CSV, images, and oversized/unsupported examples.
-4. Test ACL cases:
+5. Test ACL cases:
    - owner only
    - direct user share
    - direct group share
@@ -436,11 +579,13 @@ Run a focused proof of concept before committing:
    - external owner
    - removed permission
    - trashed and permanently deleted file
-5. Measure initial crawl throughput, incremental sync latency, export failures,
+6. Measure initial crawl throughput, incremental sync latency, export failures,
    conversion failures, and vector deletion latency.
-6. Run adversarial search tests where users try to retrieve documents they
+7. Run adversarial search tests where users try to retrieve documents they
    should not see.
-7. Decide the product rule for link-shared files before indexing them broadly.
+8. Decide the product rule for link-shared files before indexing them broadly.
+9. Compare adopt-vs-build cost, including licensing, deployment, security
+   review, custom Sanger UI work, MCP integration, and MLWH integration.
 
 ## Recommendation Relative To Architecture 1
 
@@ -456,16 +601,33 @@ through `wa`.
 
 The safest roadmap is:
 
-1. Build the Drive connector as the first document ingestion path.
-2. Keep the internal RAG index and policy layer Sanger-owned.
-3. Use Drive source links instead of storing originals.
-4. Launch with shared drives first.
-5. Add My Drive and link-shared behavior only after explicit governance review.
+1. Evaluate Onyx, RAGFlow, Pathway, and LlamaIndex before writing a custom
+   connector.
+2. Build or adopt the Drive connector as the first document ingestion path.
+3. Keep the internal RAG index and policy layer Sanger-owned unless an adopted
+   product passes the same permission-leakage and audit tests.
+4. Use Drive source links instead of storing originals.
+5. Launch with shared drives first.
+6. Add My Drive and link-shared behavior only after explicit governance review.
+
+If Onyx Enterprise passes the proof of concept and the licence is acceptable,
+it could replace a large part of the custom document RAG build. If not, it
+still provides a valuable reference implementation for the Drive connector and
+permission-sync behavior.
 
 ## Sources Used
 
 - Desired features: `.docs/architecture/features.md`
 - Current architecture recommendation: `.docs/architecture/recommendation.md`
+- Onyx GitHub: https://github.com/onyx-dot-app/onyx
+- Onyx connector overview and permission sync: https://docs.onyx.app/admins/connectors/overview
+- Onyx Google Drive service account setup: https://docs.onyx.app/admins/connectors/official/google_drive/service_account
+- RAGFlow Google Drive data source: https://ragflow.io/docs/add_google_drive
+- Pathway live RAG templates: https://github.com/pathwaycom/llm-app
+- LlamaIndex live Google Drive RAG example: https://developers.llamaindex.ai/python/examples/ingestion/ingestion_gdrive/
+- Paragon RAG tutorials: https://github.com/useparagon/rag-tutorials
+- Example personal Google Drive RAG repo: https://github.com/donat-konan33/google-drive-agentic-rag
+- Unstructured Google Drive connector: https://docs.unstructured.io/open-source/ingestion/source-connectors/google-drive
 - Google Workspace domain-wide delegation: https://knowledge.workspace.google.com/admin/apps/control-api-access-with-domain-wide-delegation
 - Google domain-wide delegation best practices: https://knowledge.workspace.google.com/admin/apps/domain-wide-delegation-best-practices
 - Google IAM service account best practices: https://docs.cloud.google.com/iam/docs/best-practices-service-accounts
