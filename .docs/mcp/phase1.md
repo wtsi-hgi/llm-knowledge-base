@@ -42,8 +42,8 @@ deleted or rewritten. See spec.md for the full target layout.
 This item has no acceptance tests of its own; it is verified by item 1.3's
 verifiable outcome (web UI files exist only under `webui/`).
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 ### Item 1.2: Add root Go module, dependencies, README, and .gitignore
 
@@ -60,8 +60,8 @@ phase).
 
 This item has no acceptance tests of its own; it is verified by item 1.3.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 ### Item 1.3: Verify the bootstrapped module builds
 
@@ -75,5 +75,5 @@ beyond the empty entrypoint is added in this phase.
 This is the phase's only verifiable acceptance criterion (the spec defines
 it as a build/layout check, not a numbered story acceptance test).
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
