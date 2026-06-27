@@ -160,9 +160,10 @@ BACKEND_PORT=9000 ./run_uvicorn.sh
 
 Run both services together
 
-You can run both the frontend and backend dev servers together with `run-dev.sh`
-at the repository root. The script starts both servers, writes logs to
-`./logs/`, and stops both cleanly if it is interrupted (SIGINT/SIGTERM).
+You can run both the frontend and backend dev servers together with the
+`run-dev.sh` script in the `webui/` directory. The script starts both servers,
+writes logs to `./logs/` (i.e. `webui/logs/`), and stops both cleanly if it is
+interrupted (SIGINT/SIGTERM).
 
 ```bash
 # default ports (frontend:3000, backend:8000)
