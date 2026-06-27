@@ -231,3 +231,66 @@ intermingled. Lean:
    old FTS5/FULLTEXT design with later word-prefix reconciliation notes), the
    `phase*.md` build plans, and that project's own `prompt.md`. Background context
    at most.
+
+## Notes
+
+Decisions settled during requirements clarification. These refine — and take
+precedence over — any looser phrasing above:
+
+- **Tool generation strategy (hybrid, with escape hatch):** generate the MLWH
+  tool set from `mlwh.Registry` as the source of truth, but expose a curated,
+  LLM-ergonomic surface — clear tool names/descriptions, with related endpoints
+  grouped (e.g. unify the `FindSamplesBy*` endpoints into a single `find_samples`
+  tool with a field enum; group the sample/study/run/library detail endpoints).
+  Additionally provide one generic, Registry-driven "call any MLWH endpoint"
+  escape-hatch tool so no endpoint is unreachable.
+- **Result shape (structured + text):** every tool returns both typed
+  `structuredContent` (output schemas generated from the `mlwh` Go result types)
+  and a JSON text rendering of the same data, so structured-aware and text-only
+  clients both work.
+- **MCP SDK:** build on the official `github.com/modelcontextprotocol/go-sdk`,
+  pinned to **v1.6.1**.
+- **Repository layout (root Go module):** the MCP server is a Go module rooted at
+  the repository root (`go.mod` at root; entrypoint under `cmd/`, with internal
+  packages alongside). Relocate the existing web UI — `frontend/`, `backend/`,
+  and the web-specific root files (`run-dev.sh`, the web `.env.example`, and the
+  web-oriented `README.md` content) — under a `webui/` subfolder. Keep `LICENSE`
+  at the root, add a root `README.md` describing the whole project (MCP-first,
+  web UI as a future component), and a `.gitignore` covering Go as well as
+  Node/Python. This mirrors the `wa` repo's own layout (root Go module +
+  `frontend/` subdir).
+- **MLWH API version (build-time/static):** derive the targeted MLWH API version
+  statically from `mlwh.OpenAPIDocument()` (`info.version`) — the version
+  compiled in via the imported `wa` package (it is not exported as a symbol).
+  Reporting it must not require contacting a live MLWH server.
+- **Version surfacing (all of these):** surface both this server's own version
+  and the targeted MLWH API version via (1) a `--version` CLI flag that prints
+  them and exits, (2) an MCP resource the agent can read at runtime to caveat
+  answers, (3) the startup logs, and (4) the MCP server's advertised
+  implementation info / instructions seen by clients on connect.
+- **Transport scope (stdio only this round):** implement the **stdio** transport
+  only. Design the transport as a clean seam so streamable-HTTP can be added
+  later with no core changes, but write no HTTP transport code, config, or tests
+  in this round.
+- **Multi-service seam proof (test-only fake provider):** prove the provider seam
+  with a **fake provider defined in test code** that registers through the same
+  core provider interface as MLWH. A test must assert that the fake's tools
+  register and appear alongside MLWH's and that adding it requires no changes to
+  the core. The shipped binary registers only the MLWH provider.
+- **Escape-hatch tool contract:** the generic "call any MLWH endpoint" tool takes
+  the target endpoint as a `mlwh.Registry` **`Method` name** (e.g. `SampleDetail`)
+  plus `path_params` and `query_params` maps (the latter including `limit` /
+  `offset`), and returns an **untyped JSON passthrough** (the raw decoded result
+  as `structuredContent`, with no per-endpoint output schema). It dispatches
+  through the typed `mlwh` client like every other tool.
+- **Constrained enums for fixed value-sets:** where a tool input is a fixed set —
+  identifier kinds from `mlwh.IdentifierKinds()`, and the `FindSamplesBy*` field
+  set behind the unified `find_samples` tool — generate a constrained **enum** in
+  the input schema (values sourced from the code) so invalid kinds/fields are
+  rejected at the schema layer and the agent sees the allowed values.
+
+Factual grounding (from reading the `wa/mlwh` code — authoritative over prose
+above): the live `mlwh.Registry` currently exposes ~46 endpoints (all `GET`), and
+`mlwh.RemoteConfig` exposes `BaseURL`, `Timeout`, `CACert`, `CacheTTL` and a
+bearer `Token`. Treat the code and the live `/openapi.json` as the source of
+truth for the exact endpoint set, the result types, and the config fields.
