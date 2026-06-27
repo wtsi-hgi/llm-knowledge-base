@@ -41,8 +41,8 @@ a clear startup error. Covers all 3 H2 acceptance tests (base URL from env;
 missing base URL errors mentioning it is required; `MLWH_TIMEOUT=5s` yields
 5s with `CacheTTL` left zero).
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 ### Item 4.2: I1 scaffolding - New, Register shell, RemoteClient construction
 
@@ -60,5 +60,5 @@ assertion (all expected tools/resources present) is verified in phase 8.
 The single assertion verifiable now is that `Name()` returns "mlwh" (the
 `Name()` part of I1.3).
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
