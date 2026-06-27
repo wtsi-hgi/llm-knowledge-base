@@ -44,8 +44,8 @@ This also realises the end-to-end form of H1.1 (a connected client lists the
 MLWH tools over `mcp.NewInMemoryTransports()`). Test file
 `internal/mlwh/provider_test.go`.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 ### Item 8.2: I2 - Multi-service seam proof (test-only fake provider)
 
@@ -61,5 +61,5 @@ calling `fake_ping` returns its trivial result with `IsError=false`,
 proving the same handler path; the fake is defined only in a `_test.go`
 file with no production core reference).
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
