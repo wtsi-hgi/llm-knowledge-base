@@ -7,8 +7,8 @@
 
 SHELL := bash
 
-BINARY := mcp-server
-PKG := ./cmd/mcp-server
+BINARY := mlwh-mcp-server
+PKG := ./cmd/mlwh-mcp-server
 GOBIN := $(shell go env GOBIN)
 GOBIN := $(if $(GOBIN),$(GOBIN),$(shell go env GOPATH)/bin)
 

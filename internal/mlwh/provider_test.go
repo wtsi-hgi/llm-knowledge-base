@@ -280,7 +280,7 @@ func TestProviderConfig(t *testing.T) {
 }
 
 func TestProviderBindFlags(t *testing.T) {
-	Convey("BindFlags registers the three --mlwh-* flags so cmd/mcp-server can wire them", t, func() {
+	Convey("BindFlags registers the three --mlwh-* flags so cmd/mlwh-mcp-server can wire them", t, func() {
 		clearMLWHEnv(t)
 
 		var cfg Config

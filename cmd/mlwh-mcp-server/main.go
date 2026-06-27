@@ -23,7 +23,7 @@
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  ******************************************************************************/
 
-// Command mcp-server is the entrypoint for the MLWH MCP server.
+// Command mlwh-mcp-server is the entrypoint for the MLWH MCP server.
 //
 // It is the composition root: it parses flags, builds the MLWH provider from its
 // configuration, wraps it in the service-agnostic core, and serves over the
@@ -52,7 +52,7 @@ import (
 
 func main() {
 	if err := run(os.Args[1:], os.Stdout); err != nil {
-		fmt.Fprintln(os.Stderr, "mcp-server:", err)
+		fmt.Fprintln(os.Stderr, "mlwh-mcp-server:", err)
 		os.Exit(1)
 	}
 }
@@ -63,10 +63,10 @@ func main() {
 // out of main so a test can drive --version without a subprocess or real stdio.
 //
 // The --version path is handled before any configuration is resolved or any
-// transport is opened, so `mcp-server --version` works with no MLWH_BASE_URL set
+// transport is opened, so `mlwh-mcp-server --version` works with no MLWH_BASE_URL set
 // and returns promptly without serving or blocking on stdin.
 func run(args []string, stdout io.Writer) error {
-	fs := flag.NewFlagSet("mcp-server", flag.ContinueOnError)
+	fs := flag.NewFlagSet("mlwh-mcp-server", flag.ContinueOnError)
 
 	showVersion := fs.Bool("version", false, "print the server version and the targeted MLWH API version, then exit")
 
@@ -89,7 +89,7 @@ func run(args []string, stdout io.Writer) error {
 // version contacts no server, so --version never needs configuration or the
 // network.
 func printVersion(w io.Writer) error {
-	_, err := fmt.Fprintf(w, "mcp-server version %s\nMLWH API version %s\n", core.ServerVersion, wa.APIVersion)
+	_, err := fmt.Fprintf(w, "mlwh-mcp-server version %s\nMLWH API version %s\n", core.ServerVersion, wa.APIVersion)
 
 	return err
 }

@@ -37,7 +37,7 @@ import (
 	. "github.com/smartystreets/goconvey/convey"
 )
 
-// TestRunVersionFlag exercises Story G4: `mcp-server --version` prints the
+// TestRunVersionFlag exercises Story G4: `mlwh-mcp-server --version` prints the
 // server version and the targeted MLWH API version to stdout and exits 0 without
 // opening the transport, requiring config, or blocking on stdin. It drives the
 // refactored run(args, stdout) directly so no subprocess or real stdio is

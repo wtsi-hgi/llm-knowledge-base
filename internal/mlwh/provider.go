@@ -79,7 +79,7 @@ type Config struct {
 }
 
 // BindFlags registers the --mlwh-base-url, --mlwh-ca-cert, and --mlwh-timeout
-// flags on fs, writing parsed values back into c. cmd/mcp-server calls this to
+// flags on fs, writing parsed values back into c. cmd/mlwh-mcp-server calls this to
 // wire the flags, then Resolve to fold in the environment fallbacks. Flags
 // default to empty so Resolve can tell "flag not given" from "flag given".
 func (c *Config) BindFlags(fs *flag.FlagSet) {

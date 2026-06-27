@@ -15,9 +15,10 @@ registry, and OpenAPI document directly, so there is no type drift and the serve
 is compile-time-locked to the upstream API version (currently MLWH API 1.6.0).
 
 This first round ships the MLWH provider over the **stdio** transport only, so it
-runs as a local subprocess launched by an agent CLI. Streamable HTTP is
-deliberately deferred (the transport is a clean seam so it can be added later
-without any core change).
+runs as a local subprocess launched per user by an agent CLI. Streamable HTTP —
+which would let an admin run one shared instance everyone connects to over the
+network — is deliberately deferred, but the transport is a clean seam so it can be
+added later without any core change.
 
 ## Requirements
 
@@ -29,20 +30,20 @@ without any core change).
 ## Install
 
 ```bash
-# Install the `mcp-server` binary into your Go bin ($(go env GOPATH)/bin):
+# Install the `mlwh-mcp-server` binary into your Go bin ($(go env GOPATH)/bin):
 make install
 
-# ...or just build it to ./mcp-server in the repo:
+# ...or just build it to ./mlwh-mcp-server in the repo:
 make build
 ```
 
-`make install` puts `mcp-server` on your `PATH` if `$(go env GOPATH)/bin` (usually
-`~/go/bin`) is on it; otherwise use the binary's full path in the configs below.
-Check the build and the versions it targets:
+`make install` puts `mlwh-mcp-server` on your `PATH` if `$(go env GOPATH)/bin`
+(usually `~/go/bin`) is on it; otherwise use the binary's full path in the configs
+below. Check the build and the versions it targets:
 
 ```bash
-mcp-server --version
-# mcp-server version <build version>
+mlwh-mcp-server --version
+# mlwh-mcp-server version <build version>
 # MLWH API version 1.6.0
 ```
 
@@ -58,7 +59,7 @@ variables, or the equivalent command-line flags (a flag overrides its env var):
 | `MLWH_TIMEOUT`  | `--mlwh-timeout`   | no       | Per-request HTTP timeout as a Go duration (e.g. `15s`, `1m`).                     |
 
 The MLWH API is internal and unauthenticated, so there is no token to set. A
-missing base URL is a clear startup error. `mcp-server --version` needs no
+missing base URL is a clear startup error. `mlwh-mcp-server --version` needs no
 configuration (it prints the versions and exits without opening a transport or
 touching the network).
 
@@ -83,7 +84,7 @@ Register the server once (here at user scope, so it is available in every
 project):
 
 ```bash
-claude mcp add --env MLWH_BASE_URL=http://mlwh.internal:8080 --scope user mlwh -- mcp-server
+claude mcp add --env MLWH_BASE_URL=http://mlwh.internal:8080 --scope user mlwh -- mlwh-mcp-server
 ```
 
 - `mlwh` is the name the server appears under; everything after `--` is the
@@ -102,7 +103,7 @@ or in `~/.claude.json` for user scope:
   "mcpServers": {
     "mlwh": {
       "type": "stdio",
-      "command": "mcp-server",
+      "command": "mlwh-mcp-server",
       "args": [],
       "env": { "MLWH_BASE_URL": "http://mlwh.internal:8080" }
     }
@@ -123,7 +124,7 @@ workflow-guide resource (`mlwh://workflow`) and a version resource
 Add the server with the CLI:
 
 ```bash
-codex mcp add mlwh --env MLWH_BASE_URL=http://mlwh.internal:8080 -- mcp-server
+codex mcp add mlwh --env MLWH_BASE_URL=http://mlwh.internal:8080 -- mlwh-mcp-server
 ```
 
 ...or edit `~/.codex/config.toml` (or a project-scoped `.codex/config.toml`)
@@ -131,7 +132,7 @@ directly:
 
 ```toml
 [mcp_servers.mlwh]
-command = "mcp-server"
+command = "mlwh-mcp-server"
 args = []
 
 [mcp_servers.mlwh.env]
@@ -139,8 +140,8 @@ MLWH_BASE_URL = "http://mlwh.internal:8080"
 # MLWH_TIMEOUT = "30s"
 ```
 
-Use the full path to `mcp-server` if it is not on your `PATH`. Codex discovers the
-tools on startup and calls them as needed during a session.
+Use the full path to `mlwh-mcp-server` if it is not on your `PATH`. Codex
+discovers the tools on startup and calls them as needed during a session.
 
 ## What the server exposes
 
@@ -189,14 +190,17 @@ See [`.docs/mcp/spec.md`](.docs/mcp/spec.md) for the full specification and
 ## Architecture
 
 The server is built to host multiple independent services through a
-service-agnostic core and self-contained providers. MLWH is the first provider;
-adding another service requires only a new provider package plus its
-registration, with no core change.
+service-agnostic core (`internal/core`) and self-contained providers. MLWH is the
+first. Each service is its own binary: a thin `cmd/<service>-mcp-server`
+entrypoint wires that service's `internal/<service>` provider into the shared
+core. Adding a service is therefore a new `cmd/` + `internal/` package plus its
+registration — with no core change — and each service keeps its own configuration,
+auth, and (in future) transport.
 
 ```
 go.mod                  module github.com/wtsi-hgi/llm-knowledge-base
 Makefile                build / install / lint / test / config / start
-cmd/mcp-server/         CLI entrypoint (flag parsing, wiring only)
+cmd/mlwh-mcp-server/    MLWH server entrypoint (flag parsing, wiring only)
 internal/core/          service-agnostic core (provider seam, transport, version)
 internal/mlwh/          MLWH provider (imports wa/mlwh)
 webui/                  Next.js + FastAPI web UI scaffold (future component)
