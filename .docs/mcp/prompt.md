@@ -54,7 +54,9 @@ Semantics the tools MUST convey to the agent so it queries correctly:
 - Sample search is a **case-insensitive word-prefix** match over
   `name` / `supplier_name` / `common_name` / `donor_id`, **minimum term length 3**
   (so "mus" and "musculus" both match "Mus Musculus"; a mid-word substring does
-  not).
+  not). Study search is a case-insensitive **substring** match (over
+  `name` / `study_title` / `programme` / `faculty_sponsor`) and shares the same
+  **minimum term length 3**.
 - Sample **counts are exact only up to a cap (10000)** and report the cap as a
   **floor** for very common terms (a `count` of 10000 means "at least 10000").
 - Results are **paginated** (bounded default and maximum page sizes; over-max is
@@ -167,10 +169,20 @@ intermingled. Lean:
   default/max page sizes).
 - Help the agent with **multi-step workflows** (e.g. resolve an identifier →
   fetch detail → expand) via clear tool descriptions and/or an MCP resource or
-  prompt that explains how the endpoints compose.
+  prompt that explains how the endpoints compose. The exported
+  `mlwh.EndpointReference()` generates the always-current Markdown endpoint
+  catalogue (Registry-derived — the same source as `api-reference.md`) and is
+  ideal raw material for such a resource; prefer calling it over shipping a
+  copied doc.
 - Handle pagination, validate inputs, and map API errors into clear MCP tool
-  errors the agent can act on (e.g. 503 never-synced → "warehouse cache not
-  synced yet"; 400 → "term too short / bad input"; 404 → "not found").
+  errors the agent can act on. Prefer matching the exported, `errors.Is`-checkable
+  `mlwh.Err*` sentinels the typed client returns (`ErrNotFound`,
+  `ErrCacheNeverSynced`, `ErrAmbiguous`, `ErrUnsupportedIdentifier`, …) over
+  parsing HTTP status, and cover all six stable error codes the API documents:
+  400 bad_request ("term too short / bad input"), 404 not_found, 409 ambiguous
+  ("matches multiple records — disambiguate"), 422 unsupported_identifier, 502
+  upstream_impaired, and 503 cache_never_synced ("warehouse cache not synced
+  yet").
 - Surface freshness so answers can be caveated.
 
 ## Configuration & deployment
@@ -226,11 +238,11 @@ intermingled. Lean:
 2. **Current external-behaviour references** (cross-check against 1), all under
    `~/wa/.docs/mcp/`: `api-reference.md` (generated, CI no-drift guarded) and
    `glossary.md`; `security-posture.md` for the no-auth/internal posture.
-3. **Historical only — contains superseded/incorrect material, do NOT treat as
-   the contract:** in the same `~/wa/.docs/mcp/` directory, `spec.md` (mixes the
-   old FTS5/FULLTEXT design with later word-prefix reconciliation notes), the
-   `phase*.md` build plans, and that project's own `prompt.md`. Background context
-   at most.
+3. **Historical only — do NOT treat as the contract:** in the same
+   `~/wa/.docs/mcp/` directory, `spec.md`, the `phase*.md` build plans, and that
+   project's own `prompt.md` (see the superseded-material warning under
+   "Background: the MLWH API this server talks to" above). Background context at
+   most.
 
 ## Notes
 
@@ -247,7 +259,12 @@ precedence over — any looser phrasing above:
 - **Result shape (structured + text):** every tool returns both typed
   `structuredContent` (output schemas generated from the `mlwh` Go result types)
   and a JSON text rendering of the same data, so structured-aware and text-only
-  clients both work.
+  clients both work. The result types carry their field-level documentation in
+  custom `doc:"…"` struct tags that feed `mlwh.OpenAPIDocument()`'s
+  `components.schemas` — **not** the `json` / `jsonschema` tags the MCP SDK's
+  struct reflection reads — so to preserve those field descriptions, source the
+  output schemas (or at least their field docs) from the OpenAPI component
+  schemas rather than from naive struct reflection.
 - **MCP SDK:** build on the official `github.com/modelcontextprotocol/go-sdk`,
   pinned to **v1.6.1**.
 - **Repository layout (root Go module):** the MCP server is a Go module rooted at
@@ -259,10 +276,11 @@ precedence over — any looser phrasing above:
   web UI as a future component), and a `.gitignore` covering Go as well as
   Node/Python. This mirrors the `wa` repo's own layout (root Go module +
   `frontend/` subdir).
-- **MLWH API version (build-time/static):** derive the targeted MLWH API version
-  statically from `mlwh.OpenAPIDocument()` (`info.version`) — the version
-  compiled in via the imported `wa` package (it is not exported as a symbol).
-  Reporting it must not require contacting a live MLWH server.
+- **MLWH API version (build-time/static):** read the targeted MLWH API version
+  from the exported **`mlwh.APIVersion`** constant — a compiled-in string from
+  the imported `wa` package, so reporting it is a typed, compile-time lookup that
+  never contacts a live MLWH server. (`mlwh.OpenAPIDocument()`'s `info.version`
+  derives from that same constant, so the two cannot drift.)
 - **Version surfacing (all of these):** surface both this server's own version
   and the targeted MLWH API version via (1) a `--version` CLI flag that prints
   them and exits, (2) an MCP resource the agent can read at runtime to caveat
@@ -282,15 +300,25 @@ precedence over — any looser phrasing above:
   plus `path_params` and `query_params` maps (the latter including `limit` /
   `offset`), and returns an **untyped JSON passthrough** (the raw decoded result
   as `structuredContent`, with no per-endpoint output schema). It dispatches
-  through the typed `mlwh` client like every other tool.
+  through the exported **`(*mlwh.RemoteClient).Call(ctx, method, pathParams,
+  query)`** generic dispatcher — the same typed client every other tool uses — so
+  the escape hatch is a thin pass-through (look the `Method` up in
+  `mlwh.Registry`, forward the params to `Call`, serialise the returned value),
+  with no reflection and no per-endpoint switch.
 - **Constrained enums for fixed value-sets:** where a tool input is a fixed set —
-  identifier kinds from `mlwh.IdentifierKinds()`, and the `FindSamplesBy*` field
-  set behind the unified `find_samples` tool — generate a constrained **enum** in
-  the input schema (values sourced from the code) so invalid kinds/fields are
-  rejected at the schema layer and the agent sees the allowed values.
+  identifier kinds from the exported `mlwh.IdentifierKinds()`, and the
+  `FindSamplesBy*` field set behind the unified `find_samples` tool (its members
+  derivable by filtering `mlwh.Registry` for the `FindSamplesBy` `Method` prefix,
+  then mapped to clean field names) — generate a constrained **enum** in the
+  input schema (values sourced from the code, not hand-maintained) so invalid
+  kinds/fields are rejected at the schema layer and the agent sees the allowed
+  values.
 
 Factual grounding (from reading the `wa/mlwh` code — authoritative over prose
-above): the live `mlwh.Registry` currently exposes ~46 endpoints (all `GET`), and
-`mlwh.RemoteConfig` exposes `BaseURL`, `Timeout`, `CACert`, `CacheTTL` and a
-bearer `Token`. Treat the code and the live `/openapi.json` as the source of
+above): the live `mlwh.Registry` currently exposes 40 endpoints (all `GET`, one
+per `Queryer` method), and
+`mlwh.RemoteConfig` exposes `BaseURL`, `Timeout`, `CACert`, a bearer `Token`, and
+`CacheTTL` — but `NewRemoteClient` reads only the first four; `CacheTTL` is inert
+for the remote client (it configures the local cache-backed client), so don't
+wire it expecting an effect. Treat the code and the live `/openapi.json` as the source of
 truth for the exact endpoint set, the result types, and the config fields.
