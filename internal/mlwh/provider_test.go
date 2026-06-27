@@ -26,7 +26,6 @@
 package mlwh
 
 import (
-	"context"
 	"flag"
 	"strings"
 	"testing"
@@ -62,9 +61,13 @@ func TestProviderNew(t *testing.T) {
 				So(provider.APIVersion(), ShouldEqual, wa.APIVersion)
 			})
 
-			Convey("Register is a no-op shell that returns nil this phase", func() {
-				err := provider.Register(context.Background(), nil)
-				So(err, ShouldBeNil)
+			Convey("Register wires the search/count tools through the Registrar", func() {
+				stub := newStubMLWH(t)
+				cs, cleanup := runMLWHServerWithClient(t, stub)
+				defer cleanup()
+
+				_, ok := toolByName(t, cs, "mlwh_search_samples")
+				So(ok, ShouldBeTrue)
 			})
 		})
 	})

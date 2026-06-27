@@ -45,8 +45,8 @@ min-3 and max-1000 guards with no HTTP request; limit/offset passthrough;
 defaults 100/0; tool name and description containing "word-prefix",
 "minimum" 3, and "1000"). Also satisfies the end-to-end F2.1 assertion.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 ### Item 5.2: A2 - Count samples matching a word prefix
 
@@ -59,8 +59,8 @@ means "at least 10000". Covers all 4 A2 acceptance tests (count 42; count
 10000 floor; min-3 guard with no request; tool name and description
 containing "10000" and "at least").
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 ### Item 5.3: A3 - Search studies by substring
 
@@ -73,8 +73,8 @@ name/study_title/programme/faculty_sponsor; min term 3; default 100, max
 1000. Covers all 4 A3 acceptance tests (three studies; min-3 guard; max-1000
 guard; tool name and description containing "substring").
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 ### Item 5.4: A4 - Count studies (search + all)
 
@@ -86,8 +86,8 @@ input schema `{"type":"object"}`); both output `mlwh.Count`. File
 `internal/mlwh/tools_search.go`. Covers all 3 A4 acceptance tests (search
 count 7; search min guard; whole-set count 1234 from `{}`).
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 ### Item 5.5: B1 - Resolve and classify identifiers
 
@@ -105,8 +105,8 @@ names registered). Also realises F1.2's tool-level assertion (the
 `mlwh_resolve_sample` output schema is non-nil, object-typed, and carries
 the `Match` field descriptions).
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 ### Item 5.6: B2 - Find samples by exact field (unified enum)
 
@@ -122,8 +122,8 @@ the code-sourced table (phase 3). Covers all 4 B2 acceptance tests
 invalid enum rejected at schema with no request; the exact 5-value enum in
 Registry order).
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 ### Item 5.7: B3 - Expand identifiers
 
@@ -138,5 +138,5 @@ Add the expand tools (file `internal/mlwh/tools_resolve.go`):
 `kind` rejected with no request; `kind` enum equals `IdentifierKinds()`'s
 15 values in order, first `sample_uuid`, last `id_library_lims`).
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
