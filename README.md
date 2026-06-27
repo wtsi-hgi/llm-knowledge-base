@@ -26,9 +26,6 @@ without any core change).
   this server bridges to. You point the server at its base URL (see
   [Configuration](#configuration)).
 
-`github.com/wtsi-hgi/wa` is a normal public Go module dependency, resolved from
-the Go module proxy — no special setup or `replace` directive is needed.
-
 ## Install
 
 ```bash
