@@ -156,17 +156,31 @@ func (p *provider) APIVersion() string {
 
 // Register adds the provider's MCP tools and resources through the Registrar. It
 // is modularised by tool group so each phase's batch wires its own tools without
-// conflict: the sample/study search and count tools via registerSearchTools and
-// the resolve/classify, unified find-samples, and expand tools via
-// registerResolveTools. The detail/fan-out, freshness, and escape-hatch tool
-// groups, and the workflow resource, are added by their own registrar helpers in
-// later batches (still empty shells until then).
+// conflict: the sample/study search and count tools via registerSearchTools, the
+// resolve/classify, unified find-samples, and expand tools via
+// registerResolveTools, the detail and fan-out enumeration tools via
+// registerDetailTools, the cache-freshness tool via registerFreshnessTool, and
+// the generic escape-hatch tool via registerCallTool. The workflow resource is
+// added by its own registrar helper in a later batch (still an empty shell until
+// then).
 func (p *provider) Register(_ context.Context, r core.Registrar) error {
 	if err := p.registerSearchTools(r); err != nil {
 		return err
 	}
 
 	if err := p.registerResolveTools(r); err != nil {
+		return err
+	}
+
+	if err := p.registerDetailTools(r); err != nil {
+		return err
+	}
+
+	if err := p.registerFreshnessTool(r); err != nil {
+		return err
+	}
+
+	if err := p.registerCallTool(r); err != nil {
 		return err
 	}
 

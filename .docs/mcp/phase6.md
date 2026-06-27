@@ -41,8 +41,8 @@ input `IDRun`, output `mlwh.RunDetail`), `mlwh_library_detail`
 aggregate; library detail routes to `/library/P1/study/5901/detail`; 503
 cache-never-synced error on study detail; all four names registered).
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 ### Item 6.2: C2 - Fan-out enumeration tools
 
@@ -63,8 +63,8 @@ Descriptions state the fetch-all default. Covers all 4 C2 acceptance tests
 `limit=50`/`offset=50` passthrough; samples-for-study count 300; empty
 studies-for-sample array with `IsError=false`).
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 ### Item 6.3: D1 - Report cache freshness
 
@@ -77,8 +77,8 @@ succeeds even on a never-synced cache. Covers all 3 D1 acceptance tests
 (five synced tables; never-synced state returns `IsError=false`; tool name
 and accepts empty input `{}`).
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 ### Item 6.4: E1 - Call any MLWH endpoint (escape hatch)
 
@@ -95,5 +95,5 @@ Match via `ResolveStudy`; `limit`/`offset` passthrough for `AllStudies`;
 unknown-method error naming the method; path-param arity error for
 `SampleDetail`; no output schema because `Out` is `any`).
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
