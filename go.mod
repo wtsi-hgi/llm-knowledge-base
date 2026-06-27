@@ -2,12 +2,10 @@ module github.com/wtsi-hgi/llm-knowledge-base
 
 go 1.25.5
 
-replace github.com/wtsi-hgi/wa => /home/ubuntu/wa
-
 require (
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/smartystreets/goconvey v1.8.1
-	github.com/wtsi-hgi/wa v0.0.0-00010101000000-000000000000
+	github.com/wtsi-hgi/wa v0.6.1
 )
 
 require (
