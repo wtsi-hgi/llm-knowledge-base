@@ -23,7 +23,10 @@ provider module — never a rework of the core.
 ## Background: the MLWH API this server talks to (provided by the `wa` project)
 
 `wa` (Go; module `github.com/wtsi-hgi/wa`) provides `wa mlwh serve`: a read-only
-HTTP API over a synced cache of the warehouse.
+HTTP API over a synced cache of the warehouse. **The `wa` project is checked out
+locally at `~/wa` (`/home/ubuntu/wa`)** — read its `mlwh/` package source and its
+current `.docs/mcp/` references directly from that working copy when authoring the
+spec; it is the authoritative material referred to throughout this prompt.
 
 - It self-describes at `GET /openapi.json` (OpenAPI **3.1.0**; the API version is
   currently **1.6.0**) and has `GET /health` and `GET /freshness`.
@@ -90,8 +93,8 @@ integrated by its own provider module using whatever client suits it — the cor
 stays Go and provider-agnostic, making no assumption that other services expose a
 Go package to import.
 
-The spec should state how the `wa` module is made available as a dependency (a Go
-module dependency is the key part — for MLWH, the imported package _is_ the
+The `wa` module is imported like any other Go module dependency — a standard
+`require` on `github.com/wtsi-hgi/wa` (for MLWH, that imported package _is_ the
 contract). Supporting prose can be pulled from `wa`'s
 `.docs/mcp/api-reference.md` / `glossary.md`, but the package API and the live
 `/openapi.json` are authoritative.
@@ -116,6 +119,41 @@ Architect around a **service-provider abstraction**:
   MCP outputs. Cross-cutting concerns stay in the core.
 - Only the MLWH provider needs to be implemented in this round; the others just
   need a clean, proven place to plug in.
+
+## HARD REQUIREMENT 3 — repository layout: coexist cleanly with the pre-existing web UI
+
+This is **not a greenfield repo**. It already contains a working "hello world"
+full-stack scaffold — a **Next.js 16 (App Router) frontend** (`frontend/`) and a
+**FastAPI backend** (`backend/`), tied together by a root `run-dev.sh`,
+`README.md` and `.env.example`. That scaffold exists for **possible future use as
+a web UI** onto an LLM chat that will itself be a client of the MCP server(s)
+described here (MLWH first, others later). Priority and scope:
+
+- **The Go MCP server is the first and primary deliverable**, and must be
+  immediately usable over **stdio** by local agent CLIs — **Claude Code** and
+  **Codex** are the reference clients — with no web UI in the loop.
+- The existing web UI scaffold is **out of scope to build on or change
+  functionally** in this round. No web UI code should be **deleted** — treat it
+  as a placeholder to be grown later.
+- **Leave room for easy future integration**: the eventual web UI's server-side
+  agent is just another MCP client. This may well have **zero impact** on the MCP
+  server's own design — if so, do not distort the design to accommodate it. (At
+  most it is a further reason to keep a streamable-HTTP transport option open;
+  stdio stays the baseline — see Configuration & deployment.)
+
+The concrete requirement here: **the spec must settle a clean top-level repository
+layout** so the Go server and the web UI scaffold are not confusingly
+intermingled. Lean:
+
+- Relocate the existing web UI — `frontend/`, `backend/`, and its web-specific
+  root files (`run-dev.sh`, the web `.env.example`, and the web-oriented
+  `README.md` content) — under a dedicated **`webui/`** subfolder, and give the
+  Go MCP server a clear home of its own (a repo-root Go module, or a sibling
+  subfolder such as `server/` — the spec picks one and says why).
+- Keep the repo coherent after the move: a root `README.md` describing the whole
+  project (MCP-server-first, web UI as a future component), a `.gitignore`
+  covering Go as well as Node/Python, and `LICENSE` left at the root. The move is
+  purely organisational — relocation, not rewrites.
 
 ## Functional requirements (MLWH provider)
 
@@ -143,8 +181,9 @@ Architect around a **service-provider abstraction**:
   of which may need quite different settings. Sensible env-var / flag based
   config.
 - MCP transport: **stdio** as the baseline (local agents such as Claude Code /
-  desktop); consider streamable HTTP if remote/shared hosting is wanted. The spec
-  should settle this.
+  Codex / desktop); consider streamable HTTP if remote/shared hosting is wanted —
+  e.g. the future web UI's server-side agent would be such a shared consumer. The
+  spec should settle this, keeping stdio as the default.
 
 ## Non-functional / engineering conventions
 
@@ -183,13 +222,12 @@ Architect around a **service-provider abstraction**:
    (`github.com/wtsi-hgi/wa`) — `Queryer`, `RemoteClient` + `RemoteConfig`,
    `Registry` + `Endpoint`, `OpenAPIDocument()`, and the response types — and a
    running `wa mlwh serve`'s `GET /openapi.json` (OpenAPI 3.1.0, generated from
-   that code at runtime).
-2. **Current external-behaviour references** (cross-check against 1): the `wa`
-   project's `.docs/mcp/api-reference.md` (generated, CI no-drift guarded) and
-   `.docs/mcp/glossary.md`; its `.docs/mcp/security-posture.md` for the
-   no-auth/internal posture.
+   that code at runtime). All of this is readable locally under `~/wa/mlwh/`.
+2. **Current external-behaviour references** (cross-check against 1), all under
+   `~/wa/.docs/mcp/`: `api-reference.md` (generated, CI no-drift guarded) and
+   `glossary.md`; `security-posture.md` for the no-auth/internal posture.
 3. **Historical only — contains superseded/incorrect material, do NOT treat as
-   the contract:** the `wa` project's `.docs/mcp/spec.md` (mixes the old
-   FTS5/FULLTEXT design with later word-prefix reconciliation notes), its
-   `.docs/mcp/phase*.md` build plans, and its `.docs/mcp/prompt.md`. Background
-   context at most.
+   the contract:** in the same `~/wa/.docs/mcp/` directory, `spec.md` (mixes the
+   old FTS5/FULLTEXT design with later word-prefix reconciliation notes), the
+   `phase*.md` build plans, and that project's own `prompt.md`. Background context
+   at most.
