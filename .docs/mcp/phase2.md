@@ -45,8 +45,8 @@ This item underpins the phase's acceptance tests (no story acceptance tests
 are dedicated to the I-prereqs themselves; they are exercised via G3 and
 H1 below).
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 ### Item 2.2: H1 - Stdio transport seam (Run takes any mcp.Transport)
 
@@ -64,8 +64,8 @@ core alone); (2) inspecting the module confirms no HTTP transport, config
 flag, or listener exists. The `cmd/mcp-server` wiring of
 `&mcp.StdioTransport{}` is completed in phase 7's flag work.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 ### Item 2.3: G3 - Server implementation info and instructions
 
@@ -84,5 +84,5 @@ supplying a version, since the core stays provider-agnostic; the literal
 `mlwh.APIVersion` value is realised once the MLWH provider is wired (it
 supplies `mlwh.APIVersion` to `VersionInfo` in phase 4).
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
