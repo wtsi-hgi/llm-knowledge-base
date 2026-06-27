@@ -45,8 +45,8 @@ schema marshals to a valid JSON object with no unresolved `$ref`; the
 realised once resolve tools exist in phase 5, but the schema source is
 verified here).
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 ### Item 3.2: F2 - Slice results wrapped as an object
 
@@ -62,8 +62,8 @@ at the schema/wrapper level (object wrapper shape; output schema top-level
 type "object" with an array property); the end-to-end assertions via
 `mlwh_search_samples` are exercised when that tool lands in phase 5 (A1.1).
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 ### Item 3.3: J1 - Map wa/mlwh sentinels to clear MCP tool errors
 
@@ -83,5 +83,5 @@ to `nil`. Also derive the enum/field tables the spec attributes to
 so phase 5's tools consume them; their full enum assertions land with the
 tools (B2.4, B3.3).
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
