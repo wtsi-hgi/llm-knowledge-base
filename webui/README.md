@@ -109,10 +109,10 @@ pip install -r requirements-dev.txt
 uvicorn main:app --reload
 ```
 
-Visit `http://localhost:8000` to see the FastAPI Hello World endpoint, and try
-the example query endpoint:
+Visit `http://localhost:8000/api/v1/` to see the FastAPI Hello World endpoint,
+and try the example query endpoint:
 
-- `http://localhost:8000/hello?name=YourName` => { "message": "Hello, YourName from FastAPI!" }
+- `http://localhost:8000/api/v1/hello?name=YourName` => { "message": "Hello, YourName from FastAPI!" }
 
 ### 3. Environment Variables
 
