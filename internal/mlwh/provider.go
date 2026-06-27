@@ -160,9 +160,8 @@ func (p *provider) APIVersion() string {
 // resolve/classify, unified find-samples, and expand tools via
 // registerResolveTools, the detail and fan-out enumeration tools via
 // registerDetailTools, the cache-freshness tool via registerFreshnessTool, and
-// the generic escape-hatch tool via registerCallTool. The workflow resource is
-// added by its own registrar helper in a later batch (still an empty shell until
-// then).
+// the generic escape-hatch tool via registerCallTool. The workflow /
+// endpoint-catalogue resource (Story G1) is added by registerWorkflowResource.
 func (p *provider) Register(_ context.Context, r core.Registrar) error {
 	if err := p.registerSearchTools(r); err != nil {
 		return err
@@ -181,6 +180,10 @@ func (p *provider) Register(_ context.Context, r core.Registrar) error {
 	}
 
 	if err := p.registerCallTool(r); err != nil {
+		return err
+	}
+
+	if err := p.registerWorkflowResource(r); err != nil {
 		return err
 	}
 

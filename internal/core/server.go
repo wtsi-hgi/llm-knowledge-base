@@ -26,7 +26,10 @@
 package core
 
 import (
+	"fmt"
 	"log/slog"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -95,6 +98,12 @@ func New(opts Options) (*Server, error) {
 		},
 	)
 
+	// The core registers the version resource itself (Story G2), not via a
+	// provider, so it is present regardless of which providers are configured.
+	if err := registerVersionResource(mcpServer, version); err != nil {
+		return nil, fmt.Errorf("registering version resource: %w", err)
+	}
+
 	return &Server{
 		mcpServer: mcpServer,
 		logger:    logger,
@@ -110,6 +119,31 @@ func New(opts Options) (*Server, error) {
 // G3), and the startup log line (Story G5).
 func (s *Server) VersionInfo() VersionInfo {
 	return s.version
+}
+
+// logStartupVersion emits the single startup version line (Story G5) when the
+// server begins serving. It is sourced from the same VersionInfo the core
+// assembled at New time, so it names this server's version and each provider's
+// targeted upstream API version (e.g. mlwh=1.6.0) without the core knowing any
+// provider's domain. If no logger was configured the default logger is used, so
+// a configured logger always receives the line. The per-provider versions are
+// attached as one structured attribute so the line carries each as
+// "<name>=<version>".
+func (s *Server) logStartupVersion() {
+	logger := s.logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+
+	apiVersions := make([]any, 0, len(s.version.APIVersions)*2)
+	for _, name := range slices.Sorted(maps.Keys(s.version.APIVersions)) {
+		apiVersions = append(apiVersions, name, s.version.APIVersions[name])
+	}
+
+	logger.Info("starting MLWH MCP server",
+		slog.String("server_version", s.version.ServerVersion),
+		slog.Group("api_versions", apiVersions...),
+	)
 }
 
 // registrar adapts a *mcp.Server to the Registrar seam exposed to providers.

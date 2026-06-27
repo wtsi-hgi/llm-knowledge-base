@@ -50,5 +50,9 @@ func (s *Server) Run(ctx context.Context, t mcp.Transport) error {
 		}
 	}
 
+	// Emit the startup version line (Story G5) once, as serving begins, so the
+	// running server's versions are visible in the logs.
+	s.logStartupVersion()
+
 	return s.mcpServer.Run(ctx, t)
 }

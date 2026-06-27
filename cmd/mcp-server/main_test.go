@@ -1,0 +1,86 @@
+/*******************************************************************************
+ * Copyright (c) 2026 Genome Research Ltd.
+ *
+ * Author: Sendu Bala <sb10@sanger.ac.uk>
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining
+ * a copy of this software and associated documentation files (the
+ * "Software"), to deal in the Software without restriction, including
+ * without limitation the rights to use, copy, modify, merge, publish,
+ * distribute, sublicense, and/or sell copies of the Software, and to
+ * permit persons to whom the Software is furnished to do so, subject to
+ * the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included
+ * in all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+ * IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+ * CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+ * TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+ * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ ******************************************************************************/
+
+package main
+
+import (
+	"bytes"
+	"testing"
+	"time"
+
+	wa "github.com/wtsi-hgi/wa/mlwh"
+
+	"github.com/wtsi-hgi/llm-knowledge-base/internal/core"
+
+	. "github.com/smartystreets/goconvey/convey"
+)
+
+// TestRunVersionFlag exercises Story G4: `mcp-server --version` prints the
+// server version and the targeted MLWH API version to stdout and exits 0 without
+// opening the transport, requiring config, or blocking on stdin. It drives the
+// refactored run(args, stdout) directly so no subprocess or real stdio is
+// involved, and so the no-config requirement is exercised (no MLWH_BASE_URL is
+// set).
+func TestRunVersionFlag(t *testing.T) {
+	Convey("Given --version and a captured stdout, with no MLWH_BASE_URL configured", t, func() {
+		t.Setenv("MLWH_BASE_URL", "")
+
+		var stdout bytes.Buffer
+
+		done := make(chan error, 1)
+
+		go func() {
+			done <- run([]string{"--version"}, &stdout)
+		}()
+
+		var (
+			err     error
+			prompt  bool
+			settled bool
+		)
+
+		select {
+		case err = <-done:
+			prompt = true
+			settled = true
+		case <-time.After(3 * time.Second):
+			settled = false
+		}
+
+		Convey("G4.2: it returns promptly without blocking on stdin or serving", func() {
+			So(settled, ShouldBeTrue)
+			So(prompt, ShouldBeTrue)
+		})
+
+		Convey("G4.1: it returns nil (exit 0) and prints both versions to stdout", func() {
+			So(settled, ShouldBeTrue)
+			So(err, ShouldBeNil)
+
+			out := stdout.String()
+			So(out, ShouldContainSubstring, core.ServerVersion)
+			So(out, ShouldContainSubstring, wa.APIVersion)
+		})
+	})
+}

@@ -42,8 +42,8 @@ expand). URI `mlwh://workflow`, MIME type `text/markdown`; build by calling
 `/resolve/sample` entry; MIMEType `text/markdown`; guidance mentioning
 "resolve" and "detail").
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 ### Item 7.2: G2 - Version MCP resource
 
@@ -57,8 +57,8 @@ targeted version is `mlwh.APIVersion`. Covers both G2 acceptance tests (JSON
 parses to `server_version` "0.1.0" and `api_versions.mlwh` ==
 `mlwh.APIVersion`; MIMEType `application/json`).
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 ### Item 7.3: G4 - --version flag
 
@@ -74,8 +74,8 @@ acceptance tests (stdout contains the server version and the
 `mlwh.APIVersion` value with exit 0; the command returns promptly and does
 not block on stdin / start serving), tested in `main_test.go`.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 ### Item 7.4: G5 - Startup-log version line
 
@@ -90,5 +90,5 @@ single G5 acceptance test (a buffer-backed logger receives a startup line
 containing both "0.1.0" and `mlwh.APIVersion` when `Run` reaches the serving
 phase over an in-memory transport).
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed

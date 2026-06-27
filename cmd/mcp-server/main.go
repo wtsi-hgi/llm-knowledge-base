@@ -25,15 +25,102 @@
 
 // Command mcp-server is the entrypoint for the MLWH MCP server.
 //
-// This is the bootstrap entrypoint; wiring (flag parsing, provider
-// registration, transport) is added in later phases. The blank imports anchor
-// the module's two core dependencies - the MCP SDK and the wa/mlwh client - so
-// the bootstrap compiles against them; later phases use them directly.
+// It is the composition root: it parses flags, builds the MLWH provider from its
+// configuration, wraps it in the service-agnostic core, and serves over the
+// stdio transport so a local agent CLI (Claude Code, Codex) can launch it. A
+// --version flag prints this server's build version and the targeted MLWH API
+// version without opening any transport or requiring configuration. Only the
+// stdio transport is wired (Story H1); there is no HTTP transport, config, or
+// listener.
 package main
 
 import (
-	_ "github.com/modelcontextprotocol/go-sdk/mcp"
-	_ "github.com/wtsi-hgi/wa/mlwh"
+	"context"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"os/signal"
+	"syscall"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+	wa "github.com/wtsi-hgi/wa/mlwh"
+
+	"github.com/wtsi-hgi/llm-knowledge-base/internal/core"
+	"github.com/wtsi-hgi/llm-knowledge-base/internal/mlwh"
 )
 
-func main() {}
+func main() {
+	if err := run(os.Args[1:], os.Stdout); err != nil {
+		fmt.Fprintln(os.Stderr, "mcp-server:", err)
+		os.Exit(1)
+	}
+}
+
+// run parses args, then either prints version information (--version) or builds
+// and serves the MCP server over stdio. stdout receives the --version output;
+// operational logs go to the core's logger (stderr by default). It is factored
+// out of main so a test can drive --version without a subprocess or real stdio.
+//
+// The --version path is handled before any configuration is resolved or any
+// transport is opened, so `mcp-server --version` works with no MLWH_BASE_URL set
+// and returns promptly without serving or blocking on stdin.
+func run(args []string, stdout io.Writer) error {
+	fs := flag.NewFlagSet("mcp-server", flag.ContinueOnError)
+
+	showVersion := fs.Bool("version", false, "print the server version and the targeted MLWH API version, then exit")
+
+	var cfg mlwh.Config
+	cfg.BindFlags(fs)
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	if *showVersion {
+		return printVersion(stdout)
+	}
+
+	return serve(cfg)
+}
+
+// printVersion writes this server's build version (core.ServerVersion) and the
+// compile-time targeted MLWH API version (wa.APIVersion) to w. Reading either
+// version contacts no server, so --version never needs configuration or the
+// network.
+func printVersion(w io.Writer) error {
+	_, err := fmt.Fprintf(w, "mcp-server version %s\nMLWH API version %s\n", core.ServerVersion, wa.APIVersion)
+
+	return err
+}
+
+// serve resolves the MLWH provider configuration, builds the provider and the
+// core server, and serves over the stdio transport until the process is
+// signalled or the peer disconnects. Run accepts any mcp.Transport (Story H1);
+// the binary supplies &mcp.StdioTransport{}, the only transport this round.
+// Operational output (including the startup version line) goes to the core's
+// logger, not stdout, so it does not corrupt the stdio MCP stream.
+func serve(cfg mlwh.Config) error {
+	remoteCfg, err := cfg.Resolve(nil)
+	if err != nil {
+		return err
+	}
+
+	provider, err := mlwh.New(remoteCfg)
+	if err != nil {
+		return err
+	}
+
+	srv, err := core.New(core.Options{
+		ServerVersion: core.ServerVersion,
+		Providers:     []core.Provider{provider},
+	})
+	if err != nil {
+		return err
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	return srv.Run(ctx, &mcp.StdioTransport{})
+}

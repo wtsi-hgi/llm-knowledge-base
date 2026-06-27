@@ -25,6 +25,14 @@
 
 package core
 
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+)
+
 // ServerVersion is this server's build version. It defaults to "dev" and is
 // overridable at link time, e.g.:
 //
@@ -33,3 +41,47 @@ package core
 // It is the default used by New when Options.ServerVersion is empty, and is the
 // value reported by the --version flag (Story G4).
 var ServerVersion = "dev"
+
+// versionResourceMIMEType is the MIME type of the version resource body (Story
+// G2): the body is VersionInfo marshaled to JSON.
+const versionResourceMIMEType = "application/json"
+
+// registerVersionResource registers the version MCP resource (Story G2) on the
+// MCP server. The resource lives at versionResourceURI and its body is the
+// supplied VersionInfo marshaled to JSON
+// (e.g. {"server_version":"0.1.0","api_versions":{"mlwh":"1.6.0"}}), so a client
+// can read this server's version and each provider's targeted upstream API
+// version at runtime. The core registers it itself, not via a provider, so it is
+// present even with no providers; the per-provider versions still arrive only
+// through the Provider seam (in the assembled VersionInfo), keeping the core
+// service-agnostic.
+//
+// The body is marshaled once at registration: VersionInfo is assembled at New
+// time and never mutates, so a marshal failure here is a programming error and
+// is returned so New can surface it.
+func registerVersionResource(server *mcp.Server, info VersionInfo) error {
+	body, err := json.Marshal(info)
+	if err != nil {
+		return fmt.Errorf("marshal version info: %w", err)
+	}
+
+	text := string(body)
+
+	server.AddResource(&mcp.Resource{
+		URI:         versionResourceURI,
+		Name:        "version",
+		Title:       "Server and upstream API versions",
+		Description: "This server's build version and each provider's targeted upstream API version, as JSON.",
+		MIMEType:    versionResourceMIMEType,
+	}, func(_ context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+		return &mcp.ReadResourceResult{
+			Contents: []*mcp.ResourceContents{{
+				URI:      req.Params.URI,
+				MIMEType: versionResourceMIMEType,
+				Text:     text,
+			}},
+		}, nil
+	})
+
+	return nil
+}
