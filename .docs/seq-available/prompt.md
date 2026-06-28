@@ -43,6 +43,25 @@ behaviour. Tool descriptions and output schemas are sourced from the upstream
 `Registry`/OpenAPI (see Background), so the two specs must agree on wording and
 semantics. Adapt to whatever exact endpoint shapes the `wa` spec finalises.
 
+**Upstream → tool traceability** (each `wa-prompt.md` deliverable and how it surfaces
+here; if `wa` drops one, the matching tool drops too):
+
+| wa-prompt deliverable | MCP tool / behaviour |
+|---|---|
+| (S) summary, (O1) study overview | `mlwh_study_sequencing_summary` / `mlwh_study_overview` |
+| (C) samples-with-data count | `mlwh_count_samples_with_data_for_study` |
+| (E) with/without-data lists + iRODS sample identity | `mlwh_samples_with[out]_data_for_study`; sample fields on `mlwh_irods_paths_*` |
+| (R)+(T) iRODS `created` + date window | `since`/`until` recency params on the availability tools |
+| (O2) run overview | `mlwh_run_overview` |
+| (N) `/count` counterparts | `mlwh_count_*` tools |
+| (M) list sizing metadata | bounded paging + hints (deliverable P) |
+| (L) lean detail | lean/overview tools (deliverable L) |
+| (F) per-response freshness field | surfaced on every result |
+| (P0) baseline + (P1–P2) milestones + (P5) per-platform status | `mlwh_sample_progress`, `mlwh_run_status` |
+| (P3) study status breakdown | `mlwh_study_status_breakdown` |
+| Platform coverage + HARD REQUIREMENT 11 | `platform` field + "not tracked" passthrough |
+| *(no upstream — MCP-only)* | (G) response-size guard |
+
 ## Why this is needed (the motivating incident — read this)
 
 An agent asked "how many of study 7607's 428 samples have sequencing data?" had to
@@ -153,8 +172,10 @@ The recency question depends on presenting the right time (see
   `mlwh_all_studies`, and the untyped `mlwh_call_endpoint`. Because it measures
   serialised bytes generically, it lives in the **shared `internal/core`** result
   path (alongside `errs.go`/the `Registrar` seam) so every current and future
-  provider inherits it and the core stays service-agnostic; the threshold is
-  configurable via the existing `--mlwh-*`/`MLWH_*` flag+env convention.
+  provider inherits it and the core stays service-agnostic. The threshold is a
+  **core-level Option** (not MLWH-specific), set by each per-service binary from its
+  own flag/env — for `mlwh-mcp-server`, an `MLWH_*` var: the core defines the
+  mechanism, the binary names the knob.
 - **(N) Count tools for every upstream `/count` counterpart**
   (`mlwh_count_irods_paths_for_study`, `..._for_sample`, `mlwh_count_runs_for_study`,
   `mlwh_count_libraries_for_study`, `mlwh_count_lanes_for_sample`,
@@ -267,9 +288,12 @@ Each item below **will be built**; settle only the implementation:
   shape/wording, and how it estimates size (serialised bytes vs a token estimate).
 - **The bounded-default page size for (P)** and the exact sizing-hint wording,
   reconciled with the C2 fetch-all stories.
-- **How "added to iRODS" is worded** in tool descriptions, and how the freshness
-  caveat is presented (a field on each response vs guidance to call
-  `mlwh_freshness`) — matching the upstream semantics.
+- **How "added to iRODS" is worded** in tool descriptions, and the exact
+  field/wording of the freshness caveat. The caveat is **always present on the
+  response** (the upstream surfaces it per its deliverable F — see HARD REQUIREMENT
+  2); this decision settles only its presentation, not whether it appears.
+  `mlwh_freshness` stays available for an explicit re-check but is **not** a
+  substitute for the per-response field.
 - **Progress tool shapes** — names (`mlwh_sample_progress`, `mlwh_run_status`,
   `mlwh_study_status_breakdown`); how the open phase's elapsed time, the freshness
   caveat, and the three-layer (baseline / milestone / run-status) presentation

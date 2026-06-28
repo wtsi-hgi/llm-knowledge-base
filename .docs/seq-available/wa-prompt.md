@@ -81,7 +81,7 @@ sample-link column per platform):
 | Illumina | `iseq_product_metrics` (`id_iseq_product`) | `iseq_flowcell` | `qc`/`qc_seq`/`qc_lib` | `iseq_run_status`, `iseq_run_lane_metrics` |
 | PacBio | `pac_bio_product_metrics` (`id_pac_bio_product`) | `pac_bio_run` | `qc` | `pac_bio_run_well_metrics` (`run_start`/`run_complete`/`well_complete`/`qc_seq_date`, `run_status`/`well_status`) |
 | Elembio | `eseq_product_metrics` (`id_eseq_product`) | `eseq_flowcell` | `qc`/`qc_seq`/`qc_lib` | `eseq_run`, `eseq_run_lane_metrics` |
-| Ultimagen | `useq_product_metrics` (`id_useq_product`) | `useq_run_metrics` | `qc`/`qc_seq`/`qc_lib` | `useq_run_metrics` |
+| Ultimagen | `useq_product_metrics` (`id_useq_product`) | `useq_wafer` (carries `id_sample_tmp`/`id_study_tmp`; join `useq_product_metrics.id_useq_wafer_tmp`) | `qc`/`qc_seq`/`qc_lib` | `useq_run_metrics` |
 | **ONT** | **— none —** | `oseq_flowcell` | **—** | **—** |
 
 So Illumina/PacBio/Elembio/Ultimagen link **identically** (each product-metrics table
@@ -533,6 +533,11 @@ Each item below **will be built**; settle only the implementation:
 - **Run-status layer (P5) shaping** — how the per-run `iseq_run_status` timeline is
   nested under P2 vs only on `GET /run/:id/status`; the `iseq_run_status` index
   shape; and how recurrences / on-hold / cancelled are represented.
+- **Canonical phase-entry field name** — the milestone timeline currently uses
+  `reached_at` and the run-status timeline `entered_at` for the same notion (when a
+  phase/milestone began). Settle one canonical name across both layers, or keep the
+  two deliberately distinct (milestone *reached* vs status *entered*) and say so;
+  don't leave it accidental.
 
 ## Out of scope
 
@@ -552,10 +557,11 @@ Each item below **will be built**; settle only the implementation:
 - **No platform is deferred.** All sequencing platforms are handled by the one
   uniform mechanism (Platform-coverage §); capability simply follows each platform's
   schema, with an explicit "not supported/tracked for &lt;platform&gt;" where a table
-  is absent (e.g. ONT iRODS/QC/status). Genuinely deferred is only *cosmetic*
-  per-platform enrichment beyond what the questions need — e.g. instrument-model /
-  pipeline labels that gst's `COALESCE` adds — and gst's HGI-sponsor / 2-year
-  filters, which are gst-specific and not wanted here.
+  is absent (e.g. ONT iRODS/QC/status). The only things truly out of scope are
+  *cosmetic* per-platform enrichment beyond what the questions need — e.g.
+  instrument-model / pipeline labels that gst's `COALESCE` adds — and gst's
+  HGI-sponsor / 2-year filters, which are gst-specific and not wanted here. (These
+  are excluded, not "optional deliverables" — consistent with the scope rule.)
 
 ## Pointers / prior art (in order of authority)
 
@@ -577,7 +583,8 @@ Each item below **will be built**; settle only the implementation:
    the per-platform linkage tables for uniform coverage (PacBio `pac_bio_product_metrics`
    / `pac_bio_run` / `pac_bio_run_well_metrics`; Elembio `eseq_product_metrics` /
    `eseq_flowcell` / `eseq_run` / `eseq_run_lane_metrics`; Ultimagen
-   `useq_product_metrics` / `useq_run_metrics`; ONT `oseq_flowcell`), each
+   `useq_product_metrics` / `useq_wafer` (sample link) / `useq_run_metrics`; ONT
+   `oseq_flowcell`), each
    `*_product_metrics` carrying an `id_*_product` matching
    `seq_product_irods_locations.id_product`; `mlwh/cache_schema.go` (the mirrored-table
    list to extend with the tracking-table, run-status, and per-platform mirrors);
