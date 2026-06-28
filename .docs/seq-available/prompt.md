@@ -31,9 +31,9 @@ that adds the underlying endpoints (study sequencing-availability summary/overvi
 samples-with/without-data counts and lists, sample identity on iRODS rows, a
 mirrored iRODS-creation timestamp with date-windowed "added since" queries, a run
 overview, `/count` counterparts for every list, list sizing metadata, lean detail,
-and **sample/run pipeline-progress endpoints** backed by newly-mirrored NPG
-run-status history). **The tools here are thin pass-throughs over those endpoints**
-and assume
+and **sample pipeline-progress endpoints** backed by the newly-mirrored per-sample
+ops-tracking table (`seq_ops_tracking_per_sample`)). **The tools here are thin
+pass-throughs over those endpoints** and assume
 they exist; the MCP size guard (deliverable G) is the one genuinely new MCP-layer
 behaviour. Tool descriptions and output schemas are sourced from the upstream
 `Registry`/OpenAPI (see Background), so the two specs must agree on wording and
@@ -166,20 +166,26 @@ The recency question depends on presenting the right time (see
 
 ### Sample progress / pipeline status tools
 
-- **(Q1) `mlwh_sample_progress`** — pass a Sanger sample name through to the
-  upstream sample-progress endpoint and return its per-run pipeline timeline: each
-  phase with `description`, `entered_at`, and duration; the current phase; and the
-  overall current phase for the sample's latest run.
-- **(Q2) `mlwh_run_status`** — a run's status timeline (the building block Q1
-  composes).
-- **(Q3) `mlwh_study_status_breakdown`** — counts of a study's samples by current
-  pipeline phase, in one small call (never N per-sample timelines).
-- **(Q4) Honest progress presentation.** Present the **current phase** and, for the
+First pass surfaces the upstream **per-sample milestone timeline** (from
+`seq_ops_tracking_per_sample`): submission → labware → order → library → sequencing
+→ qc-complete (→ iRODS-delivered). The fine-grained run-status history and
+multi-platform enrichment are deferred upstream, so there is **no** `mlwh_run_status`
+tool this pass.
+
+- **(Q1) `mlwh_sample_progress`** — pass a Sanger sample name to the upstream
+  sample-progress endpoint and return the ordered milestone timeline: each reached
+  milestone with its `reached_at` and the duration to the next; the **current
+  phase** (after the latest reached milestone). If the sample is **not in the
+  tracking table**, surface the upstream "not tracked" result plainly — do not imply
+  it has made no progress.
+- **(Q2) `mlwh_study_status_breakdown`** — counts of a study's tracked samples by
+  current phase, in one small call (never N per-sample lookups). Surface the
+  **tracked-of-total** figure (e.g. 11 of 428) so partial coverage is explicit.
+- **(Q3) Honest progress presentation.** Present the **current phase** and, for the
   open phase, "time in phase so far" computed by the **agent** (which knows "now")
-  from the upstream `entered_at`; show completed-phase durations from upstream;
-  always attach the `mlwh_freshness` caveat for the run-status table (current phase
-  is **as-of last sync**). Render the raw ordered sequence faithfully — phases can
-  recur and runs can end cancelled/stopped-early; do not imply monotonic progress.
+  from the upstream `reached_at`; show completed-phase durations from upstream;
+  always attach the `mlwh_freshness` caveat for the tracking table (current phase is
+  **as-of last sync**). Never fabricate phases the table doesn't record.
 
 ### Guidance
 
@@ -190,8 +196,9 @@ The recency question depends on presenting the right time (see
   complete only up to the last sync); (iii) the general **count/summarise → decide
   → page** recipe naming each large list's count tool; (iv) **progress** — route
   "what's happening with my sample / study" to the progress/breakdown tools, read
-  the current phase as **as-of last sync**, and let the agent compute elapsed time
-  in the open phase from `entered_at`. Make the new tools'
+  the current phase as **as-of last sync**, let the agent compute elapsed time in the
+  open phase from `reached_at`, and report "not tracked" / tracked-of-total honestly
+  rather than implying no progress. Make the new tools'
   descriptions unambiguously the right pick for these questions, including the
   definition of "available", the recency semantics, and the study-scoping caveat.
 
@@ -221,10 +228,11 @@ The recency question depends on presenting the right time (see
    `../mcp/spec.md` stories; keep version-surfacing and existing behaviour intact
    except the deliberate (P) default change, which must be documented.
 8. **Correct progress presentation.** Current phase is **as-of last sync** (attach
-   the run-status freshness caveat); elapsed time in the open phase is computed by
-   the agent from `entered_at`, not fabricated; the ordered event sequence is shown
-   faithfully (recurrence, on-hold, cancelled, stopped-early are valid), never
-   forced into monotonic progress. The study breakdown (Q3) is one aggregate call.
+   the tracking-table freshness caveat); elapsed time in the open phase is computed
+   by the agent from `reached_at`, not fabricated; a sample absent from the tracking
+   table is reported "not tracked" (never "no progress"), and the study breakdown
+   (Q2) — a single aggregate call — surfaces tracked-of-total, never hiding untracked
+   samples.
 
 ## Design decisions for the spec to settle (HOW, not WHETHER)
 
@@ -240,10 +248,9 @@ Each item below **will be built**; settle only the implementation:
 - **How "added to iRODS" is worded** in tool descriptions, and how the freshness
   caveat is presented (a field on each response vs guidance to call
   `mlwh_freshness`) — matching the upstream semantics.
-- **Progress tool shapes** — names (`mlwh_sample_progress` vs `..._status`); whether
-  a multi-run sample shows all runs or just the latest active run; and how the open
-  phase's elapsed time and the freshness caveat are surfaced — matching the upstream
-  progress endpoints.
+- **Progress tool shapes** — names (`mlwh_sample_progress` vs `..._status`); how the
+  open phase's elapsed time, the freshness caveat, and the "not tracked" /
+  tracked-of-total coverage are surfaced — matching the upstream progress endpoints.
 
 ## Out of scope
 

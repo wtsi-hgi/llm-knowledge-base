@@ -27,9 +27,10 @@ one request, small response**:
   right now, and how long it has spent in each phase.
 
 Today the API cannot answer any of these without abuse. Most needed facts are
-already cached (the sample→run link included); the gaps are the iRODS-creation
-timestamp and the NPG run-status history. This feature adds the small, indexed
-aggregate + recency + pipeline-progress + budget-safety surface to close that.
+already cached; the gaps are the iRODS-creation timestamp and the per-sample
+ops-tracking milestones (`mlwh_reporting.seq_ops_tracking_per_sample`). This feature
+adds the small, indexed aggregate + recency + pipeline-progress + budget-safety
+surface to close that.
 
 ## Why this is needed (the motivating incident — read this)
 
@@ -134,30 +135,41 @@ recency question correctly therefore **requires a cache schema change**: carry
   variants. The incremental window stays keyed on `last_changed`; `created` rides
   along (a new row has `created == last_changed`, so it is captured the first time
   it crosses the high-water mark).
-- **The run-status timeline (verified in the source).** `iseq_run_status`
-  (`id_run_status` PK, `id_run`, `date` datetime, `id_run_status_dict`, `iscurrent`)
-  records every NPG lifecycle transition for a run; `iseq_run_status_dict`
-  (`id_run_status_dict`, `description`, `temporal_index`) is the ~29-row phase
-  vocabulary: run pending → run in progress → run complete → run mirrored →
-  analysis pending/in progress → secondary analysis in progress → analysis complete
-  → archival pending/in progress → run archived → qc review pending → qc in
-  progress → qc complete (plus on hold / cancelled / quarantined / stopped early).
-  `temporal_index` gives canonical phase order; chronology comes from `date`. A
-  sample reaches this via the **already-cached** `iseq_product_metrics_mirror`
-  (`id_sample_tmp` → `id_run`). Verified end-to-end: run 52553 (study 7607) →
-  run pending (6h) → in progress (34h) → complete → mirrored → analysis →
-  secondary analysis (6h) → analysis complete → **qc review pending (current)**.
-- **Sync nuance for `iseq_run_status`.** It has **no `last_changed`/`recorded`
-  column**, and recording a new status flips the prior row's `iscurrent` 1→0 **in
-  place**. So incremental sync must key on the `id_run_status` PK (the existing
-  ascending-id mode, cf. `seqProductIRODSLocationsIDMode`, `mlwh/sync.go:55`) and
-  **derive "current" as the latest `date` per `id_run`** rather than trusting a
-  mirrored `iscurrent` (which mutates with no sync trigger). `iseq_run_status_dict`
-  is tiny and effectively static — mirror it wholesale. **Neither table is mirrored
-  today**, nor are `iseq_run_lane_metrics` (per-lane `run_pending`/`run_complete`/
-  `qc_complete`/`lane_released` + `instrument_model`, has `last_changed`) or
-  `iseq_flowcell` (`recorded_at` = library/flowcell assignment); and `sample_mirror`
-  carries only `last_updated`, not `sample.created`/`recorded_at` (submission time).
+- **The per-sample tracking table (verified in the source).**
+  `mlwh_reporting.seq_ops_tracking_per_sample` — a **BASE TABLE** in the
+  `mlwh_reporting` schema (readable by the same read-only user; all rows
+  `id_lims = 'SQSCP'`), one row per tracked sample (PK `id_sample_lims_composite`;
+  lookup keys `id_sample_lims`, `sanger_sample_id`, `sanger_sample_name`,
+  `study_id`). It carries the pipeline milestones as named `datetime` columns, in
+  order: `manifest_created` → `manifest_uploaded` → `labware_received` →
+  `order_made` → `working_dilution` → `library_start` → `library_complete` →
+  `sequencing_run_start` → `sequencing_qc_complete`, plus context columns
+  (`programme`, `faculty_sponsor`, `data_access_group`, `library_type`,
+  `project_name`, `platform`, …). This is the source the requester's own tracking
+  tool [`wtsi-hgi/gst`](https://github.com/wtsi-hgi/gst) (`db/query.sql`) reads;
+  it computes phase durations directly, e.g. `LibraryTime =
+  DATEDIFF(library_complete, library_start)`, `SequencingTime =
+  DATEDIFF(sequencing_qc_complete, sequencing_run_start)`. Verified for study 7607,
+  e.g. sample 7607STDY16897354: manifest 2026-05-29 → labware 2026-06-02 → order
+  2026-06-19 → library_start/complete 2026-06-19 → sequencing_run_start 2026-06-25 →
+  `sequencing_qc_complete` NULL (**currently in the sequencing phase**).
+- **Two caveats on that table.** (a) **Coverage is a subset.** It tracks only
+  samples that went through the ops-tracking process — study 7607 has **11** rows
+  here vs its **428** samples. A sample absent from it has no milestone timeline
+  (the endpoint must say "not tracked", not "no progress"). (b) **No
+  change-timestamp.** It has no `last_changed`/`updated` column, and rows mutate in
+  place as later milestones fill in. So it cannot sync on the usual `last_changed`
+  watermark — it needs a full-table refresh (≈1.46M rows, modest) or a
+  `GREATEST(milestone columns)` pseudo-watermark; settle in Design decisions. It is
+  **not mirrored today**.
+- **Deferred richer sources (NOT first pass — see Out of scope).** `iseq_run_status`
+  (+ `iseq_run_status_dict`) holds the fine-grained NPG within-sequencing event
+  history (run pending → in progress → analysis → qc → archival …) per `id_run`,
+  reachable from the already-cached `iseq_product_metrics_mirror`
+  (`id_sample_tmp` → `id_run`); and the per-platform run/QC enrichment (`iseq_*`
+  for Illumina, `pac_bio_*`, `oseq_flowcell`) that gst COALESCEs over. These add
+  detail and cover samples missing from the tracking table, but are out of scope for
+  this first pass.
 - **Handler wiring & invariants.** `mlwh/server.go` — one `case` per
   `Registry.Method` (~373–396); `RegisterRoutes` (~79–96). Every query bakes in
   `id_lims = 'SQSCP'`; keep it.
@@ -264,35 +276,41 @@ recency question correctly therefore **requires a cache schema change**: carry
 
 ### Sample progress / pipeline status ("what's happening with my sample?")
 
-- **(P1) Mirror the run-status tables.** Add `iseq_run_status` (synced by the
-  `id_run_status` PK ascending-id mode; do **not** trust the source `iscurrent`)
-  and `iseq_run_status_dict` (wholesale) to the cache in **both** dialects, indexed
-  by `id_run` and `(id_run, date)`. Extend `cache_schema.go`, the schema SQL, and
-  the sync source queries/row structs/inserts in `mlwh/sync.go`.
+First pass uses **`mlwh_reporting.seq_ops_tracking_per_sample`** as the single
+source — the milestone columns, not the per-platform metrics joins (those, and the
+finer `iseq_run_status` history, are deferred; see Out of scope).
+
+- **(P1) Mirror the tracking table.** Add a `seq_ops_tracking_per_sample_mirror` to
+  the cache in **both** dialects, carrying the milestone `datetime` columns
+  (`manifest_created`, `manifest_uploaded`, `labware_received`, `order_made`,
+  `working_dilution`, `library_start`, `library_complete`, `sequencing_run_start`,
+  `sequencing_qc_complete`) plus the lookup/context columns (`id_sample_lims`,
+  `sanger_sample_id`, `sanger_sample_name`, `study_id`, `programme`,
+  `faculty_sponsor`, `library_type`, `platform`, …), indexed by `id_sample_lims`,
+  `sanger_sample_name`, and `study_id`. Extend `cache_schema.go`, the schema SQL,
+  and `mlwh/sync.go`. Because the table has **no change-timestamp**, sync it by
+  full refresh (or a `GREATEST(milestones)` pseudo-watermark) rather than the
+  `last_changed` path — settle the exact strategy in Design decisions.
 - **(P2) Sample progress endpoint** — e.g. `GET /sample/:id/progress` (by Sanger
-  name): the sample's run(s) (via `iseq_product_metrics_mirror`), and per run the
-  status timeline ordered by `date` — each event carrying `description`,
-  `temporal_index`, `entered_at` (= `date`), and the **duration to the next event**
-  (completed phases exact; the open/current phase carries `entered_at` only, for the
-  caller to compute elapsed). Mark the current phase per run (latest `date`) and the
-  overall current phase (the sample's most recent run). Present the **raw ordered
-  event sequence** faithfully — phases can recur (on hold, repeats) and runs can end
-  cancelled / stopped early; do not assume monotonic progress.
-- **(P3) Run-status endpoint** — `GET /run/:id/status` returning a run's timeline;
-  the reusable building block (P2) composes per run.
-- **(P4) Study rollup** — `GET /study/:id/status-breakdown`: counts of the study's
-  samples by current pipeline phase (e.g. N sequencing / M in qc / K archived), as a
-  single small aggregate so "where is my study overall?" needs no per-sample fan-out.
-- **(P5) Bookends & enrichment.** Extend the timeline with the milestones MLWH does
-  hold, each requiring its column/table to be mirrored: submission
-  (`sample.created`/`recorded_at` → add to `sample_mirror`), library/flowcell
-  assignment (`iseq_flowcell.recorded_at`), per-lane milestones + instrument
-  (`iseq_run_lane_metrics.run_pending`/`run_complete`/`qc_complete`/`lane_released`,
-  `instrument_model`), and **data delivered to iRODS** (deliverable R's `created`) as
-  the terminal milestone — so progress and availability join into one journey.
-- **(P6) Freshness on every progress response** — surface the `iseq_run_status`
-  table's `last_run` so "current phase / time so far" is explicitly **as-of last
-  sync** (reuse `mlwh/freshness.go`), distinct from the event `date`s.
+  name): the ordered milestone timeline for the sample, each milestone carrying its
+  name, its `reached_at` datetime, and the **duration to the next reached
+  milestone**; the **current phase** = the span after the latest reached milestone
+  whose successor is still NULL (its duration is open — return the `reached_at` for
+  the caller to compute elapsed). If the sample is **absent from the tracking
+  table**, return an explicit "not tracked" result, not an empty/zero timeline.
+- **(P3) Study rollup** — `GET /study/:id/status-breakdown`: counts of the study's
+  **tracked** samples by current phase (e.g. N in library prep / M sequencing / K
+  qc-complete), as one small aggregate so "where is my study overall?" needs no
+  per-sample fan-out. Report how many of the study's samples are tracked vs total
+  (e.g. 11 of 428), so the partial coverage is visible, not silently hidden.
+- **(P4) Delivery tie-in.** Treat **data added to iRODS** (deliverable R's
+  `created`) as the milestone after `sequencing_qc_complete`, so progress and
+  availability read as one continuous journey (submission → … → qc complete →
+  delivered to iRODS).
+- **(P5) Freshness on every progress response** — surface the tracking table's
+  `last_run` (when `wa` last refreshed it) so "current phase / time so far" is
+  explicitly **as-of last sync** (reuse `mlwh/freshness.go`), distinct from the
+  milestone datetimes.
 
 ## HARD REQUIREMENTS
 
@@ -323,17 +341,19 @@ recency question correctly therefore **requires a cache schema change**: carry
    another study (to exercise scoping). Assert the counts / summary / overview /
    windowed results, cross-check count against list length, and cover
    never-synced / empty-study and the freshness fields. Test both schema dialects'
-   new column/index. For progress, seed `iseq_run_status` rows across multiple
-   phases (including a recurrence and a current phase) and assert the ordered
-   timeline, durations, current phase, and study-rollup counts.
-8. **Current phase is derived, not mirrored.** Compute the current phase as the
-   latest `date` per run; never depend on a synced `iscurrent` flag (it mutates in
-   place with no sync trigger). Present durations from consecutive event `date`s and
-   the raw event sequence faithfully (recurrence, on-hold, cancelled, stopped-early
-   are all valid).
+   new column/index. For progress, seed `seq_ops_tracking_per_sample_mirror` rows
+   with milestones filled to different points (one still in library prep, one
+   sequencing, one qc-complete, and a study sample **absent** from the table) and
+   assert the ordered timeline, per-phase durations, current phase, the "not
+   tracked" result, and the study-rollup counts incl. tracked-of-total.
+8. **Current phase is derived from milestones; coverage is honest.** Current phase
+   = the latest reached milestone (in the fixed canonical order) whose successor is
+   NULL; durations = consecutive milestone deltas. A sample not in the tracking
+   table is reported "not tracked" (never as "no progress"); the study rollup
+   reports tracked-of-total, never silently dropping untracked samples.
 9. **Progress responses stay small and are aggregates where they must be.** A
-   per-sample/run timeline is naturally bounded (tens of events); the study rollup
-   (P4) must be a single grouped query, never N per-sample timelines.
+   per-sample timeline is a fixed handful of milestones; the study rollup (P3) must
+   be a single grouped query, never N per-sample lookups.
 
 ## Design decisions for the spec to settle (HOW, not WHETHER)
 
@@ -365,34 +385,45 @@ Each item below **will be built**; settle only the implementation:
   or opt-in, reconciled with the current bare-slice contract.
 - **Lean/de-dup detail shape (L)** — projection mechanism and the lookup-table
   layout for de-duplicated nested entities.
-- **Progress endpoint shapes & names** (`/sample/:id/progress` vs `/status`); how
-  the open/current phase's elapsed time is represented (return `entered_at` for the
-  caller to compute now − entered_at, vs compute against `last_run`); whether to also
-  return per-phase totals alongside the raw event sequence; how to present a sample
-  on multiple runs (all runs vs the latest active run); and which of the (P5)
-  bookends/enrichments to mirror and include now.
+- **Progress endpoint shape & sync strategy** — the endpoint name
+  (`/sample/:id/progress` vs `/status`); the tracking-table sync strategy
+  (full-table refresh vs a `GREATEST(milestone columns)` pseudo-watermark, given no
+  `last_changed`); how the open/current phase's elapsed time is represented (return
+  `reached_at` for the caller to compute now − reached_at, vs compute against
+  `last_run`); how "not tracked" and partial study coverage are represented in the
+  response; the canonical phase names exposed (mapping the milestone columns to
+  phases); and whether the iRODS-delivery milestone (P4) is appended inline.
 
 ## Out of scope
 
 - **Mirroring beyond what these deliverables require.** New mirrored source data is
-  limited to: the iRODS-location `created` **column** (R); the `iseq_run_status` +
-  `iseq_run_status_dict` **tables** (P1); and the (P5) enrichment columns/tables you
-  choose to include (`sample.created`/`recorded_at` on `sample_mirror`,
-  `iseq_flowcell`, `iseq_run_lane_metrics`). Everything else reuses already-mirrored
-  data; do not mirror tables/columns no deliverable here needs.
+  limited to: the iRODS-location `created` **column** (R) and the
+  `mlwh_reporting.seq_ops_tracking_per_sample` **table** (P1). Everything else
+  reuses already-mirrored data; do not mirror tables/columns no deliverable here
+  needs.
 - Authentication / TLS changes (keep the current posture); mutating endpoints.
 - Fuzzy relative-time parsing in the API ("this week"): the API takes explicit
   dates; callers compute the window.
-- **Granular wet-lab / library-construction sub-stage durations** (extraction,
-  normalisation, pooling, etc.). MLWH does not appear to record these as a
-  timestamped per-stage history: it has sample submission (`sample.created`/
-  `recorded_at`), library/flowcell assignment (`iseq_flowcell.recorded_at`), and the
-  full NPG run → analysis → qc → archival timeline (`iseq_run_status`), but not the
-  Sequencescape request-state history. Out of scope unless a source for it is
-  identified (the requester may supply notes); the pipeline timeline covers from
-  submission/flowcell-assignment through sequencing, analysis, qc, archival, and
-  iRODS delivery.
 - The downstream MCP server's tool surface (a separate, dependent spec).
+
+### Explicitly deferred to a later pass (cross-checked against `wtsi-hgi/gst`)
+
+The first-pass progress timeline comes wholly from
+`seq_ops_tracking_per_sample`'s milestone columns. Deferred — do **not** build now:
+
+- **Multi-platform run/QC enrichment.** gst's `COALESCE` over Illumina (`iseq_*`),
+  PacBio (`pac_bio_*`), and ONT (`oseq_flowcell`) to attach RunID / instrument /
+  pipeline / QC-pass. The "unusual sequencing types" complexity; not supported this
+  pass. The milestone timeline already spans all platforms without it.
+- **Fine-grained within-sequencing phase history** via `iseq_run_status` /
+  `iseq_run_status_dict` (run pending → in progress → analysis → qc → archival …).
+  A future enhancement for deeper sequencing-phase detail and for samples missing
+  from the tracking table. (Note its sync nuances when picked up: no `last_changed`,
+  and `iscurrent` mutates in place, so sync by the `id_run_status` PK ascending-id
+  mode and derive "current" from the latest `date` per run.)
+- **Coverage backfill** for samples absent from `seq_ops_tracking_per_sample`:
+  first pass reports them "not tracked" rather than reconstructing a timeline from
+  base tables.
 
 ## Pointers / prior art (in order of authority)
 
@@ -403,12 +434,10 @@ Each item below **will be built**; settle only the implementation:
    + `iseq_product_metrics_mirror.sql` + `sync_state.sql` (the linkage, the
    `last_updated` signal, and where the new creation column/index go);
    `mlwh/sync.go` (~560–592, the `seq_product_irods_locations` source SELECTs to
-   extend with `spi.created`; row struct ~2542, batch insert ~2586; the
-   `seqProductIRODSLocationsIDMode` ascending-id precedent at line 55 to reuse for
-   `iseq_run_status`); `mlwh/cache_schema.go` (the mirrored-table list to extend
-   with `iseq_run_status` + `iseq_run_status_dict`); the source tables
-   `iseq_run_status` / `iseq_run_status_dict` and (for P5 enrichment)
-   `iseq_run_lane_metrics` / `iseq_flowcell`;
+   extend with `spi.created`; row struct ~2542, batch insert ~2586); the source
+   table `mlwh_reporting.seq_ops_tracking_per_sample` (the milestone columns for the
+   progress feature; full-refresh sync, no `last_changed`); `mlwh/cache_schema.go`
+   (the mirrored-table list to extend with the tracking-table mirror);
    `mlwh/registry.go` (entry pattern + recipe); `mlwh/queryer.go`; `mlwh/server.go`;
    `mlwh/types.go` (`Count`, `IRODSPath`, `Sample`, `Lane`, `StudyDetail`,
    `RunDetail`).
@@ -418,3 +447,8 @@ Each item below **will be built**; settle only the implementation:
    `mlwh/hierarchy_test.go` / `mlwh/freshness_test.go`.
 3. **The downstream consumer** (why descriptions matter): the MLWH MCP server turns
    each `Registry` entry into an agent tool and shows the `Description` as its help.
+4. **Prior art for the progress feature**: [`wtsi-hgi/gst`](https://github.com/wtsi-hgi/gst)
+   `db/query.sql` + `db/model.go` — reads `seq_ops_tracking_per_sample`, computes
+   `LibraryTime`/`SequencingTime` from the milestone deltas. Take the milestone
+   model from it; ignore its multi-platform `COALESCE` (deferred) and its HGI
+   faculty-sponsor / 2-year filters (gst-specific, not wanted here).
