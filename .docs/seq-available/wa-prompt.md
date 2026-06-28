@@ -1,4 +1,4 @@
-# Feature: answer sequencing-data availability & recency for a study, cheaply
+# Feature: answer sequencing-data availability, recency & sample progress, cheaply
 
 > This prompt is the feature description for the **`wa` MLWH REST API** (the
 > `wa mlwh serve` command, code under `mlwh/`). It will be moved into the `wa`
@@ -23,10 +23,13 @@ one request, small response**:
   i.e. data **added to iRODS** within a recent window.
 - "Which samples have data / which are still missing it?"
 - "What's in study X?" / "How much data is there?"
+- **"What's happening with my sample?"** — where it is in the sequencing pipeline
+  right now, and how long it has spent in each phase.
 
-Today the API cannot answer any of these without abuse, even though almost all the
-needed facts are already cached. This feature adds the small, indexed aggregate +
-recency + budget-safety surface to close that.
+Today the API cannot answer any of these without abuse. Most needed facts are
+already cached (the sample→run link included); the gaps are the iRODS-creation
+timestamp and the NPG run-status history. This feature adds the small, indexed
+aggregate + recency + pipeline-progress + budget-safety surface to close that.
 
 ## Why this is needed (the motivating incident — read this)
 
@@ -131,6 +134,30 @@ recency question correctly therefore **requires a cache schema change**: carry
   variants. The incremental window stays keyed on `last_changed`; `created` rides
   along (a new row has `created == last_changed`, so it is captured the first time
   it crosses the high-water mark).
+- **The run-status timeline (verified in the source).** `iseq_run_status`
+  (`id_run_status` PK, `id_run`, `date` datetime, `id_run_status_dict`, `iscurrent`)
+  records every NPG lifecycle transition for a run; `iseq_run_status_dict`
+  (`id_run_status_dict`, `description`, `temporal_index`) is the ~29-row phase
+  vocabulary: run pending → run in progress → run complete → run mirrored →
+  analysis pending/in progress → secondary analysis in progress → analysis complete
+  → archival pending/in progress → run archived → qc review pending → qc in
+  progress → qc complete (plus on hold / cancelled / quarantined / stopped early).
+  `temporal_index` gives canonical phase order; chronology comes from `date`. A
+  sample reaches this via the **already-cached** `iseq_product_metrics_mirror`
+  (`id_sample_tmp` → `id_run`). Verified end-to-end: run 52553 (study 7607) →
+  run pending (6h) → in progress (34h) → complete → mirrored → analysis →
+  secondary analysis (6h) → analysis complete → **qc review pending (current)**.
+- **Sync nuance for `iseq_run_status`.** It has **no `last_changed`/`recorded`
+  column**, and recording a new status flips the prior row's `iscurrent` 1→0 **in
+  place**. So incremental sync must key on the `id_run_status` PK (the existing
+  ascending-id mode, cf. `seqProductIRODSLocationsIDMode`, `mlwh/sync.go:55`) and
+  **derive "current" as the latest `date` per `id_run`** rather than trusting a
+  mirrored `iscurrent` (which mutates with no sync trigger). `iseq_run_status_dict`
+  is tiny and effectively static — mirror it wholesale. **Neither table is mirrored
+  today**, nor are `iseq_run_lane_metrics` (per-lane `run_pending`/`run_complete`/
+  `qc_complete`/`lane_released` + `instrument_model`, has `last_changed`) or
+  `iseq_flowcell` (`recorded_at` = library/flowcell assignment); and `sample_mirror`
+  carries only `last_updated`, not `sample.created`/`recorded_at` (submission time).
 - **Handler wiring & invariants.** `mlwh/server.go` — one `case` per
   `Registry.Method` (~373–396); `RegisterRoutes` (~79–96). Every query bakes in
   `id_lims = 'SQSCP'`; keep it.
@@ -235,6 +262,38 @@ recency question correctly therefore **requires a cache schema change**: carry
   Reuse `mlwh/freshness.go`. A recent-window answer is only complete up to
   `last_run`.
 
+### Sample progress / pipeline status ("what's happening with my sample?")
+
+- **(P1) Mirror the run-status tables.** Add `iseq_run_status` (synced by the
+  `id_run_status` PK ascending-id mode; do **not** trust the source `iscurrent`)
+  and `iseq_run_status_dict` (wholesale) to the cache in **both** dialects, indexed
+  by `id_run` and `(id_run, date)`. Extend `cache_schema.go`, the schema SQL, and
+  the sync source queries/row structs/inserts in `mlwh/sync.go`.
+- **(P2) Sample progress endpoint** — e.g. `GET /sample/:id/progress` (by Sanger
+  name): the sample's run(s) (via `iseq_product_metrics_mirror`), and per run the
+  status timeline ordered by `date` — each event carrying `description`,
+  `temporal_index`, `entered_at` (= `date`), and the **duration to the next event**
+  (completed phases exact; the open/current phase carries `entered_at` only, for the
+  caller to compute elapsed). Mark the current phase per run (latest `date`) and the
+  overall current phase (the sample's most recent run). Present the **raw ordered
+  event sequence** faithfully — phases can recur (on hold, repeats) and runs can end
+  cancelled / stopped early; do not assume monotonic progress.
+- **(P3) Run-status endpoint** — `GET /run/:id/status` returning a run's timeline;
+  the reusable building block (P2) composes per run.
+- **(P4) Study rollup** — `GET /study/:id/status-breakdown`: counts of the study's
+  samples by current pipeline phase (e.g. N sequencing / M in qc / K archived), as a
+  single small aggregate so "where is my study overall?" needs no per-sample fan-out.
+- **(P5) Bookends & enrichment.** Extend the timeline with the milestones MLWH does
+  hold, each requiring its column/table to be mirrored: submission
+  (`sample.created`/`recorded_at` → add to `sample_mirror`), library/flowcell
+  assignment (`iseq_flowcell.recorded_at`), per-lane milestones + instrument
+  (`iseq_run_lane_metrics.run_pending`/`run_complete`/`qc_complete`/`lane_released`,
+  `instrument_model`), and **data delivered to iRODS** (deliverable R's `created`) as
+  the terminal milestone — so progress and availability join into one journey.
+- **(P6) Freshness on every progress response** — surface the `iseq_run_status`
+  table's `last_run` so "current phase / time so far" is explicitly **as-of last
+  sync** (reuse `mlwh/freshness.go`), distinct from the event `date`s.
+
 ## HARD REQUIREMENTS
 
 1. **One request, small response** for every count/summary/overview question;
@@ -264,7 +323,17 @@ recency question correctly therefore **requires a cache schema change**: carry
    another study (to exercise scoping). Assert the counts / summary / overview /
    windowed results, cross-check count against list length, and cover
    never-synced / empty-study and the freshness fields. Test both schema dialects'
-   new column/index.
+   new column/index. For progress, seed `iseq_run_status` rows across multiple
+   phases (including a recurrence and a current phase) and assert the ordered
+   timeline, durations, current phase, and study-rollup counts.
+8. **Current phase is derived, not mirrored.** Compute the current phase as the
+   latest `date` per run; never depend on a synced `iscurrent` flag (it mutates in
+   place with no sync trigger). Present durations from consecutive event `date`s and
+   the raw event sequence faithfully (recurrence, on-hold, cancelled, stopped-early
+   are all valid).
+9. **Progress responses stay small and are aggregates where they must be.** A
+   per-sample/run timeline is naturally bounded (tens of events); the study rollup
+   (P4) must be a single grouped query, never N per-sample timelines.
 
 ## Design decisions for the spec to settle (HOW, not WHETHER)
 
@@ -296,15 +365,33 @@ Each item below **will be built**; settle only the implementation:
   or opt-in, reconciled with the current bare-slice contract.
 - **Lean/de-dup detail shape (L)** — projection mechanism and the lookup-table
   layout for de-duplicated nested entities.
+- **Progress endpoint shapes & names** (`/sample/:id/progress` vs `/status`); how
+  the open/current phase's elapsed time is represented (return `entered_at` for the
+  caller to compute now − entered_at, vs compute against `last_run`); whether to also
+  return per-phase totals alongside the raw event sequence; how to present a sample
+  on multiple runs (all runs vs the latest active run); and which of the (P5)
+  bookends/enrichments to mirror and include now.
 
 ## Out of scope
 
-- **New mirrored *tables*.** The only new mirrored source data is the
-  iRODS-location creation-time **column** in deliverable (R) (plus supporting
-  indices); everything else reuses already-mirrored data.
+- **Mirroring beyond what these deliverables require.** New mirrored source data is
+  limited to: the iRODS-location `created` **column** (R); the `iseq_run_status` +
+  `iseq_run_status_dict` **tables** (P1); and the (P5) enrichment columns/tables you
+  choose to include (`sample.created`/`recorded_at` on `sample_mirror`,
+  `iseq_flowcell`, `iseq_run_lane_metrics`). Everything else reuses already-mirrored
+  data; do not mirror tables/columns no deliverable here needs.
 - Authentication / TLS changes (keep the current posture); mutating endpoints.
 - Fuzzy relative-time parsing in the API ("this week"): the API takes explicit
   dates; callers compute the window.
+- **Granular wet-lab / library-construction sub-stage durations** (extraction,
+  normalisation, pooling, etc.). MLWH does not appear to record these as a
+  timestamped per-stage history: it has sample submission (`sample.created`/
+  `recorded_at`), library/flowcell assignment (`iseq_flowcell.recorded_at`), and the
+  full NPG run → analysis → qc → archival timeline (`iseq_run_status`), but not the
+  Sequencescape request-state history. Out of scope unless a source for it is
+  identified (the requester may supply notes); the pipeline timeline covers from
+  submission/flowcell-assignment through sequencing, analysis, qc, archival, and
+  iRODS delivery.
 - The downstream MCP server's tool surface (a separate, dependent spec).
 
 ## Pointers / prior art (in order of authority)
@@ -316,7 +403,12 @@ Each item below **will be built**; settle only the implementation:
    + `iseq_product_metrics_mirror.sql` + `sync_state.sql` (the linkage, the
    `last_updated` signal, and where the new creation column/index go);
    `mlwh/sync.go` (~560–592, the `seq_product_irods_locations` source SELECTs to
-   extend with `spi.created`; row struct ~2542, batch insert ~2586);
+   extend with `spi.created`; row struct ~2542, batch insert ~2586; the
+   `seqProductIRODSLocationsIDMode` ascending-id precedent at line 55 to reuse for
+   `iseq_run_status`); `mlwh/cache_schema.go` (the mirrored-table list to extend
+   with `iseq_run_status` + `iseq_run_status_dict`); the source tables
+   `iseq_run_status` / `iseq_run_status_dict` and (for P5 enrichment)
+   `iseq_run_lane_metrics` / `iseq_flowcell`;
    `mlwh/registry.go` (entry pattern + recipe); `mlwh/queryer.go`; `mlwh/server.go`;
    `mlwh/types.go` (`Count`, `IRODSPath`, `Sample`, `Lane`, `StudyDetail`,
    `RunDetail`).

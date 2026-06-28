@@ -1,4 +1,4 @@
-# Feature: make sequencing-data availability & recency easy to ask via the MCP server
+# Feature: make sequencing-data availability, recency & sample progress easy via the MCP server
 
 ## Summary
 
@@ -9,6 +9,8 @@ most common class of question users ask this server:
   don't", "which are missing data", "how much is there").
 - **"Is there any *new* sequencing data available for study X this week?"** — data
   **added to iRODS** within a recent window.
+- **"What's happening with my sample?"** — where it is in the sequencing pipeline
+  now, and how long it has spent in each phase.
 - "What's in study X?" / "What's on this run?"
 
 Today this server (`mlwh-mcp-server`, specified in [`../mcp/spec.md`](../mcp/spec.md))
@@ -28,8 +30,10 @@ This builds on a companion feature in the `wa` repo, [`wa-prompt.md`](./wa-promp
 that adds the underlying endpoints (study sequencing-availability summary/overview,
 samples-with/without-data counts and lists, sample identity on iRODS rows, a
 mirrored iRODS-creation timestamp with date-windowed "added since" queries, a run
-overview, `/count` counterparts for every list, list sizing metadata, and lean
-detail). **The tools here are thin pass-throughs over those endpoints** and assume
+overview, `/count` counterparts for every list, list sizing metadata, lean detail,
+and **sample/run pipeline-progress endpoints** backed by newly-mirrored NPG
+run-status history). **The tools here are thin pass-throughs over those endpoints**
+and assume
 they exist; the MCP size guard (deliverable G) is the one genuinely new MCP-layer
 behaviour. Tool descriptions and output schemas are sourced from the upstream
 `Registry`/OpenAPI (see Background), so the two specs must agree on wording and
@@ -160,6 +164,23 @@ The recency question depends on presenting the right time (see
   about study X / this run" to the overview tools (A1/A5), never the giant
   `mlwh_study_detail` / `mlwh_run_detail`.
 
+### Sample progress / pipeline status tools
+
+- **(Q1) `mlwh_sample_progress`** — pass a Sanger sample name through to the
+  upstream sample-progress endpoint and return its per-run pipeline timeline: each
+  phase with `description`, `entered_at`, and duration; the current phase; and the
+  overall current phase for the sample's latest run.
+- **(Q2) `mlwh_run_status`** — a run's status timeline (the building block Q1
+  composes).
+- **(Q3) `mlwh_study_status_breakdown`** — counts of a study's samples by current
+  pipeline phase, in one small call (never N per-sample timelines).
+- **(Q4) Honest progress presentation.** Present the **current phase** and, for the
+  open phase, "time in phase so far" computed by the **agent** (which knows "now")
+  from the upstream `entered_at`; show completed-phase durations from upstream;
+  always attach the `mlwh_freshness` caveat for the run-status table (current phase
+  is **as-of last sync**). Render the raw ordered sequence faithfully — phases can
+  recur and runs can end cancelled/stopped-early; do not imply monotonic progress.
+
 ### Guidance
 
 - **(W) Update the `mlwh://workflow` resource** with explicit workflows: (i)
@@ -167,7 +188,10 @@ The recency question depends on presenting the right time (see
   or `mlwh_study_detail`; (ii) **recency** — supply an explicit `since`, read the
   result as "added to iRODS", and **caveat with `mlwh_freshness`** (the answer is
   complete only up to the last sync); (iii) the general **count/summarise → decide
-  → page** recipe naming each large list's count tool. Make the new tools'
+  → page** recipe naming each large list's count tool; (iv) **progress** — route
+  "what's happening with my sample / study" to the progress/breakdown tools, read
+  the current phase as **as-of last sync**, and let the agent compute elapsed time
+  in the open phase from `entered_at`. Make the new tools'
   descriptions unambiguously the right pick for these questions, including the
   definition of "available", the recency semantics, and the study-scoping caveat.
 
@@ -196,6 +220,11 @@ The recency question depends on presenting the right time (see
 7. **Keep the surface coherent.** Update `mlwh://workflow` and the relevant
    `../mcp/spec.md` stories; keep version-surfacing and existing behaviour intact
    except the deliberate (P) default change, which must be documented.
+8. **Correct progress presentation.** Current phase is **as-of last sync** (attach
+   the run-status freshness caveat); elapsed time in the open phase is computed by
+   the agent from `entered_at`, not fabricated; the ordered event sequence is shown
+   faithfully (recurrence, on-hold, cancelled, stopped-early are valid), never
+   forced into monotonic progress. The study breakdown (Q3) is one aggregate call.
 
 ## Design decisions for the spec to settle (HOW, not WHETHER)
 
@@ -211,6 +240,10 @@ Each item below **will be built**; settle only the implementation:
 - **How "added to iRODS" is worded** in tool descriptions, and how the freshness
   caveat is presented (a field on each response vs guidance to call
   `mlwh_freshness`) — matching the upstream semantics.
+- **Progress tool shapes** — names (`mlwh_sample_progress` vs `..._status`); whether
+  a multi-run sample shows all runs or just the latest active run; and how the open
+  phase's elapsed time and the freshness caveat are surfaced — matching the upstream
+  progress endpoints.
 
 ## Out of scope
 
