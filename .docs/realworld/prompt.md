@@ -388,11 +388,99 @@ Each item below **will be built**; settle only the implementation:
   upstream `SampleProgress`/`RunStatusTimeline`.
 - **Lean surfacing** — how the upstream `lean` param is exposed on the detail tools.
 
+## Second wave (realworld2): more question shapes to make easy
+
+A further batch of real user questions must also be one cheap call. These build on a
+**second upstream feature** being added in the `wa` repo
+([`~/wa/.docs/realworld2/prompt.md`](../../../wa/.docs/realworld2/prompt.md), **not
+yet built** — the contract is the `wa` code once it lands). Same rules as above: thin
+pass-throughs, one small/bounded response, the freshness/timestamp discipline, the
+size guard (G), bounded paging (P), `/count` tools (N), descriptions sourced from the
+upstream Registry/OpenAPI. Source-schema facts below were verified against the live
+MLWH source.
+
+| Question (study/run/person)                                            | Today                                                            | New tool / behaviour (realworld2)                                                                 |
+| --------------------------------------------------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Q1 "data access groups for study X"                                   | answerable: `data_access_group` is on the `Study` object        | (A10) make a **cheap** study tool surface it; never route to `mlwh_study_detail`                  |
+| Q2 "iRODS path for cram files from run X"                             | **gap**                                                         | (A6) `mlwh_irods_paths_for_run` + a `file_type` filter on the iRODS tools                         |
+| Q3 "list study details, run_id, sample name, supplier_name, accession" | **gap** (multi-call)                                          | (A7) `mlwh_study_manifest` (paginated tabular + count)                                            |
+| Q4 Q3 + iRODS path to the cram files                                  | **gap**                                                         | (A7) `mlwh_study_manifest` with iRODS path + `file_type`                                          |
+| Q5 "study ID for `<name>`" (ambiguous)                               | answerable: `mlwh_search_studies` (+count)                      | ensure results expose `id_study_lims`/`name`/`faculty_sponsor`; workflow note on multiple matches |
+| Q6 "not-sequenced / sequenced / passed manual QC counts"             | **gap** (aggregate; `qc` data exists)                           | (A8) study **QC counts** on the overview/breakdown tool                                           |
+| Q7 "studies for `<person>`" / "my studies"                          | partial: `faculty_sponsor` already matched by `mlwh_search_studies` | (A9) `mlwh_studies_for_person` (faculty_sponsor) + a `study_users`/login tool, with routing    |
+
+### New MCP deliverables
+
+- **(A6) iRODS by file type + run-scoped iRODS.** A `mlwh_irods_paths_for_run`
+  (+ `mlwh_count_irods_paths_for_run`) wrapping the new `/run/:id/irods`, and a
+  `file_type` param (e.g. `cram`) on `mlwh_irods_paths_for_{study,sample,run}`.
+  Upstream "cram" is a filename-suffix match and run-scope is a product→run join —
+  pass through; surface the run on rows where upstream provides it.
+- **(A7) Study manifest.** `mlwh_study_manifest` wrapping the new paginated study
+  manifest: per-(sample, run/product) rows with sample `name`, `supplier_name`,
+  `accession_number`, `sanger_sample_id`, `id_run`, and — with a `file_type`/with-iRODS
+  switch — the iRODS cram path; study-level metadata returned once. This is the most
+  budget-sensitive new tool: bounded-by-default, paged with sizing hints, a
+  `mlwh_count_*` counterpart, and **fully under the size guard (G)**.
+- **(A8) Study QC counts.** Surface the new study-level QC dimension —
+  **received** (`samples_total`), **sequenced** (has product-metrics),
+  **not-sequenced** (registered), and **qc_pass / qc_fail / qc_pending** — on the
+  study overview/status-breakdown tool, in one cheap call (no per-sample fan-out),
+  consistent with `mlwh_sample_progress`'s `qc`.
+- **(A9) People → studies, with routing.** `mlwh_studies_for_person` for the named
+  **faculty sponsor** (already matched by `mlwh_search_studies`'s `faculty_sponsor`
+  substring — give it a clear dedicated tool/description), and a separate
+  **`study_users`**-backed tool for "my studies" / a login (role-based membership,
+  **role-filtered** to `owner`/`manager` by default, excluding the noisy `follower`).
+  Both must match **case-insensitively across `name`, `login`, and `email`** so an
+  email/login query and a name query both work.
+- **(A9b) Person resolution (name → stored identifier).** A `mlwh_resolve_person` /
+  `mlwh_find_people` tool wrapping the upstream people-directory endpoint: given a
+  partial term it returns the **distinct candidate people** with their canonical
+  stored forms (distinct `faculty_sponsor` values; `study_users`
+  `name`/`login`/`email`/`role`) and a study count each — so the agent can translate
+  a spoken/partial name into the exact stored value and disambiguate, instead of
+  guessing a spelling and dead-ending.
+- **(A10) Cheap study metadata.** Ensure `data_access_group`, `faculty_sponsor`,
+  `name`, `accession_number` come from a cheap study tool (`mlwh_resolve_study` / the
+  overview), never the giant `mlwh_study_detail` (Q1).
+
+### Routing & semantics the descriptions + `mlwh://workflow` must encode
+
+- **`faculty_sponsor` (named PI/sponsor) ≠ `study_users` (role membership).** "Studies
+  for `<person>`" → faculty_sponsor (e.g. ~91 studies for "Carl Anderson"); "my
+  studies"/a login → `study_users`, role-filtered (`owner`/`manager`; `follower` is
+  noise). They return different sets — never conflate; route by name-vs-login.
+- **Translate the user's name to what's stored; never dead-end on a narrow search.**
+  People are stored as free-text full names (`faculty_sponsor`) and as
+  `name`/`login`/`email` (`study_users`) — a user won't type these exactly. The
+  workflow guidance must tell the agent to: match across name/login/email; if a
+  partial/first-name/initials query returns nothing or is ambiguous, **resolve via
+  `mlwh_resolve_person` and pick/confirm a candidate** rather than reporting "no
+  results"; and for **"my studies"**, prefer the user's **email/login** — which the
+  host/session usually knows (the MCP session carries the user's email) — over
+  guessing their name spelling. A zero result from one spelling is not evidence of
+  zero studies.
+- **"cram" is a file-type (filename-suffix) filter** (no file-type column upstream);
+  run-scoped iRODS exists upstream via the product→run join.
+- **QC:** "sequenced" = has product-metrics; "passed manual QC" = `qc` pass;
+  "not got sequence data" = not sequenced (registered). One call, no per-sample
+  fan-out.
+- The manifest and run-iRODS **lists are large** → count/summarise → page; the size
+  guard (G) applies; carry the freshness caveat via `mlwh_freshness` (these
+  list/manifest responses do not carry `cache_synced_at`).
+
+These reuse the same MCP-layer machinery specified above (size guard G, bounded
+paging P, count tools N, `mapToolError`, upstream-sourced descriptions, the hermetic
+harness). When the realworld2 endpoints land, re-verify exact paths/field names
+against the `wa` code before building, exactly as for the first wave.
+
 ## Out of scope
 
-- The upstream API work itself — it is **already implemented and merged** in `~/wa`
-  (API 1.6.0); this spec wraps those endpoints and treats the `wa` code as the
-  contract.
+- The upstream API work itself — the first wave is **already implemented and merged**
+  in `~/wa` (API 1.6.0); the second wave (realworld2) is **being built** in `~/wa`
+  per [`~/wa/.docs/realworld2/prompt.md`](../../../wa/.docs/realworld2/prompt.md).
+  This spec wraps those endpoints and treats the `wa` code as the contract.
 - Any `internal/core` change beyond the generic size guard (G) and what
   registering new MLWH tools requires.
 - HTTP transport / web UI work (separate features); client-side caching or quotas.
