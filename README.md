@@ -3,8 +3,10 @@
 A [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server, written
 in Go, that lets LLM agents (Claude Code, Codex, and later a web UI server-side
 agent) query the Multi-LIMS Warehouse (MLWH) read API in natural, tool-driven
-ways: search and count samples and studies, resolve identifiers, drill into
-detail and fan-outs, and report data freshness.
+ways: search and count samples and studies, resolve identifiers, answer cheap
+overview/status/availability questions, page through manifests and iRODS paths,
+route people and sponsor questions, drill into detail and fan-outs, and report
+data freshness.
 
 The MLWH read API is provided by the separate upstream
 [`wa`](https://github.com/wtsi-hgi/wa) project (its `wa mlwh serve` command). This
@@ -14,11 +16,11 @@ ergonomic and correctly usable by an LLM, not re-implementing them: it imports
 registry, and OpenAPI document directly, so there is no type drift and the server
 is compile-time-locked to the upstream API version (currently MLWH API 1.7.0).
 
-This first round ships the MLWH provider over the **stdio** transport only, so it
-runs as a local subprocess launched per user by an agent CLI. Streamable HTTP —
-which would let an admin run one shared instance everyone connects to over the
-network — is deliberately deferred, but the transport is a clean seam so it can be
-added later without any core change.
+The MLWH provider currently ships over the **stdio** transport only, so it runs
+as a local subprocess launched per user by an agent CLI. Streamable HTTP, which
+would let an admin run one shared instance everyone connects to over the network,
+is deliberately deferred, but the transport is a clean seam so it can be added
+later without any core change.
 
 ## Requirements
 
@@ -144,34 +146,157 @@ MLWH_BASE_URL = "http://mlwh.internal:8080"
 Use the full path to `mlwh-mcp-server` if it is not on your `PATH`. Codex
 discovers the tools on startup and calls them as needed during a session.
 
+## What can I ask?
+
+Once the MCP server is connected, talk to your agent normally. Include the sample
+name, study id, run id, library id, person, or file type you care about; the
+agent should choose the cheap overview/count/status tools first and only page
+through lists when rows are actually needed.
+
+Prompt cookbook:
+
+- **Find samples or studies**
+  - "Find samples matching `mus`."
+  - "How many samples match `mus`?"
+  - "What study id matches the name `cancer`?"
+  - "List study candidates for `rare disease`, enough to disambiguate the id."
+- **Resolve or classify an identifier**
+  - "What kind of MLWH identifier is `5901`?"
+  - "Resolve sample `S1` to its canonical identifiers."
+  - "Resolve run `52553`."
+  - "Expand this study id into related search values."
+- **Exact sample lookup**
+  - "Find samples where accession is exactly `ERS123`."
+  - "Count samples with supplier name exactly `Bob`."
+  - "Find samples for library type `WGS`."
+- **Study overview and metadata**
+  - "Give me a quick overview of study `S1`."
+  - "What data access group is study `S1` in?"
+  - "How many samples in `S1` have data, have no data, or were sequenced but have no data?"
+- **Availability and recency**
+  - "How many samples in study `S1` have data added since `2026-06-21T00:00:00Z`?"
+  - "List the first page of samples in `S1` with data between these two timestamps."
+  - "Which samples in `S1` still have no sequencing data?"
+  - "How much new data was added to iRODS for `S1` in the last 7 days?"
+- **QC and status**
+  - "Break down study `S1` by received, sequenced, not sequenced, and manual QC state."
+  - "How many samples in `S1` passed, failed, or are pending QC?"
+  - "Show status by platform, preserving ONT and not-tracked values."
+- **Sample and run progress**
+  - "What is happening with sample `S1` right now?"
+  - "Show sample `ONT1` progress, including not-tracked QC if present."
+  - "Summarize run `52553`."
+  - "Show the status timeline for run `52553`."
+- **iRODS paths and CRAMs**
+  - "How many CRAM paths are there for sample `S1`?"
+  - "List CRAM iRODS paths for study `S1`, first page only."
+  - "Show iRODS paths for run `52553` with `file_type=cram`."
+  - "Are there any VCF paths for `S1`?"
+- **Study manifest**
+  - "Build a manifest for study `S1`."
+  - "Build a study `S1` manifest with an iRODS CRAM column."
+  - "How many manifest rows would study `S1` return?"
+- **People, sponsors, and users**
+  - "Which studies have faculty sponsor `Carl`?"
+  - "How many studies is `cwa` associated with as a user?"
+  - "List studies where `cwa` has role `Follower`."
+  - "Resolve the person name `Carl` across sponsors and study users."
+- **Detail and fan-outs**
+  - "Show sample detail for `S1`."
+  - "Show lean study detail for `S1`, page size 100."
+  - "List runs for study `S1`."
+  - "List libraries for study `S1`."
+  - "How many lanes does sample `S1` have?"
+  - "How many samples are linked to library id `LIB123`?"
+- **Freshness and caveats**
+  - "How fresh is the MLWH cache?"
+  - "Before answering, check whether the cache has synced recently."
+  - "This list has no `cache_synced_at`; use `mlwh_freshness` for the as-of caveat."
+- **Large answers and paging**
+  - "Count first, then list the first 100 rows."
+  - "Continue from `next_offset=100`."
+  - "Use a smaller page if the result is too large."
+- **Advanced registry access**
+  - "Call the MLWH Registry method `AllStudies` with `limit=100` and `offset=0`."
+  - "Use the generic endpoint caller for a Registry method that does not have a curated tool yet."
+
+Notes for interpreting answers:
+
+- Paged list and paged detail tools default to `limit=100`, reject `limit > 1000`,
+  and return `total` plus `next_offset`; `next_offset=-1` means there is no next
+  page.
+- Count responses and bare list responses do not carry `cache_synced_at`; ask the
+  agent to use `mlwh_freshness` when you need a cache as-of caveat.
+- Responses that include `cache_synced_at` should use that field as the as-of
+  timestamp. Data "added to iRODS" means the upstream iRODS `created` timestamp,
+  not sync `last_run` or generic row-change fields.
+- If a response would be too large, the server returns a structured
+  `tool_result_too_large` error with guidance instead of flooding the chat.
+
 ## What the server exposes
 
 A curated, LLM-ergonomic tool surface generated from the MLWH endpoint registry
 (so it stays in lockstep with the upstream API), grouped by task:
 
-- **Search & count** — `mlwh_search_samples`, `mlwh_count_samples`,
-  `mlwh_search_studies`, `mlwh_count_studies_search`, `mlwh_count_studies`. The
-  descriptions carry the semantics an agent needs: sample search is a word-prefix
-  match, study search a substring match, both with a 3-character minimum; counts
-  are exact up to a floor of 10000.
-- **Resolve, find & expand** — `mlwh_classify_identifier`, seven `mlwh_resolve_*`
-  tools, the unified `mlwh_find_samples` (a `field` enum over the exact-match
-  endpoints), and the `mlwh_expand_*` tools.
-- **Detail & fan-out** — `mlwh_sample_detail` / `_study_detail` / `_run_detail` /
-  `_library_detail`, plus list/fan-out tools (`mlwh_all_studies`,
-  `mlwh_samples_for_study`, `mlwh_irods_paths_for_sample`, …). Paged list and
-  detail tools default to `limit=100`, reject `limit > 1000`, and return `total`
-  plus `next_offset` for paging.
-- **Freshness** — `mlwh_freshness` reports per-table sync state so answers can be
+- **Search and study lookup**: `mlwh_search_samples`, `mlwh_count_samples`,
+  `mlwh_search_studies`, `mlwh_count_studies_search`, `mlwh_count_studies`.
+  Sample search is a case-insensitive word-prefix match; study search is a
+  case-insensitive substring match across `name`, `study_title`, `programme`,
+  and `faculty_sponsor`.
+- **Resolve, classify, exact find, and expand**: `mlwh_classify_identifier`,
+  `mlwh_resolve_sample`, `mlwh_resolve_sample_name`, `mlwh_resolve_study`,
+  `mlwh_resolve_run`, `mlwh_resolve_library`,
+  `mlwh_resolve_library_identifier`, `mlwh_find_samples`,
+  `mlwh_count_find_samples`, `mlwh_expand_identifier`,
+  `mlwh_expand_search_values`, `mlwh_expand_sample_search_values`.
+- **Overview, status, and progress**: `mlwh_study_overview`,
+  `mlwh_study_status_breakdown`, `mlwh_run_overview`, `mlwh_run_status`,
+  `mlwh_sample_progress`. These are the preferred tools for common availability,
+  QC, run, and "what is happening?" questions.
+- **Availability, iRODS, and manifests**:
+  `mlwh_count_samples_with_data_for_study`,
+  `mlwh_samples_with_data_for_study`,
+  `mlwh_samples_without_data_for_study`,
+  `mlwh_irods_paths_for_sample`, `mlwh_count_irods_paths_for_sample`,
+  `mlwh_irods_paths_for_study`, `mlwh_count_irods_paths_for_study`,
+  `mlwh_irods_paths_for_run`, `mlwh_count_irods_paths_for_run`,
+  `mlwh_study_manifest`, `mlwh_count_study_manifest`. iRODS tools support
+  upstream `file_type` suffix filtering, such as `cram`.
+- **Detail, fan-out, and count counterparts**: `mlwh_sample_detail`,
+  `mlwh_study_detail`, `mlwh_run_detail`, `mlwh_library_detail`,
+  `mlwh_all_studies`, `mlwh_samples_for_study`, `mlwh_count_samples_for_study`,
+  `mlwh_samples_for_run`, `mlwh_count_samples_for_run`,
+  `mlwh_libraries_for_study`, `mlwh_count_libraries_for_study`,
+  `mlwh_runs_for_study`, `mlwh_count_runs_for_study`,
+  `mlwh_lanes_for_sample`, `mlwh_count_lanes_for_sample`,
+  `mlwh_studies_for_sample`, `mlwh_count_samples_for_library`,
+  `mlwh_count_samples_for_library_id`,
+  `mlwh_count_samples_for_library_lims_id`,
+  `mlwh_count_samples_for_library_type`.
+- **People, sponsors, and study users**:
+  `mlwh_studies_for_faculty_sponsor`,
+  `mlwh_count_studies_for_faculty_sponsor`, `mlwh_studies_for_user`,
+  `mlwh_count_studies_for_user`, `mlwh_resolve_person`,
+  `mlwh_count_resolve_person`. Sponsor tools read `faculty_sponsor`; user tools
+  read `study_users` membership and optionally filter by role.
+- **Freshness**: `mlwh_freshness` reports per-table sync state so answers can be
   caveated; it succeeds even against a never-synced cache.
-- **Escape hatch** — `mlwh_call_endpoint` dispatches any registry method by name,
-  so no endpoint is unreachable even if it lacks a curated tool.
+- **Escape hatch**: `mlwh_call_endpoint` dispatches any upstream Registry method
+  by name. If the upstream response includes pagination headers, the tool returns
+  `result`, `total`, and `next_offset`; otherwise it returns the decoded result
+  directly.
 
-Plus two MCP resources: `mlwh://workflow` (a Markdown endpoint catalogue with
-guidance on composing calls — resolve → detail → expand) and `mcp-server://version`
-(this server's version and the targeted MLWH API version). Upstream errors are
-mapped to clear, actionable tool errors (not found; ambiguous — disambiguate;
-unsupported identifier; cache not synced yet; …).
+The server also publishes two MCP resources:
+
+- `mlwh://workflow`: cheap-first guidance plus the always-current
+  Registry-derived endpoint catalogue.
+- `mcp-server://version`: this server's version and the targeted MLWH API
+  version.
+
+Upstream errors are mapped to clear, actionable tool errors: bad input, not
+found, ambiguous identifiers, unsupported identifiers, never-synced cache state,
+and impaired upstream/cache failures all keep the upstream context and add a
+caller-oriented next step.
 
 ## Development
 
