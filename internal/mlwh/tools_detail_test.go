@@ -193,6 +193,83 @@ func TestDetailTools(t *testing.T) {
 			So(strings.ToLower(firstTextContent(res)), ShouldContainSubstring, "synced")
 		})
 
+		Convey("E1.1: mlwh_study_detail sends default pagination with lean=true and returns flattened page metadata", func() {
+			stub.respondJSONWithHeaders("/study/S1/detail", 200, studyDetailS1Lean(), http.Header{
+				"X-Total-Count": {"200"},
+				"X-Next-Offset": {"100"},
+			})
+
+			res := callTool(t, cs, "mlwh_study_detail", map[string]any{
+				"study_lims_id": "S1",
+				"lean":          true,
+			})
+
+			obj := structuredObject(res)
+			study, ok := obj["study"].(map[string]any)
+			So(ok, ShouldBeTrue)
+			So(study["id_study_lims"], ShouldEqual, "S1")
+
+			sampleIDs, ok := obj["sample_ids"].([]any)
+			So(ok, ShouldBeTrue)
+			So(sampleIDs, ShouldResemble, []any{"SAM1", "SAM2"})
+			So(obj["lean"], ShouldBeTrue)
+			So(obj["total"], ShouldEqual, 200)
+			So(obj["next_offset"], ShouldEqual, 100)
+
+			req, ok := stub.lastRequest()
+			So(ok, ShouldBeTrue)
+			So(req.Path, ShouldEqual, "/study/S1/detail")
+			So(req.Query.Get("limit"), ShouldEqual, "100")
+			So(req.Query.Get("offset"), ShouldEqual, "0")
+			So(req.Query.Get("lean"), ShouldEqual, "true")
+		})
+
+		Convey("E1.2: mlwh_run_detail passes explicit pagination and returns flattened page metadata", func() {
+			stub.respondJSONWithHeaders("/run/52553/detail", 200, runDetail52553(), http.Header{
+				"X-Total-Count": {"120"},
+				"X-Next-Offset": {"100"},
+			})
+
+			res := callTool(t, cs, "mlwh_run_detail", map[string]any{
+				"id_run": "52553",
+				"limit":  50,
+				"offset": 50,
+			})
+
+			obj := structuredObject(res)
+			run, ok := obj["run"].(map[string]any)
+			So(ok, ShouldBeTrue)
+			So(run["id_run"], ShouldEqual, float64(52553))
+
+			samples, ok := obj["samples"].([]any)
+			So(ok, ShouldBeTrue)
+			So(len(samples), ShouldEqual, 1)
+			So(obj["total"], ShouldEqual, 120)
+			So(obj["next_offset"], ShouldEqual, 100)
+
+			req, ok := stub.lastRequest()
+			So(ok, ShouldBeTrue)
+			So(req.Path, ShouldEqual, "/run/52553/detail")
+			So(req.Query.Get("limit"), ShouldEqual, "50")
+			So(req.Query.Get("offset"), ShouldEqual, "50")
+			So(req.Query.Get("lean"), ShouldEqual, "")
+		})
+
+		Convey("E1.3: mlwh_sample_detail input schema has no lean, limit, or offset properties", func() {
+			tool, ok := toolByName(t, cs, "mlwh_sample_detail")
+			So(ok, ShouldBeTrue)
+
+			schema, ok := tool.InputSchema.(map[string]any)
+			So(ok, ShouldBeTrue)
+			properties, ok := schema["properties"].(map[string]any)
+			So(ok, ShouldBeTrue)
+
+			for _, field := range []string{"lean", "limit", "offset"} {
+				_, found := properties[field]
+				So(found, ShouldBeFalse)
+			}
+		})
+
 		Convey("C1.4: the four detail tools are registered with the listed names", func() {
 			for _, name := range []string{
 				"mlwh_sample_detail",
@@ -457,4 +534,26 @@ func TestFanOutToolDescriptions(t *testing.T) {
 			}
 		})
 	})
+}
+
+// studyDetailS1Lean is the lean StudyDetail body returned by wa for
+// /study/S1/detail?limit=100&offset=0&lean=true; the page metadata is supplied
+// by response headers and flattened by the MCP layer.
+func studyDetailS1Lean() wa.StudyDetail {
+	return wa.StudyDetail{
+		Study:      wa.Study{IDStudyLims: "S1", Name: "Study One"},
+		SampleIDs:  []string{"SAM1", "SAM2"},
+		LibraryIDs: []string{"LIB1"},
+		Lean:       true,
+	}
+}
+
+// runDetail52553 is a small RunDetail body used by E1.2 to prove the run detail
+// tool preserves explicit limit/offset and flattens header metadata.
+func runDetail52553() wa.RunDetail {
+	return wa.RunDetail{
+		Run:     wa.Run{IDRun: 52553},
+		Samples: []wa.Sample{{IDSampleTmp: 1, Name: "SAM1"}},
+		Studies: []wa.Study{{IDStudyLims: "S1", Name: "Study One"}},
+	}
 }

@@ -141,10 +141,19 @@ func (p *provider) registerDetailTools(r core.Registrar) error {
 func (p *provider) registerDetailGroup(r core.Registrar) error {
 	schemas := map[string]map[string]any{}
 
-	for _, component := range []string{"SampleDetail", "StudyDetail", "RunDetail", "LibraryDetail"} {
+	for _, component := range []string{"SampleDetail", "LibraryDetail"} {
 		schema, err := outputSchemaFor(component)
 		if err != nil {
 			return fmt.Errorf("mlwh: build %s output schema: %w", component, err)
+		}
+
+		schemas[component] = schema
+	}
+
+	for _, component := range []string{"StudyDetail", "RunDetail"} {
+		schema, err := outputSchemaForPagedObject(component)
+		if err != nil {
+			return fmt.Errorf("mlwh: build paged %s output schema: %w", component, err)
 		}
 
 		schemas[component] = schema
@@ -199,16 +208,52 @@ func (p *provider) addSampleDetail(r core.Registrar, outputSchema map[string]any
 	return nil
 }
 
-// studyIDInput is the input for the study-keyed tools that take only a LIMS
-// study id and no pagination (mlwh_study_detail,
-// mlwh_count_samples_for_study, mlwh_count_runs_for_study,
-// mlwh_count_libraries_for_study).
+// pagedStudyDetailResult flattens wa.PagedStudyDetail for MCP: the upstream
+// StudyDetail fields stay at top level and the page metadata is added beside
+// them, with no study_detail wrapper.
+type pagedStudyDetailResult struct {
+	wa.StudyDetail
+	Total      int `json:"total"`
+	NextOffset int `json:"next_offset"`
+}
+
+// studyDetailInput is the input for mlwh_study_detail: a LIMS study id,
+// bounded page controls for nested rows, and optional lean output.
+type studyDetailInput struct {
+	StudyLimsID string `json:"study_lims_id" jsonschema:"the LIMS identifier of the study to look up"`
+	Limit       int    `json:"limit,omitempty" jsonschema:"maximum nested detail rows to return; defaults to 100, maximum 1000 (a larger limit is rejected, not clamped)"`
+	Offset      int    `json:"offset,omitempty" jsonschema:"number of leading nested detail rows to skip before returning results; defaults to 0"`
+	Lean        bool   `json:"lean,omitempty" jsonschema:"return the smaller lean detail shape with flat ids instead of heavy nested objects"`
+}
+
+// pagedRunDetailResult flattens wa.PagedRunDetail for MCP: the upstream
+// RunDetail fields stay at top level and the page metadata is added beside
+// them, with no run_detail wrapper.
+type pagedRunDetailResult struct {
+	wa.RunDetail
+	Total      int `json:"total"`
+	NextOffset int `json:"next_offset"`
+}
+
+// runDetailInput is the input for mlwh_run_detail: a run id, bounded page
+// controls for nested rows, and optional lean output.
+type runDetailInput struct {
+	IDRun  string `json:"id_run" jsonschema:"the sequencing run identifier to look up"`
+	Limit  int    `json:"limit,omitempty" jsonschema:"maximum nested detail rows to return; defaults to 100, maximum 1000 (a larger limit is rejected, not clamped)"`
+	Offset int    `json:"offset,omitempty" jsonschema:"number of leading nested detail rows to skip before returning results; defaults to 0"`
+	Lean   bool   `json:"lean,omitempty" jsonschema:"return the smaller lean detail shape with flat ids instead of heavy nested objects"`
+}
+
+// studyIDInput is the input for study-keyed count tools that take only a LIMS
+// study id and no pagination (mlwh_count_samples_for_study,
+// mlwh_count_runs_for_study, mlwh_count_libraries_for_study).
 type studyIDInput struct {
 	StudyLimsID string `json:"study_lims_id" jsonschema:"the LIMS identifier of the study to look up"`
 }
 
-// addStudyDetail registers mlwh_study_detail (Story C1): it returns the given
-// study with the detail of each of its libraries and their samples.
+// addStudyDetail registers mlwh_study_detail (Story C1/E1): it returns the
+// given study with a bounded page of nested detail rows, plus header-derived
+// total and next_offset metadata.
 func (p *provider) addStudyDetail(r core.Registrar, outputSchema map[string]any) error {
 	description, err := resolveDescription("StudyDetail")
 	if err != nil {
@@ -219,28 +264,42 @@ func (p *provider) addStudyDetail(r core.Registrar, outputSchema map[string]any)
 
 	mcp.AddTool(r.Server(), &mcp.Tool{
 		Name:         "mlwh_study_detail",
-		Description:  description,
+		Description:  description + pagedFanOutPaginationNote,
 		OutputSchema: outputSchema,
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in studyIDInput) (*mcp.CallToolResult, wa.StudyDetail, error) {
-		detail, err := client.StudyDetail(ctx, in.StudyLimsID)
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in studyDetailInput) (*mcp.CallToolResult, pagedStudyDetailResult, error) {
+		limit, offset, err := boundedPagination(in.Limit, in.Offset)
 		if err != nil {
-			return core.ToolError[wa.StudyDetail](mapToolError(err))
+			return core.ToolError[pagedStudyDetailResult](err)
 		}
 
-		return nil, detail, nil
+		page, err := client.StudyDetailWithOptions(ctx, in.StudyLimsID, wa.DetailOptions{
+			Limit:  limit,
+			Offset: offset,
+			Lean:   in.Lean,
+		})
+		if err != nil {
+			return core.ToolError[pagedStudyDetailResult](mapToolError(err))
+		}
+
+		return nil, pagedStudyDetailResult{
+			StudyDetail: page.StudyDetail,
+			Total:       page.Total,
+			NextOffset:  page.NextOffset,
+		}, nil
 	})
 
 	return nil
 }
 
-// runIDInput is the input for the run-keyed tools that take only a run id and no
-// pagination (mlwh_run_detail, mlwh_count_samples_for_run).
+// runIDInput is the input for run-keyed count tools that take only a run id and
+// no pagination (mlwh_count_samples_for_run).
 type runIDInput struct {
 	IDRun string `json:"id_run" jsonschema:"the sequencing run identifier to look up"`
 }
 
-// addRunDetail registers mlwh_run_detail (Story C1): it returns the given run
-// with its related samples, studies, and per-study detail.
+// addRunDetail registers mlwh_run_detail (Story C1/E1): it returns the given
+// run with a bounded page of related detail rows, plus header-derived total and
+// next_offset metadata.
 func (p *provider) addRunDetail(r core.Registrar, outputSchema map[string]any) error {
 	description, err := resolveDescription("RunDetail")
 	if err != nil {
@@ -251,15 +310,28 @@ func (p *provider) addRunDetail(r core.Registrar, outputSchema map[string]any) e
 
 	mcp.AddTool(r.Server(), &mcp.Tool{
 		Name:         "mlwh_run_detail",
-		Description:  description,
+		Description:  description + pagedFanOutPaginationNote,
 		OutputSchema: outputSchema,
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in runIDInput) (*mcp.CallToolResult, wa.RunDetail, error) {
-		detail, err := client.RunDetail(ctx, in.IDRun)
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in runDetailInput) (*mcp.CallToolResult, pagedRunDetailResult, error) {
+		limit, offset, err := boundedPagination(in.Limit, in.Offset)
 		if err != nil {
-			return core.ToolError[wa.RunDetail](mapToolError(err))
+			return core.ToolError[pagedRunDetailResult](err)
 		}
 
-		return nil, detail, nil
+		page, err := client.RunDetailWithOptions(ctx, in.IDRun, wa.DetailOptions{
+			Limit:  limit,
+			Offset: offset,
+			Lean:   in.Lean,
+		})
+		if err != nil {
+			return core.ToolError[pagedRunDetailResult](mapToolError(err))
+		}
+
+		return nil, pagedRunDetailResult{
+			RunDetail:  page.RunDetail,
+			Total:      page.Total,
+			NextOffset: page.NextOffset,
+		}, nil
 	})
 
 	return nil

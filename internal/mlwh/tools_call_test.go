@@ -37,18 +37,19 @@ import (
 	. "github.com/smartystreets/goconvey/convey"
 )
 
-// TestCallTool covers Story E1: the generic mlwh_call_endpoint escape-hatch tool.
+// TestCallTool covers Story E2: the generic mlwh_call_endpoint escape-hatch tool.
 // Every assertion drives the tool over the real in-memory MCP client against the
-// hermetic stub, so dispatch through (*RemoteClient).Call, the untyped passthrough
-// output, the QueryParams->url.Values conversion, and the unknown-method and
-// path-param arity errors surfaced by Call are all exercised end-to-end.
+// hermetic stub, so dispatch through (*RemoteClient).CallWithHeaders, the
+// untyped passthrough output, the QueryParams->url.Values conversion, and the
+// unknown-method and path-param arity errors surfaced by CallWithHeaders are all
+// exercised end-to-end.
 func TestCallTool(t *testing.T) {
 	Convey("Given the MLWH server (stub-backed) with mlwh_call_endpoint", t, func() {
 		stub := newStubMLWH(t)
 		cs, cleanup := runMLWHServerWithClient(t, stub)
 		defer cleanup()
 
-		Convey("E1.1: ResolveStudy with path_params [5901] returns the decoded Match in StructuredContent", func() {
+		Convey("E2.2: ResolveStudy with no pagination headers returns the decoded Match without a wrapper", func() {
 			stub.respondJSON("/resolve/study/5901", 200, studyMatch())
 
 			res := callTool(t, cs, "mlwh_call_endpoint", map[string]any{
@@ -69,19 +70,22 @@ func TestCallTool(t *testing.T) {
 			So(req.Path, ShouldEqual, "/resolve/study/5901")
 		})
 
-		Convey("E1.2: AllStudies with query_params limit=2/offset=0 sends them and holds the two studies", func() {
-			stub.respondJSON("/studies", 200, threeStudies()[:2])
+		Convey("E2.1: AllStudies with pagination headers wraps the bare array with total and next_offset", func() {
+			stub.respondJSONWithHeaders("/studies", 200, threeStudies()[:2], map[string][]string{
+				"X-Total-Count": {"250"},
+				"X-Next-Offset": {"100"},
+			})
 
 			res := callTool(t, cs, "mlwh_call_endpoint", map[string]any{
 				"method":       "AllStudies",
 				"query_params": map[string]any{"limit": "2", "offset": "0"},
 			})
 
-			So(res.IsError, ShouldBeFalse)
+			obj := structuredObject(res)
+			So(obj["total"], ShouldEqual, 250)
+			So(obj["next_offset"], ShouldEqual, 100)
 
-			// AllStudies decodes to *[]Study, so the untyped passthrough output is a
-			// JSON array; the client surfaces it as a bare []any, not an object.
-			studies, ok := res.StructuredContent.([]any)
+			studies, ok := obj["result"].([]any)
 			So(ok, ShouldBeTrue)
 			So(len(studies), ShouldEqual, 2)
 
@@ -92,7 +96,7 @@ func TestCallTool(t *testing.T) {
 			So(req.Query.Get("offset"), ShouldEqual, "0")
 		})
 
-		Convey("E1.3: an unknown method is a tool error whose message names the method", func() {
+		Convey("E2.3: an unknown method is a mapped tool error whose message names the method", func() {
 			res := callTool(t, cs, "mlwh_call_endpoint", map[string]any{"method": "NoSuchMethod"})
 
 			So(res.IsError, ShouldBeTrue)
@@ -111,17 +115,35 @@ func TestCallTool(t *testing.T) {
 			So(stub.requestCount(), ShouldEqual, 0)
 		})
 
+		Convey("E2.4: RunStatus without cache_synced_at is not given synthesized freshness", func() {
+			stub.respondJSON("/run/52553/status", 200, runStatus52553())
+
+			res := callTool(t, cs, "mlwh_call_endpoint", map[string]any{
+				"method":      "RunStatus",
+				"path_params": []any{"52553"},
+			})
+
+			obj := structuredObject(res)
+			So(obj["id_run"], ShouldEqual, 52553)
+			So(obj["current"], ShouldEqual, "qc complete")
+
+			_, hasCacheSyncedAt := obj["cache_synced_at"]
+			So(hasCacheSyncedAt, ShouldBeFalse)
+		})
+
 		Convey("E1.5: the registered tool has NO output schema (Out is any)", func() {
 			tool, ok := toolByName(t, cs, "mlwh_call_endpoint")
 			So(ok, ShouldBeTrue)
 			So(tool.OutputSchema, ShouldBeNil)
 		})
 
-		Convey("E1: the description points at the workflow resource and flags the escape hatch", func() {
+		Convey("E2.4: the description points agents to mlwh_freshness for responses without cache_synced_at", func() {
 			tool, ok := toolByName(t, cs, "mlwh_call_endpoint")
 			So(ok, ShouldBeTrue)
 			So(tool.Description, ShouldContainSubstring, "mlwh://workflow")
 			So(strings.ToLower(tool.Description), ShouldContainSubstring, "escape hatch")
+			So(tool.Description, ShouldContainSubstring, "no cache_synced_at")
+			So(tool.Description, ShouldContainSubstring, "mlwh_freshness")
 		})
 	})
 }

@@ -20,8 +20,8 @@ Update `mlwh_study_detail` and `mlwh_run_detail` in
 leave `mlwh_sample_detail` unchanged, covering all 3 acceptance tests
 from E1. Depends on phase 7.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 ### Item 8.2: E2 - Header-aware generic call endpoint
 
@@ -32,5 +32,5 @@ Update `mlwh_call_endpoint` in `internal/mlwh/tools_call.go` to call
 preserve dynamic error and freshness behavior, covering all 4
 acceptance tests from E2. Depends on item 8.1.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed

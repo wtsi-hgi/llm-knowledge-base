@@ -39,15 +39,18 @@ import (
 // callEndpointDescription is the LLM-facing description for mlwh_call_endpoint. It
 // names the escape-hatch role (prefer the curated tools), points at the
 // mlwh://workflow resource as the source of valid Method names and their path and
-// query parameters, and explains the three inputs so an agent can dispatch any
-// Registry endpoint that lacks a curated tool.
+// query parameters, and explains the inputs, pagination wrapper, and freshness
+// caveat so an agent can dispatch any Registry endpoint that lacks a curated
+// tool.
 const callEndpointDescription = "Escape hatch: call any MLWH endpoint by its Registry Method name. " +
 	"Prefer the curated tools (search, resolve, detail, fan-out, freshness) where one exists; use this " +
 	"only to reach an endpoint that has no curated tool. Set method to the Registry Method name (e.g. " +
 	"\"ResolveStudy\", \"AllStudies\"); the mlwh://workflow resource lists every Method with its path and " +
 	"query parameters. Supply path_params in the endpoint's declared order and query_params (including " +
 	"limit/offset for paginated endpoints). Unknown methods and the wrong number of path params are " +
-	"rejected. The decoded result is returned untyped (no per-endpoint output schema)."
+	"rejected. The decoded result is returned untyped (no per-endpoint output schema); dynamic calls with " +
+	"X-Total-Count or X-Next-Offset are wrapped as result, total, and next_offset. Responses with no " +
+	"cache_synced_at need mlwh_freshness for the cache as-of caveat."
 
 // CallInput is the input for mlwh_call_endpoint: a Registry Method name, the
 // endpoint's path parameters in declaration order, and its query parameters. The
