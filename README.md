@@ -1,245 +1,346 @@
-# Next.js + shadcn/ui → FastAPI Monorepo
+# MLWH MCP Server
 
-This project is a full-stack app with a Next.js (React) frontend using the
-**App Router**, Tailwind CSS v4 + shadcn/ui, and a FastAPI backend.
+A [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server, written
+in Go, that lets LLM agents (Claude Code, Codex, and later a web UI server-side
+agent) query the Multi-LIMS Warehouse (MLWH) read API in natural, tool-driven
+ways: search and count samples and studies, resolve identifiers, answer cheap
+overview/status/availability questions, page through manifests and iRODS paths,
+route people and sponsor questions, drill into detail and fan-outs, and report
+data freshness.
 
-### Highlights
+The MLWH read API is provided by the separate upstream
+[`wa`](https://github.com/wtsi-hgi/wa) project (its `wa mlwh serve` command). This
+server is a thin, well-described bridge whose value is making those endpoints
+ergonomic and correctly usable by an LLM, not re-implementing them: it imports
+`github.com/wtsi-hgi/wa/mlwh` and reuses its typed client, response types,
+registry, and OpenAPI document directly, so there is no type drift and the server
+is compile-time-locked to the upstream API version (currently MLWH API 1.7.0).
 
-- **Server Actions first**: Next.js Server Actions call FastAPI directly from
-  the server without exposing backend URLs to the browser.
-- **Typed contracts**: FastAPI responses are validated on the frontend with
-  `zod` so regressions are caught immediately.
-- **Modern styling**: Tailwind v4 `@theme` tokens power shadcn/ui components,
-  theme switching, and animation primitives.
-- **Tests built-in**: Vitest covers the shared contracts, while pytest + httpx
-  validate the FastAPI routers.
+The MLWH provider currently ships over the **stdio** transport only, so it runs
+as a local subprocess launched per user by an agent CLI. Streamable HTTP, which
+would let an admin run one shared instance everyone connects to over the network,
+is deliberately deferred, but the transport is a clean seam so it can be added
+later without any core change.
 
-If you are new to this stack, think of it as:
+## Requirements
 
-- Next.js handles **routing, rendering, and UI**.
-- FastAPI exposes a **typed JSON API**.
-- Zod bridges the two by validating **everything that crosses the boundary**.
+- **Go 1.25+** to build and install.
+- Network access to a running **`wa mlwh serve`** instance — the MLWH read API
+  this server bridges to. You point the server at its base URL (see
+  [Configuration](#configuration)).
 
----
-
-## Directory Structure
-
--- `frontend/` — Next.js 16 (App Router) + React 19 + shadcn/ui + Tailwind CSS v4 (TypeScript)
-  - `app/` — App Router pages, layouts, and API routes
-    - `app/page.tsx` — Home page that calls Server Actions
-    - `app/actions.ts` — Server Actions that talk to FastAPI
-    - `app/api/health/route.ts` — Health check proxy for external monitors
-  - `components/` — React components including shadcn/ui
-    - `components/hello-form.tsx` — Client component with a form that calls a Server Action
-    - `components/health-status.tsx` — Small status indicator for backend health
-    - `components/ui/` — shadcn/ui primitives (button, card, input, etc.)
-  - `lib/` — Shared frontend utilities and contracts
-    - `lib/backend-client.ts` — Thin `fetch` wrapper used by Server Actions
-    - `lib/contracts.ts` — Zod schemas mirroring FastAPI responses
-    - `lib/greeting-state.ts` — State machine for the greeting form
--- `backend/` — FastAPI + Uvicorn (Python 3.11)
-  - `main.py` — FastAPI app with lifespan + logging
-  - `config.py` — Pydantic settings (ports, URLs, log level, etc.)
-  - `api/` — Versioned routers and schemas
-    - `api/v1/greetings.py` — `GET /api/v1/hello` greeting endpoint
-    - `api/v1/health.py` — `GET /api/v1/health` health endpoint
-    - `api/schemas.py` — Pydantic models shared across routers
-  - `tests/` — pytest suite using `httpx.AsyncClient`
-
----
-
-## Developer Setup
-
-### Prerequisites
-- Node.js 20+ (in your PATH)
-- Python 3.11+ (in your PATH)
-- pnpm (in your PATH)
-
-### 1. Frontend Setup
-```bash
-cd frontend
-pnpm install
-
-# (optional) Add more shadcn components:
-pnpm dlx shadcn@latest add [component-name]
-
-pnpm dev
-```
-
-Visit `http://localhost:3000` to see the Server Action-powered greeting page.
-
-Server Actions call `FastAPI` via the shared `backendJson` helper. If you still
-need a browser-accessible endpoint, the `/app/api/*` routes proxy requests with
-response validation before returning data to the client.
-
-### How the pieces fit together
-
-At a high level, a greeting request flows like this:
-
-1. User types a name into `HelloForm` (`components/hello-form.tsx`) and submits.
-2. The form calls the `requestGreeting` Server Action in `app/actions.ts`.
-3. `requestGreeting` calls `backendJson` from `lib/backend-client.ts` with the
-  FastAPI URL and the relevant Zod schema from `lib/contracts.ts`.
-4. FastAPI serves the request from `backend/api/v1/greetings.py` and returns
-  a JSON payload.
-5. `backendJson` validates the JSON with Zod and returns a typed object to the
-  Server Action, which updates the greeting state.
-
-The health check uses a slightly different path:
-
-1. `Home` (`app/page.tsx`) calls the `fetchHealth` Server Action.
-2. `fetchHealth` calls the FastAPI `/api/v1/health` endpoint using `backendJson`.
-3. The `/app/api/health/route.ts` API Route exists **only** for external
-  monitors that need a simple unauthenticated `GET /api/health` endpoint.
-
-### 2. Backend Setup
-```bash
-cd backend
-python3 -m venv .venv
-source .venv/bin/activate
-pip install --upgrade pip
-pip install -r requirements.txt
-
-# For development (linting, testing):
-pip install -r requirements-dev.txt
-```
-
-**Start the server:**
-```bash
-uvicorn main:app --reload
-```
-
-Visit `http://localhost:8000` to see the FastAPI Hello World endpoint, and try
-the example query endpoint:
-
-- `http://localhost:8000/hello?name=YourName` => { "message": "Hello, YourName from FastAPI!" }
-
-### 3. Environment Variables
-
-Copy `.env.example` to `.env` and customize as needed:
-```bash
-cp .env.example .env
-```
-
-The app will work with defaults, but you can customize:
-- `FRONTEND_PORT` - Frontend dev server port (default: 3000)
-- `BACKEND_PORT` - Backend server port (default: 8000)
-- `BACKEND_URL` - Full backend URL (optional, overrides BACKEND_PORT)
-- `LOG_LEVEL` - Backend logging level (default `INFO`).
-
-### 4. Linting, Formatting & Tests
-
-To ensure code quality, run the following commands in the `frontend/` directory:
-
-- **Linting**: `pnpm lint` (Checks for errors)
-- **Formatting**: `pnpm format` (Fixes formatting issues)
-- **Unit tests**: `pnpm test`
-
-In the `backend/` directory run:
-
-- **Unit tests**: `pytest`
-
-The `run-dev.sh` script automatically runs linting **and** the relevant unit
-tests (frontend Vitest + backend pytest) before starting the development
-servers. If any check fails, the script reruns it with full output and aborts
-the startup.
-
-## Port configuration
-
-- Frontend: set `FRONTEND_PORT` environment variable to choose the dev port (default `3000`). Example:
+## Install
 
 ```bash
-FRONTEND_PORT=4000 pnpm dev
+# Install the `mlwh-mcp-server` binary into your Go bin ($(go env GOPATH)/bin):
+make install
+
+# ...or just build it to ./mlwh-mcp-server in the repo:
+make build
 ```
 
-- Backend: set `BACKEND_PORT` environment variable (default `8000`). Example:
+`make install` puts `mlwh-mcp-server` on your `PATH` if `$(go env GOPATH)/bin`
+(usually `~/go/bin`) is on it; otherwise use the binary's full path in the configs
+below. Check the build and the versions it targets:
 
 ```bash
-BACKEND_PORT=9000 ./run_uvicorn.sh
+mlwh-mcp-server --version
+# mlwh-mcp-server version <build version>
+# MLWH API version 1.7.0
 ```
 
-Run both services together
+## Configuration
 
-You can run both the frontend and backend dev servers together with `run-dev.sh`
-at the repository root. The script starts both servers, writes logs to
-`./logs/`, and stops both cleanly if it is interrupted (SIGINT/SIGTERM).
+The server needs to know where your MLWH API lives. Configure it with environment
+variables, or the equivalent command-line flags (a flag overrides its env var):
+
+| Env var                      | Flag                          | Required | Meaning                                                                          |
+| ---------------------------- | ----------------------------- | -------- | -------------------------------------------------------------------------------- |
+| `MLWH_BASE_URL`              | `--mlwh-base-url`             | **yes**  | Base URL of the `wa mlwh serve` HTTP API, e.g. `http://mlwh.internal:8080`.      |
+| `MLWH_CA_CERT`               | `--mlwh-ca-cert`              | no       | Path to a PEM CA-certificate file, if the API is served over TLS with a private CA. |
+| `MLWH_TIMEOUT`               | `--mlwh-timeout`              | no       | Per-request HTTP timeout as a Go duration (e.g. `15s`, `1m`).                     |
+| `MLWH_MAX_TOOL_RESULT_BYTES` | `--mlwh-max-tool-result-bytes` | no       | Maximum marshaled MCP tool-result size before a structured size error is returned; defaults to `1048576`, and values `<=0` disable the guard. |
+
+The MLWH API is internal and unauthenticated, so there is no token to set. A
+missing base URL is a clear startup error. `mlwh-mcp-server --version` needs no
+configuration (it prints the versions and exits without opening a transport or
+touching the network).
+
+In normal use you set these in your **MCP client's** server config (see below),
+and the client passes them to the binary it launches. For local testing you can
+instead keep them in a `.env` file:
 
 ```bash
-# default ports (frontend:3000, backend:8000)
-./run-dev.sh
-
-# custom ports
-./run-dev.sh -f 4000 -b 9000
+make config        # creates .env from .env.example
+$EDITOR .env       # set MLWH_BASE_URL to your wa mlwh serve instance
+make start         # loads .env and serves over stdio (Ctrl-C to stop)
 ```
 
-Logs are written to `./logs/frontend.log` and `./logs/backend.log`.
-Follow them with: `tail -F logs/frontend.log logs/backend.log`.
+`make start` speaks the MCP protocol over stdio: it reads JSON-RPC on stdin and
+writes it on stdout, with operational logs on stderr. On its own it just waits for
+a client, so it is mainly a smoke test — in real use an agent CLI launches it for
+you, as described next.
 
-To update dependencies:
+## Use it with Claude Code
+
+Register the server once (here at user scope, so it is available in every
+project):
 
 ```bash
-cd frontend && pnpm update --latest
-
-cd ..
-source backend/.venv/bin/activate && pip install --upgrade pip && pip install --upgrade -r backend/requirements.txt -r backend/requirements-dev.txt
+claude mcp add --env MLWH_BASE_URL=http://mlwh.internal:8080 --scope user mlwh -- mlwh-mcp-server
 ```
 
----
+- `mlwh` is the name the server appears under; everything after `--` is the
+  command Claude Code runs to launch it (use the binary's full path if it is not
+  on your `PATH`).
+- Repeat `--env KEY=VALUE` for each setting (e.g. add `--env MLWH_TIMEOUT=30s`).
+- `--scope` is one of `local` (this project only — the default), `project`
+  (shared with your team via a checked-in `.mcp.json`), or `user` (all your
+  projects).
 
-## Production Deployment
+The equivalent manual config is a `mcpServers` entry — in a project's `.mcp.json`,
+or in `~/.claude.json` for user scope:
 
-### Frontend
+```json
+{
+  "mcpServers": {
+    "mlwh": {
+      "type": "stdio",
+      "command": "mlwh-mcp-server",
+      "args": [],
+      "env": { "MLWH_BASE_URL": "http://mlwh.internal:8080" }
+    }
+  }
+}
+```
+
+Then, in a Claude Code session, run `/mcp` and confirm `mlwh` shows as
+**connected**. Claude calls the tools automatically when they are relevant (you
+can also nudge it, e.g. _"use the mlwh tools to find samples matching 'mus'"_).
+The tools are namespaced under the server, with names like `mlwh_search_samples`,
+`mlwh_resolve_sample`, and `mlwh_sample_detail`. The server also publishes a
+workflow-guide resource (`mlwh://workflow`) and a version resource
+(`mcp-server://version`) that the agent can read.
+
+## Use it with Codex CLI
+
+Add the server with the CLI:
+
 ```bash
-cd frontend
-pnpm build
-pnpm start
+codex mcp add mlwh --env MLWH_BASE_URL=http://mlwh.internal:8080 -- mlwh-mcp-server
 ```
 
-### Backend
+...or edit `~/.codex/config.toml` (or a project-scoped `.codex/config.toml`)
+directly:
+
+```toml
+[mcp_servers.mlwh]
+command = "mlwh-mcp-server"
+args = []
+
+[mcp_servers.mlwh.env]
+MLWH_BASE_URL = "http://mlwh.internal:8080"
+# MLWH_TIMEOUT = "30s"
+```
+
+Use the full path to `mlwh-mcp-server` if it is not on your `PATH`. Codex
+discovers the tools on startup and calls them as needed during a session.
+
+## What can I ask?
+
+Once the MCP server is connected, talk to your agent normally. Include the sample
+name, study id, run id, library id, person, or file type you care about; the
+agent should choose the cheap overview/count/status tools first and only page
+through lists when rows are actually needed.
+
+Prompt cookbook:
+
+- **Find samples or studies**
+  - "Find samples matching `mus`."
+  - "How many samples match `mus`?"
+  - "What study id matches the name `cancer`?"
+  - "List study candidates for `rare disease`, enough to disambiguate the id."
+- **Resolve or classify an identifier**
+  - "What kind of MLWH identifier is `5901`?"
+  - "Resolve sample `S1` to its canonical identifiers."
+  - "Resolve run `52553`."
+  - "Expand this study id into related search values."
+- **Exact sample lookup**
+  - "Find samples where accession is exactly `ERS123`."
+  - "Count samples with supplier name exactly `Bob`."
+  - "Find samples for library type `WGS`."
+- **Study overview and metadata**
+  - "Give me a quick overview of study `S1`."
+  - "What data access group is study `S1` in?"
+  - "How many samples in `S1` have data, have no data, or were sequenced but have no data?"
+- **Availability and recency**
+  - "How many samples in study `S1` have data added since `2026-06-21T00:00:00Z`?"
+  - "List the first page of samples in `S1` with data between these two timestamps."
+  - "Which samples in `S1` still have no sequencing data?"
+  - "How much new data was added to iRODS for `S1` in the last 7 days?"
+- **QC and status**
+  - "Break down study `S1` by received, sequenced, not sequenced, and manual QC state."
+  - "How many samples in `S1` passed, failed, or are pending QC?"
+  - "Show status by platform, preserving ONT and not-tracked values."
+- **Sample and run progress**
+  - "What is happening with sample `S1` right now?"
+  - "Show sample `ONT1` progress, including not-tracked QC if present."
+  - "Summarize run `52553`."
+  - "Show the status timeline for run `52553`."
+- **iRODS paths and CRAMs**
+  - "How many CRAM paths are there for sample `S1`?"
+  - "List CRAM iRODS paths for study `S1`, first page only."
+  - "Show iRODS paths for run `52553` with `file_type=cram`."
+  - "Are there any VCF paths for `S1`?"
+- **Study manifest**
+  - "Build a manifest for study `S1`."
+  - "Build a study `S1` manifest with an iRODS CRAM column."
+  - "How many manifest rows would study `S1` return?"
+- **People, sponsors, and users**
+  - "Which studies have faculty sponsor `Carl`?"
+  - "How many studies is `cwa` associated with as a user?"
+  - "List studies where `cwa` has role `Follower`."
+  - "Resolve the person name `Carl` across sponsors and study users."
+- **Detail and fan-outs**
+  - "Show sample detail for `S1`."
+  - "Show lean study detail for `S1`, page size 100."
+  - "List runs for study `S1`."
+  - "List libraries for study `S1`."
+  - "How many lanes does sample `S1` have?"
+  - "How many samples are linked to library id `LIB123`?"
+- **Freshness and caveats**
+  - "How fresh is the MLWH cache?"
+  - "Before answering, check whether the cache has synced recently."
+  - "This list has no `cache_synced_at`; use `mlwh_freshness` for the as-of caveat."
+- **Large answers and paging**
+  - "Count first, then list the first 100 rows."
+  - "Continue from `next_offset=100`."
+  - "Use a smaller page if the result is too large."
+- **Advanced registry access**
+  - "Call the MLWH Registry method `AllStudies` with `limit=100` and `offset=0`."
+  - "Use the generic endpoint caller for a Registry method that does not have a curated tool yet."
+
+Notes for interpreting answers:
+
+- Paged list and paged detail tools default to `limit=100`, reject `limit > 1000`,
+  and return `total` plus `next_offset`; `next_offset=-1` means there is no next
+  page.
+- Count responses and bare list responses do not carry `cache_synced_at`; ask the
+  agent to use `mlwh_freshness` when you need a cache as-of caveat.
+- Responses that include `cache_synced_at` should use that field as the as-of
+  timestamp. Data "added to iRODS" means the upstream iRODS `created` timestamp,
+  not sync `last_run` or generic row-change fields.
+- If a response would be too large, the server returns a structured
+  `tool_result_too_large` error with guidance instead of flooding the chat.
+
+## What the server exposes
+
+A curated, LLM-ergonomic tool surface generated from the MLWH endpoint registry
+(so it stays in lockstep with the upstream API), grouped by task:
+
+- **Search and study lookup**: `mlwh_search_samples`, `mlwh_count_samples`,
+  `mlwh_search_studies`, `mlwh_count_studies_search`, `mlwh_count_studies`.
+  Sample search is a case-insensitive word-prefix match; study search is a
+  case-insensitive substring match across `name`, `study_title`, `programme`,
+  and `faculty_sponsor`.
+- **Resolve, classify, exact find, and expand**: `mlwh_classify_identifier`,
+  `mlwh_resolve_sample`, `mlwh_resolve_sample_name`, `mlwh_resolve_study`,
+  `mlwh_resolve_run`, `mlwh_resolve_library`,
+  `mlwh_resolve_library_identifier`, `mlwh_find_samples`,
+  `mlwh_count_find_samples`, `mlwh_expand_identifier`,
+  `mlwh_expand_search_values`, `mlwh_expand_sample_search_values`.
+- **Overview, status, and progress**: `mlwh_study_overview`,
+  `mlwh_study_status_breakdown`, `mlwh_run_overview`, `mlwh_run_status`,
+  `mlwh_sample_progress`. These are the preferred tools for common availability,
+  QC, run, and "what is happening?" questions.
+- **Availability, iRODS, and manifests**:
+  `mlwh_count_samples_with_data_for_study`,
+  `mlwh_samples_with_data_for_study`,
+  `mlwh_samples_without_data_for_study`,
+  `mlwh_irods_paths_for_sample`, `mlwh_count_irods_paths_for_sample`,
+  `mlwh_irods_paths_for_study`, `mlwh_count_irods_paths_for_study`,
+  `mlwh_irods_paths_for_run`, `mlwh_count_irods_paths_for_run`,
+  `mlwh_study_manifest`, `mlwh_count_study_manifest`. iRODS tools support
+  upstream `file_type` suffix filtering, such as `cram`.
+- **Detail, fan-out, and count counterparts**: `mlwh_sample_detail`,
+  `mlwh_study_detail`, `mlwh_run_detail`, `mlwh_library_detail`,
+  `mlwh_all_studies`, `mlwh_samples_for_study`, `mlwh_count_samples_for_study`,
+  `mlwh_samples_for_run`, `mlwh_count_samples_for_run`,
+  `mlwh_libraries_for_study`, `mlwh_count_libraries_for_study`,
+  `mlwh_runs_for_study`, `mlwh_count_runs_for_study`,
+  `mlwh_lanes_for_sample`, `mlwh_count_lanes_for_sample`,
+  `mlwh_studies_for_sample`, `mlwh_count_samples_for_library`,
+  `mlwh_count_samples_for_library_id`,
+  `mlwh_count_samples_for_library_lims_id`,
+  `mlwh_count_samples_for_library_type`.
+- **People, sponsors, and study users**:
+  `mlwh_studies_for_faculty_sponsor`,
+  `mlwh_count_studies_for_faculty_sponsor`, `mlwh_studies_for_user`,
+  `mlwh_count_studies_for_user`, `mlwh_resolve_person`,
+  `mlwh_count_resolve_person`. Sponsor tools read `faculty_sponsor`; user tools
+  read `study_users` membership and optionally filter by role.
+- **Freshness**: `mlwh_freshness` reports per-table sync state so answers can be
+  caveated; it succeeds even against a never-synced cache.
+- **Escape hatch**: `mlwh_call_endpoint` dispatches any upstream Registry method
+  by name. If the upstream response includes pagination headers, the tool returns
+  `result`, `total`, and `next_offset`; otherwise it returns the decoded result
+  directly.
+
+The server also publishes two MCP resources:
+
+- `mlwh://workflow`: cheap-first guidance plus the always-current
+  Registry-derived endpoint catalogue.
+- `mcp-server://version`: this server's version and the targeted MLWH API
+  version.
+
+Upstream errors are mapped to clear, actionable tool errors: bad input, not
+found, ambiguous identifiers, unsupported identifiers, never-synced cache state,
+and impaired upstream/cache failures all keep the upstream context and add a
+caller-oriented next step.
+
+## Development
+
 ```bash
-cd backend
-source .venv/bin/activate
-uvicorn main:app --host 0.0.0.0 --port 8000
+make test      # hermetic test suite (stubs the MLWH API; never hits a live warehouse)
+make lint      # golangci-lint over all packages
+make format    # gofmt (and cleanorder, if installed)
+make help      # list all targets
 ```
 
----
+CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs `make lint` and
+`make build` + `make test` on pushes and pull requests to `main` / `develop`,
+using the same Makefile targets.
 
-## Health Checks & Monitoring
+See [`.docs/mcp/spec.md`](.docs/mcp/spec.md) for the original MCP server
+specification, and [`.docs/realworld/spec.md`](.docs/realworld/spec.md) for the
+RealWorld MLWH tool expansion reviewed here.
 
-### External Monitoring
-External monitoring services (e.g., AWS ALB, UptimeRobot) should check the
-frontend's health endpoint:
+## Architecture
 
-- **URL**: `GET /api/health`
-- **Success**: `200 OK` `{"status": "healthy"}`
-- **Failure**: `503 Service Unavailable` `{"status": "unhealthy"}`
+The server is built to host multiple independent services through a
+service-agnostic core (`internal/core`) and self-contained providers. MLWH is the
+first. Each service is its own binary: a thin `cmd/<service>-mcp-server`
+entrypoint wires that service's `internal/<service>` provider into the shared
+core. Adding a service is therefore a new `cmd/` + `internal/` package plus its
+registration — with no core change — and each service keeps its own configuration,
+auth, and (in future) transport.
 
-### Why a Proxy Route?
-While most of the application uses **Server Actions** to communicate with the
-backend, the health check requires a dedicated API Route
-(`/app/api/health/route.ts`) for specific reasons:
+```
+go.mod                  module github.com/wtsi-hgi/llm-knowledge-base
+Makefile                build / install / lint / test / config / start
+cmd/mlwh-mcp-server/    MLWH server entrypoint (flag parsing, wiring only)
+internal/core/          service-agnostic core (provider seam, transport, version)
+internal/mlwh/          MLWH provider (imports wa/mlwh)
+webui/                  Next.js + FastAPI web UI scaffold (future component)
+```
 
-1.  **Protocol Compatibility**: Server Actions use a specialized POST protocol
-    internal to Next.js. Standard load balancers and monitoring tools expect a
-    simple HTTP `GET` request returning a 200 OK status code.
-2.  **Network Isolation**: In production, the FastAPI backend is often deployed
-    in a private network, inaccessible to the public internet. The frontend acts
-    as a gateway.
-3.  **Status Codes**: The proxy route explicitly translates backend connectivity
-    issues into standard HTTP 503 status codes, which automated monitors rely on
-    to detect failures.
+## Web UI
 
-**Note**: Other application features do **not** use proxy routes. They use
-Server Actions to communicate directly from the Next.js server to the FastAPI
-backend. This keeps the backend API private, reduces the public attack surface,
-and maintains type safety without manually defining API routes for every
-feature.
+A Next.js + FastAPI web UI scaffold lives under [`webui/`](webui/) as a future
+component. It is currently a standalone scaffold, not yet wired to the MCP server;
+see [`webui/README.md`](webui/README.md) for its own setup and developer
+instructions.
 
----
+## Licence
 
-## Notes
-- Each developer should create their own `.venv` in `backend/` and install
-  dependencies there.
-- Do not share virtual environments between users.
-- The `pnpm` binary can be shared, but each user’s global packages/cache are
-  separate by default.
+See [LICENSE](LICENSE).
