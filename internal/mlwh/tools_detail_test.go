@@ -35,6 +35,105 @@ import (
 	. "github.com/smartystreets/goconvey/convey"
 )
 
+// TestFanOutCountTools covers Story D3: count tools for the remaining large
+// upstream fan-out lists, each returning wa.Count and hitting the documented
+// Registry /count path.
+func TestFanOutCountTools(t *testing.T) {
+	Convey("Given the MLWH server (stub-backed) with the fan-out count tools", t, func() {
+		stub := newStubMLWH(t)
+		cs, cleanup := runMLWHServerWithClient(t, stub)
+		defer cleanup()
+
+		assertCountTool := func(path string, count int, tool string, args map[string]any) {
+			stub.respondJSON(path, http.StatusOK, wa.Count{Count: count})
+
+			res := callTool(t, cs, tool, args)
+
+			obj := structuredObject(res)
+			So(obj["count"], ShouldEqual, count)
+
+			req, ok := stub.lastRequest()
+			So(ok, ShouldBeTrue)
+			So(req.Path, ShouldEqual, path)
+		}
+
+		Convey("D3.1: mlwh_count_samples_for_run routes to /run/52553/samples/count", func() {
+			assertCountTool(
+				"/run/52553/samples/count",
+				10,
+				"mlwh_count_samples_for_run",
+				map[string]any{"id_run": "52553"},
+			)
+		})
+
+		Convey("D3.2: mlwh_count_runs_for_study returns the count from /study/S1/runs/count", func() {
+			assertCountTool(
+				"/study/S1/runs/count",
+				2,
+				"mlwh_count_runs_for_study",
+				map[string]any{"study_lims_id": "S1"},
+			)
+		})
+
+		Convey("D3.3: mlwh_count_libraries_for_study returns the count from /study/S1/libraries/count", func() {
+			assertCountTool(
+				"/study/S1/libraries/count",
+				5,
+				"mlwh_count_libraries_for_study",
+				map[string]any{"study_lims_id": "S1"},
+			)
+		})
+
+		Convey("D3.4: mlwh_count_lanes_for_sample returns the count from /sample/S1/lanes/count", func() {
+			assertCountTool(
+				"/sample/S1/lanes/count",
+				4,
+				"mlwh_count_lanes_for_sample",
+				map[string]any{"sanger_name": "S1"},
+			)
+		})
+
+		Convey("D3.5: mlwh_count_samples_for_library sends library and study path params in order", func() {
+			assertCountTool(
+				"/library/P1/study/S1/samples/count",
+				3,
+				"mlwh_count_samples_for_library",
+				map[string]any{
+					"pipeline_id_lims": "P1",
+					"study_lims_id":    "S1",
+				},
+			)
+		})
+
+		Convey("D3.6: mlwh_count_samples_for_library_id routes to /library-id/LIB123/samples/count", func() {
+			assertCountTool(
+				"/library-id/LIB123/samples/count",
+				6,
+				"mlwh_count_samples_for_library_id",
+				map[string]any{"library_id": "LIB123"},
+			)
+		})
+
+		Convey("D3.7: mlwh_count_samples_for_library_lims_id routes to /library-lims-id/LIMS123/samples/count", func() {
+			assertCountTool(
+				"/library-lims-id/LIMS123/samples/count",
+				7,
+				"mlwh_count_samples_for_library_lims_id",
+				map[string]any{"library_lims_id": "LIMS123"},
+			)
+		})
+
+		Convey("D3.8: mlwh_count_samples_for_library_type routes to /library-type/WGS/samples/count", func() {
+			assertCountTool(
+				"/library-type/WGS/samples/count",
+				8,
+				"mlwh_count_samples_for_library_type",
+				map[string]any{"library_type": "WGS"},
+			)
+		})
+	})
+}
+
 // TestDetailTools covers Story C1: the four grouped detail tools
 // (mlwh_sample_detail, mlwh_study_detail, mlwh_run_detail, mlwh_library_detail).
 // Every assertion drives the tool over the real in-memory MCP client against the

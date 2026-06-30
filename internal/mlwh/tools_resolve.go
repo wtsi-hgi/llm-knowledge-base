@@ -28,6 +28,7 @@ package mlwh
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	wa "github.com/wtsi-hgi/wa/mlwh"
@@ -43,6 +44,12 @@ const findSamplesDescription = "Find samples by an exact field value. Choose the
 	"(sanger_id, lims_id, accession, supplier_name, or library_type) and give the exact value; " +
 	"returns every sample whose chosen field equals that value (an exact match, not a search). " +
 	"This unifies the five per-field sample finders behind one field enum."
+
+const countFindSamplesDescription = "Count samples by an exact field value. Choose the field to match on " +
+	"(sanger_id, lims_id, accession, supplier_name, or library_type) and give the exact value; " +
+	"returns the number of samples whose chosen field equals that value (an exact match, not a search). " +
+	"This unifies the five per-field sample-finder counts behind the same field enum as mlwh_find_samples." +
+	countFreshnessNote
 
 // resolver pairs one resolve/classify tool name with the Registry Method it
 // derives its description from and the typed client call it dispatches to. The
@@ -168,6 +175,14 @@ func valuesOutputSchema() map[string]any {
 	}
 }
 
+func unsupportedFindSamplesFieldError(field string) error {
+	return fmt.Errorf(
+		"unknown field %q; supported fields are: %s",
+		field,
+		strings.Join(findSamplesFieldEnum(), ", "),
+	)
+}
+
 // registerResolveTools adds the resolve/classify (Story B1), unified find-samples
 // (Story B2), and expand (Story B3) tools to the server through the Registrar.
 // The typed tools pre-set their OpenAPI-sourced output schema so the upstream
@@ -188,6 +203,10 @@ func (p *provider) registerResolveTools(r core.Registrar) error {
 
 	if err := p.addFindSamples(r); err != nil {
 		return fmt.Errorf("mlwh: register find_samples tool: %w", err)
+	}
+
+	if err := p.addCountFindSamples(r); err != nil {
+		return fmt.Errorf("mlwh: register count_find_samples tool: %w", err)
 	}
 
 	if err := p.registerExpandTools(r); err != nil {
@@ -285,6 +304,48 @@ func (p *provider) addFindSamples(r core.Registrar) error {
 		}
 
 		return nil, samplesResult{Samples: *samples}, nil
+	})
+
+	return nil
+}
+
+// addCountFindSamples registers mlwh_count_find_samples (D4). It shares
+// mlwh_find_samples' input schema and clean field enum, then dispatches to the
+// matching CountFindSamplesBy* Registry method by prefixing the selected
+// FindSamplesBy* method. The count method's Registry path supplies the
+// hyphenated /find/sample/*/:id/count endpoint and the Count result shape.
+func (p *provider) addCountFindSamples(r core.Registrar) error {
+	outputSchema, err := outputSchemaFor("Count")
+	if err != nil {
+		return fmt.Errorf("build count output schema: %w", err)
+	}
+
+	client := p.client
+	methods := findSamplesMethods()
+
+	mcp.AddTool(r.Server(), &mcp.Tool{
+		Name:         "mlwh_count_find_samples",
+		Description:  countFindSamplesDescription,
+		InputSchema:  findSamplesInputSchema(),
+		OutputSchema: outputSchema,
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in findSamplesInput) (*mcp.CallToolResult, wa.Count, error) {
+		method, ok := methods[in.Field]
+		if !ok {
+			return core.ToolError[wa.Count](unsupportedFindSamplesFieldError(in.Field))
+		}
+
+		countMethod := "Count" + method
+		result, err := client.Call(ctx, countMethod, []string{in.Value}, nil)
+		if err != nil {
+			return core.ToolError[wa.Count](mapToolError(err))
+		}
+
+		count, ok := result.(*wa.Count)
+		if !ok {
+			return core.ToolError[wa.Count](fmt.Errorf("mlwh: %s returned %T, want *Count", countMethod, result))
+		}
+
+		return nil, *count, nil
 	})
 
 	return nil

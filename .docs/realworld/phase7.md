@@ -21,8 +21,8 @@ study-name and id lookup questions use bounded search results with
 disambiguating fields, covering all 2 acceptance tests from D1.
 Depends on phase 4.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 #### Item 7.2: D2 - Faculty sponsor, user, and person tools
 
@@ -35,8 +35,8 @@ Register sponsor, user, resolve-person, and related count tools in
 `study_users` semantics, covering all 7 acceptance tests from D2.
 Depends on phase 4.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 #### Item 7.3: D3 - Surface every missing upstream count
 
@@ -48,8 +48,8 @@ Add missing Registry count tools in `internal/mlwh/tools_detail.go` for
 run, study, library, lane, and library-type sample counts, covering all
 8 acceptance tests from D3. Depends on phase 4.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 #### Item 7.4: D4 - Unified exact sample-finder count [parallel with D1, D2, D3]
 
@@ -60,8 +60,8 @@ sharing the `mlwh_find_samples` field enum and dispatching to the
 matching `CountFindSamplesBy*` method, covering all 6 acceptance tests
 from D4. Depends on phase 4.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 For parallel batch items, use separate subagents per item.
 Launch review subagents using the `go-reviewer` skill

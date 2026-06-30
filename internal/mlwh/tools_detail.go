@@ -41,6 +41,38 @@ import (
 const pagedFanOutPaginationNote = " Defaults to a page of 100 rows, maximum 1000 " +
 	"(a larger limit is rejected, not clamped); use offset to page."
 
+// addFanOutCountTool registers a typed Count tool backed by one Registry count
+// method. The caller supplies the input-shaping closure so JSON field names stay
+// explicit at the tool boundary while the shared handler preserves upstream error
+// mapping and the OpenAPI-derived Count schema.
+func addFanOutCountTool[Input any](
+	r core.Registrar,
+	outputSchema map[string]any,
+	toolName string,
+	registryMethod string,
+	call func(context.Context, Input) (wa.Count, error),
+) error {
+	description, err := resolveDescription(registryMethod)
+	if err != nil {
+		return err
+	}
+
+	mcp.AddTool(r.Server(), &mcp.Tool{
+		Name:         toolName,
+		Description:  description,
+		OutputSchema: outputSchema,
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in Input) (*mcp.CallToolResult, wa.Count, error) {
+		count, err := call(ctx, in)
+		if err != nil {
+			return core.ToolError[wa.Count](mapToolError(err))
+		}
+
+		return nil, count, nil
+	})
+
+	return nil
+}
+
 // fanOutSliceSchemas builds the paged slice-wrapper output schemas shared by
 // the paged fan-out tools, keyed by the wrapper property name so each tool
 // picks the one matching its element type.
@@ -84,8 +116,8 @@ func paginatedFanOutDescription(method string) (string, error) {
 }
 
 // registerDetailTools adds the grouped detail tools (Story C1) and the fan-out
-// enumeration tools (Story C2) to the server through the Registrar. Each typed
-// tool pre-sets its OpenAPI-sourced output schema so the upstream doc: field
+// enumeration/count tools (Story C2/D3) to the server through the Registrar.
+// Each typed tool pre-sets its OpenAPI-sourced output schema so the upstream doc: field
 // descriptions survive (the SDK's own reflection would drop them), and every
 // handler maps an upstream error to a clear tool error via mapToolError. The
 // paged fan-out tools default an omitted limit to 100 and reject limits above
@@ -134,7 +166,8 @@ func (p *provider) registerDetailGroup(r core.Registrar) error {
 }
 
 // sampleNameInput is the input for the sample-keyed tools that take only a
-// Sanger sample name and no pagination (mlwh_sample_detail, mlwh_studies_for_sample).
+// Sanger sample name and no pagination (mlwh_sample_detail,
+// mlwh_studies_for_sample, mlwh_count_lanes_for_sample).
 type sampleNameInput struct {
 	SangerName string `json:"sanger_name" jsonschema:"the Sanger sample name to look up"`
 }
@@ -167,7 +200,9 @@ func (p *provider) addSampleDetail(r core.Registrar, outputSchema map[string]any
 }
 
 // studyIDInput is the input for the study-keyed tools that take only a LIMS
-// study id and no pagination (mlwh_study_detail, mlwh_count_samples_for_study).
+// study id and no pagination (mlwh_study_detail,
+// mlwh_count_samples_for_study, mlwh_count_runs_for_study,
+// mlwh_count_libraries_for_study).
 type studyIDInput struct {
 	StudyLimsID string `json:"study_lims_id" jsonschema:"the LIMS identifier of the study to look up"`
 }
@@ -199,7 +234,7 @@ func (p *provider) addStudyDetail(r core.Registrar, outputSchema map[string]any)
 }
 
 // runIDInput is the input for the run-keyed tools that take only a run id and no
-// pagination (mlwh_run_detail).
+// pagination (mlwh_run_detail, mlwh_count_samples_for_run).
 type runIDInput struct {
 	IDRun string `json:"id_run" jsonschema:"the sequencing run identifier to look up"`
 }
@@ -230,9 +265,10 @@ func (p *provider) addRunDetail(r core.Registrar, outputSchema map[string]any) e
 	return nil
 }
 
-// libraryDetailInput is the input for mlwh_library_detail: a library identified
-// by its pipeline LIMS id within a study, so it carries both path params in the
-// order the upstream /library/:pipeline/study/:study/detail path declares them.
+// libraryDetailInput is the input for library/study-scoped tools: a library
+// identified by its pipeline LIMS id within a study, so it carries both path
+// params in the order the upstream /library/:pipeline/study/:study/* paths
+// declare them.
 type libraryDetailInput struct {
 	PipelineIDLims string `json:"pipeline_id_lims" jsonschema:"the pipeline LIMS identifier of the library"`
 	StudyLimsID    string `json:"study_lims_id" jsonschema:"the LIMS identifier of the study the library belongs to"`
@@ -641,16 +677,53 @@ func (p *provider) addIRODSPathsForStudy(r core.Registrar, outputSchema map[stri
 	return nil
 }
 
-// registerNonPaginatedFanOuts adds the two non-paginated fan-out tools:
+// registerNonPaginatedFanOuts adds the non-paginated fan-out tools:
 // mlwh_studies_for_sample (the studies a sample belongs to, wrapped under
-// {"studies":[...]}) and mlwh_count_samples_for_study (the distinct-sample count
-// for a study, returned as the typed Count).
+// {"studies":[...]}) and the typed Count counterparts for the large upstream
+// fan-out lists.
 func (p *provider) registerNonPaginatedFanOuts(r core.Registrar) error {
 	if err := p.addStudiesForSample(r); err != nil {
 		return err
 	}
 
-	return p.addCountSamplesForStudy(r)
+	countSchema, err := outputSchemaFor("Count")
+	if err != nil {
+		return fmt.Errorf("mlwh: build count output schema: %w", err)
+	}
+
+	if err := p.addCountSamplesForStudy(r, countSchema); err != nil {
+		return err
+	}
+
+	if err := p.addCountSamplesForRun(r, countSchema); err != nil {
+		return err
+	}
+
+	if err := p.addCountRunsForStudy(r, countSchema); err != nil {
+		return err
+	}
+
+	if err := p.addCountLibrariesForStudy(r, countSchema); err != nil {
+		return err
+	}
+
+	if err := p.addCountLanesForSample(r, countSchema); err != nil {
+		return err
+	}
+
+	if err := p.addCountSamplesForLibrary(r, countSchema); err != nil {
+		return err
+	}
+
+	if err := p.addCountSamplesForLibraryID(r, countSchema); err != nil {
+		return err
+	}
+
+	if err := p.addCountSamplesForLibraryLimsID(r, countSchema); err != nil {
+		return err
+	}
+
+	return p.addCountSamplesForLibraryType(r, countSchema)
 }
 
 // addStudiesForSample registers mlwh_studies_for_sample (Story C2): a
@@ -690,31 +763,111 @@ func (p *provider) addStudiesForSample(r core.Registrar) error {
 // non-paginated tool returning the number of distinct samples linked to a study
 // as the typed Count ({"count":N}), the count counterpart of
 // mlwh_samples_for_study.
-func (p *provider) addCountSamplesForStudy(r core.Registrar) error {
-	outputSchema, err := outputSchemaFor("Count")
-	if err != nil {
-		return fmt.Errorf("mlwh: build count output schema: %w", err)
-	}
-
-	description, err := resolveDescription("CountSamplesForStudy")
-	if err != nil {
-		return err
-	}
-
+func (p *provider) addCountSamplesForStudy(r core.Registrar, outputSchema map[string]any) error {
 	client := p.client
 
-	mcp.AddTool(r.Server(), &mcp.Tool{
-		Name:         "mlwh_count_samples_for_study",
-		Description:  description,
-		OutputSchema: outputSchema,
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in studyIDInput) (*mcp.CallToolResult, wa.Count, error) {
-		count, err := client.CountSamplesForStudy(ctx, in.StudyLimsID)
-		if err != nil {
-			return core.ToolError[wa.Count](mapToolError(err))
-		}
+	return addFanOutCountTool[studyIDInput](r, outputSchema, "mlwh_count_samples_for_study", "CountSamplesForStudy",
+		func(ctx context.Context, in studyIDInput) (wa.Count, error) {
+			return client.CountSamplesForStudy(ctx, in.StudyLimsID)
+		})
+}
 
-		return nil, count, nil
-	})
+// addCountSamplesForRun registers mlwh_count_samples_for_run, the Count
+// counterpart of mlwh_samples_for_run.
+func (p *provider) addCountSamplesForRun(r core.Registrar, outputSchema map[string]any) error {
+	client := p.client
 
-	return nil
+	return addFanOutCountTool[runIDInput](r, outputSchema, "mlwh_count_samples_for_run", "CountSamplesForRun",
+		func(ctx context.Context, in runIDInput) (wa.Count, error) {
+			return client.CountSamplesForRun(ctx, in.IDRun)
+		})
+}
+
+// addCountRunsForStudy registers mlwh_count_runs_for_study, the Count counterpart
+// of mlwh_runs_for_study.
+func (p *provider) addCountRunsForStudy(r core.Registrar, outputSchema map[string]any) error {
+	client := p.client
+
+	return addFanOutCountTool[studyIDInput](r, outputSchema, "mlwh_count_runs_for_study", "CountRunsForStudy",
+		func(ctx context.Context, in studyIDInput) (wa.Count, error) {
+			return client.CountRunsForStudy(ctx, in.StudyLimsID)
+		})
+}
+
+// addCountLibrariesForStudy registers mlwh_count_libraries_for_study, the Count
+// counterpart of mlwh_libraries_for_study.
+func (p *provider) addCountLibrariesForStudy(r core.Registrar, outputSchema map[string]any) error {
+	client := p.client
+
+	return addFanOutCountTool[studyIDInput](r, outputSchema, "mlwh_count_libraries_for_study", "CountLibrariesForStudy",
+		func(ctx context.Context, in studyIDInput) (wa.Count, error) {
+			return client.CountLibrariesForStudy(ctx, in.StudyLimsID)
+		})
+}
+
+// addCountLanesForSample registers mlwh_count_lanes_for_sample, the Count
+// counterpart of mlwh_lanes_for_sample.
+func (p *provider) addCountLanesForSample(r core.Registrar, outputSchema map[string]any) error {
+	client := p.client
+
+	return addFanOutCountTool[sampleNameInput](r, outputSchema, "mlwh_count_lanes_for_sample", "CountLanesForSample",
+		func(ctx context.Context, in sampleNameInput) (wa.Count, error) {
+			return client.CountLanesForSample(ctx, in.SangerName)
+		})
+}
+
+// addCountSamplesForLibrary registers mlwh_count_samples_for_library, the Count
+// counterpart of the library/study-scoped SamplesForLibrary endpoint.
+func (p *provider) addCountSamplesForLibrary(r core.Registrar, outputSchema map[string]any) error {
+	client := p.client
+
+	return addFanOutCountTool[libraryDetailInput](r, outputSchema, "mlwh_count_samples_for_library", "CountSamplesForLibrary",
+		func(ctx context.Context, in libraryDetailInput) (wa.Count, error) {
+			return client.CountSamplesForLibrary(ctx, in.PipelineIDLims, in.StudyLimsID)
+		})
+}
+
+// libraryIDInput is the input for tools keyed by an exact library_id.
+type libraryIDInput struct {
+	LibraryID string `json:"library_id" jsonschema:"the exact library_id to count samples for"`
+}
+
+// addCountSamplesForLibraryID registers mlwh_count_samples_for_library_id.
+func (p *provider) addCountSamplesForLibraryID(r core.Registrar, outputSchema map[string]any) error {
+	client := p.client
+
+	return addFanOutCountTool[libraryIDInput](r, outputSchema, "mlwh_count_samples_for_library_id", "CountSamplesForLibraryID",
+		func(ctx context.Context, in libraryIDInput) (wa.Count, error) {
+			return client.CountSamplesForLibraryID(ctx, in.LibraryID)
+		})
+}
+
+// libraryLimsIDInput is the input for tools keyed by an exact id_library_lims.
+type libraryLimsIDInput struct {
+	LibraryLimsID string `json:"library_lims_id" jsonschema:"the exact LIMS library identifier to count samples for"`
+}
+
+// addCountSamplesForLibraryLimsID registers mlwh_count_samples_for_library_lims_id.
+func (p *provider) addCountSamplesForLibraryLimsID(r core.Registrar, outputSchema map[string]any) error {
+	client := p.client
+
+	return addFanOutCountTool[libraryLimsIDInput](r, outputSchema, "mlwh_count_samples_for_library_lims_id",
+		"CountSamplesForLibraryLimsID", func(ctx context.Context, in libraryLimsIDInput) (wa.Count, error) {
+			return client.CountSamplesForLibraryLimsID(ctx, in.LibraryLimsID)
+		})
+}
+
+// libraryTypeInput is the input for tools keyed by pipeline_id_lims / library type.
+type libraryTypeInput struct {
+	LibraryType string `json:"library_type" jsonschema:"the library type / pipeline LIMS identifier to count samples for"`
+}
+
+// addCountSamplesForLibraryType registers mlwh_count_samples_for_library_type.
+func (p *provider) addCountSamplesForLibraryType(r core.Registrar, outputSchema map[string]any) error {
+	client := p.client
+
+	return addFanOutCountTool[libraryTypeInput](r, outputSchema, "mlwh_count_samples_for_library_type",
+		"CountSamplesForLibraryType", func(ctx context.Context, in libraryTypeInput) (wa.Count, error) {
+			return client.CountSamplesForLibraryType(ctx, in.LibraryType)
+		})
 }

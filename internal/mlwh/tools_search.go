@@ -53,11 +53,14 @@ const (
 		"Defaults to a page of 100 rows, maximum 1000 (a larger limit is rejected, not clamped); " +
 		"use offset to page."
 
-	searchStudiesDescription = "Search studies by substring: returns studies whose " +
+	searchStudiesDescription = "Search studies by substring for study-name/id lookup questions " +
+		"(for example, \"What study id matches this name?\"): returns studies whose " +
 		"name, study_title, programme, or faculty_sponsor contains the term " +
 		"(case-insensitive substring match, minimum 3 characters). " +
 		"Defaults to a page of 100 rows, maximum 1000 (a larger limit is rejected, not clamped); " +
-		"use offset to page."
+		"use offset to page. Rows expose study identifiers and context fields such as " +
+		"id_study_lims, name, study_title, programme, faculty_sponsor, and accession_number " +
+		"to disambiguate candidate study ids."
 
 	countSamplesDescription = "Count samples matching a word-prefix search, the count counterpart of " +
 		"mlwh_search_samples (same case-insensitive word-prefix over name, supplier_name, " +
@@ -113,9 +116,10 @@ func (p *provider) addSearchSamples(r core.Registrar, outputSchema map[string]an
 	})
 }
 
-// addSearchStudies registers mlwh_search_studies (Story A3), mirroring
-// addSearchSamples but over the substring study search and wrapping the result
-// under {"studies":[...]}.
+// addSearchStudies registers mlwh_search_studies (Story A3/D1), mirroring
+// addSearchSamples but over the substring study search and wrapping each
+// bounded page under {"studies":[...]} with the upstream wa.Study fields needed
+// to disambiguate candidate study ids.
 func (p *provider) addSearchStudies(r core.Registrar, outputSchema map[string]any) {
 	client := p.client
 

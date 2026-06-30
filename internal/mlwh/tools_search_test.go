@@ -222,26 +222,52 @@ func TestCountSamplesTool(t *testing.T) {
 	})
 }
 
-// TestSearchStudiesTool covers Story A3 (mlwh_search_studies).
+// TestSearchStudiesTool covers Story A3 (mlwh_search_studies) and D1
+// (study-name/id lookup through bounded search results).
 func TestSearchStudiesTool(t *testing.T) {
 	Convey("Given the MLWH server (stub-backed) with mlwh_search_studies", t, func() {
 		stub := newStubMLWH(t)
 		cs, cleanup := runMLWHServerWithClient(t, stub)
 		defer cleanup()
 
-		Convey("A3.1: three studies for /search/study/cancer", func() {
-			stub.respondJSON("/search/study/cancer", 200, threeStudies())
+		Convey("A3.1/D1.1: cancer study-name lookup returns bounded candidate rows with page metadata", func() {
+			stub.respondJSONWithHeaders("/search/study/cancer", 200, twoCancerStudies(), http.Header{
+				"X-Total-Count": {"2"},
+				"X-Next-Offset": {"-1"},
+			})
 
 			res := callTool(t, cs, "mlwh_search_studies", map[string]any{"term": "cancer"})
 
 			obj := structuredObject(res)
 			studies, ok := obj["studies"].([]any)
 			So(ok, ShouldBeTrue)
-			So(len(studies), ShouldEqual, 3)
+			So(len(studies), ShouldEqual, 2)
+			So(obj["total"], ShouldEqual, 2)
+			So(obj["next_offset"], ShouldEqual, -1)
 
 			first, ok := studies[0].(map[string]any)
 			So(ok, ShouldBeTrue)
+			So(first["id_study_lims"], ShouldEqual, "S1")
 			So(first["name"], ShouldEqual, "Cancer One")
+			So(first["study_title"], ShouldEqual, "Tumour WGS")
+			So(first["programme"], ShouldEqual, "Cancer")
+			So(first["faculty_sponsor"], ShouldEqual, "Carl")
+			So(first["accession_number"], ShouldEqual, "ERP1")
+
+			second, ok := studies[1].(map[string]any)
+			So(ok, ShouldBeTrue)
+			So(second["id_study_lims"], ShouldEqual, "S2")
+			So(second["name"], ShouldEqual, "Cancer Two")
+			So(second["study_title"], ShouldEqual, "Tumour RNA")
+			So(second["programme"], ShouldEqual, "Cancer")
+			So(second["faculty_sponsor"], ShouldEqual, "Carla")
+			So(second["accession_number"], ShouldEqual, "ERP2")
+
+			req, ok := stub.lastRequest()
+			So(ok, ShouldBeTrue)
+			So(req.Path, ShouldEqual, "/search/study/cancer")
+			So(req.Query.Get("limit"), ShouldEqual, "100")
+			So(req.Query.Get("offset"), ShouldEqual, "0")
 		})
 
 		Convey("A3.2: term \"ab\" is a tool error mentioning the 3-char minimum, no request made", func() {
@@ -260,17 +286,20 @@ func TestSearchStudiesTool(t *testing.T) {
 			So(stub.requestCount(), ShouldEqual, 0)
 		})
 
-		Convey("A3.4: the tool name and description contain \"substring\"", func() {
+		Convey("A3.4/D1.2: the tool name and description explain substring study-name/id lookup", func() {
 			tool, ok := toolByName(t, cs, "mlwh_search_studies")
 			So(ok, ShouldBeTrue)
 			So(tool.Name, ShouldEqual, "mlwh_search_studies")
 
 			lower := strings.ToLower(tool.Description)
 			So(lower, ShouldContainSubstring, "substring")
+			So(lower, ShouldContainSubstring, "study-name/id lookup")
+			So(lower, ShouldContainSubstring, "what study id matches this name?")
 			So(lower, ShouldContainSubstring, "name")
 			So(lower, ShouldContainSubstring, "study_title")
 			So(lower, ShouldContainSubstring, "programme")
 			So(lower, ShouldContainSubstring, "faculty_sponsor")
+			So(lower, ShouldContainSubstring, "disambiguate candidate study ids")
 			So(tool.Description, ShouldContainSubstring, "3")
 			So(tool.Description, ShouldContainSubstring, "1000")
 		})
@@ -282,6 +311,29 @@ func threeStudies() []wa.Study {
 		{IDStudyTmp: 10, Name: "Cancer One", StudyTitle: "A cancer study"},
 		{IDStudyTmp: 11, Name: "Cancer Two", StudyTitle: "Another cancer study"},
 		{IDStudyTmp: 12, Name: "Cancer Three", StudyTitle: "Yet another cancer study"},
+	}
+}
+
+func twoCancerStudies() []wa.Study {
+	return []wa.Study{
+		{
+			IDStudyTmp:      10,
+			IDStudyLims:     "S1",
+			Name:            "Cancer One",
+			StudyTitle:      "Tumour WGS",
+			Programme:       "Cancer",
+			FacultySponsor:  "Carl",
+			AccessionNumber: "ERP1",
+		},
+		{
+			IDStudyTmp:      11,
+			IDStudyLims:     "S2",
+			Name:            "Cancer Two",
+			StudyTitle:      "Tumour RNA",
+			Programme:       "Cancer",
+			FacultySponsor:  "Carla",
+			AccessionNumber: "ERP2",
+		},
 	}
 }
 

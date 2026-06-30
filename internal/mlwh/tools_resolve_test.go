@@ -26,6 +26,7 @@
 package mlwh
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 
@@ -34,6 +35,94 @@ import (
 
 	. "github.com/smartystreets/goconvey/convey"
 )
+
+// TestCountFindSamplesTool covers D4 (the single enum-driven
+// mlwh_count_find_samples tool unifying the five CountFindSamplesBy* endpoints).
+func TestCountFindSamplesTool(t *testing.T) {
+	Convey("Given the MLWH server (stub-backed) with mlwh_count_find_samples", t, func() {
+		stub := newStubMLWH(t)
+		cs, cleanup := runMLWHServerWithClient(t, stub)
+		defer cleanup()
+
+		Convey("D4.1: field sanger_id routes to /find/sample/sanger-id/ABC/count and returns {\"count\":1}", func() {
+			stub.respondJSON("/find/sample/sanger-id/ABC/count", http.StatusOK, wa.Count{Count: 1})
+
+			res := callTool(t, cs, "mlwh_count_find_samples", map[string]any{"field": "sanger_id", "value": "ABC"})
+
+			obj := structuredObject(res)
+			So(obj["count"], ShouldEqual, float64(1))
+
+			req, ok := stub.lastRequest()
+			So(ok, ShouldBeTrue)
+			So(req.Path, ShouldEqual, "/find/sample/sanger-id/ABC/count")
+		})
+
+		Convey("D4.2: field lims_id routes to /find/sample/lims-id/LIMS1/count and returns {\"count\":2}", func() {
+			stub.respondJSON("/find/sample/lims-id/LIMS1/count", http.StatusOK, wa.Count{Count: 2})
+
+			res := callTool(t, cs, "mlwh_count_find_samples", map[string]any{"field": "lims_id", "value": "LIMS1"})
+
+			obj := structuredObject(res)
+			So(obj["count"], ShouldEqual, float64(2))
+
+			req, ok := stub.lastRequest()
+			So(ok, ShouldBeTrue)
+			So(req.Path, ShouldEqual, "/find/sample/lims-id/LIMS1/count")
+		})
+
+		Convey("D4.3: field accession routes to /find/sample/accession/ERS1/count and returns {\"count\":1}", func() {
+			stub.respondJSON("/find/sample/accession/ERS1/count", http.StatusOK, wa.Count{Count: 1})
+
+			res := callTool(t, cs, "mlwh_count_find_samples", map[string]any{"field": "accession", "value": "ERS1"})
+
+			obj := structuredObject(res)
+			So(obj["count"], ShouldEqual, float64(1))
+
+			req, ok := stub.lastRequest()
+			So(ok, ShouldBeTrue)
+			So(req.Path, ShouldEqual, "/find/sample/accession/ERS1/count")
+		})
+
+		Convey("D4.4: field supplier_name routes to /find/sample/supplier-name/Bob/count and returns {\"count\":3}", func() {
+			stub.respondJSON("/find/sample/supplier-name/Bob/count", http.StatusOK, wa.Count{Count: 3})
+
+			res := callTool(t, cs, "mlwh_count_find_samples", map[string]any{"field": "supplier_name", "value": "Bob"})
+
+			obj := structuredObject(res)
+			So(obj["count"], ShouldEqual, float64(3))
+
+			req, ok := stub.lastRequest()
+			So(ok, ShouldBeTrue)
+			So(req.Path, ShouldEqual, "/find/sample/supplier-name/Bob/count")
+		})
+
+		Convey("D4.5: field library_type routes to /find/sample/library-type/WGS/count and returns {\"count\":5}", func() {
+			stub.respondJSON("/find/sample/library-type/WGS/count", http.StatusOK, wa.Count{Count: 5})
+
+			res := callTool(t, cs, "mlwh_count_find_samples", map[string]any{"field": "library_type", "value": "WGS"})
+
+			obj := structuredObject(res)
+			So(obj["count"], ShouldEqual, float64(5))
+
+			req, ok := stub.lastRequest()
+			So(ok, ShouldBeTrue)
+			So(req.Path, ShouldEqual, "/find/sample/library-type/WGS/count")
+		})
+
+		Convey("D4.6: an invalid field is rejected with supported fields named and no HTTP request", func() {
+			res := callTool(t, cs, "mlwh_count_find_samples", map[string]any{"field": "bad", "value": "x"})
+
+			So(res.IsError, ShouldBeTrue)
+			msg := firstTextContent(res)
+			So(msg, ShouldContainSubstring, "sanger_id")
+			So(msg, ShouldContainSubstring, "lims_id")
+			So(msg, ShouldContainSubstring, "accession")
+			So(msg, ShouldContainSubstring, "supplier_name")
+			So(msg, ShouldContainSubstring, "library_type")
+			So(stub.requestCount(), ShouldEqual, 0)
+		})
+	})
+}
 
 // TestResolveTools covers Story B1 (the seven resolve/classify tools) and
 // realises Story F1.2's tool-level assertion on mlwh_resolve_sample's output

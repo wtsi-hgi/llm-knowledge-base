@@ -53,7 +53,7 @@ var aToETools = []string{
 	"mlwh_count_studies_search",
 	"mlwh_count_studies",
 
-	// B: resolve/classify (7), unified find-samples (1), expand (3).
+	// B/D4: resolve/classify (7), unified find-samples/count (2), expand (3).
 	"mlwh_classify_identifier",
 	"mlwh_resolve_sample",
 	"mlwh_resolve_sample_name",
@@ -62,6 +62,7 @@ var aToETools = []string{
 	"mlwh_resolve_library",
 	"mlwh_resolve_library_identifier",
 	"mlwh_find_samples",
+	"mlwh_count_find_samples",
 	"mlwh_expand_identifier",
 	"mlwh_expand_search_values",
 	"mlwh_expand_sample_search_values",
