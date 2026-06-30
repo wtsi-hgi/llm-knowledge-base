@@ -27,7 +27,9 @@ package mlwh
 
 import (
 	"context"
+	"net/http"
 	"net/url"
+	"strconv"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -78,20 +80,20 @@ func (p *provider) registerCallTool(r core.Registrar) error {
 }
 
 // callEndpoint dispatches the chosen Registry Method through
-// (*RemoteClient).Call, which validates the Method (rejecting unknown methods)
-// and the path-param arity itself, so no pre-check against the Registry is
-// needed. It converts the input's query parameters to url.Values and, on a Call
-// error, maps it to a clear tool error whose message still names the offending
-// method or arity (mapToolError preserves the upstream text); on success it
-// returns the decoded value as the untyped Out for the SDK to place in
-// StructuredContent.
+// (*RemoteClient).CallWithHeaders, which validates the Method (rejecting unknown
+// methods) and the path-param arity itself, so no pre-check against the Registry
+// is needed. It converts the input's query parameters to url.Values and, on a
+// call error, maps it to a clear tool error whose message still names the
+// offending method or arity (mapToolError preserves the upstream text); on
+// success it returns the decoded value as the untyped Out for the SDK to place in
+// StructuredContent, adding generic pagination metadata when upstream sent it.
 func callEndpoint(ctx context.Context, client caller, in CallInput) (*mcp.CallToolResult, any, error) {
-	decoded, err := client.Call(ctx, in.Method, in.PathParams, queryValues(in.QueryParams))
+	decoded, headers, err := client.CallWithHeaders(ctx, in.Method, in.PathParams, queryValues(in.QueryParams))
 	if err != nil {
 		return core.ToolError[any](mapToolError(err))
 	}
 
-	return nil, decoded, nil
+	return nil, dynamicResult(decoded, headers), nil
 }
 
 // queryValues converts the input's query parameters (a flat string map) to the
@@ -107,9 +109,35 @@ func queryValues(params map[string]string) url.Values {
 	return values
 }
 
-// caller is the (*RemoteClient).Call surface callEndpoint needs: the generic
-// dispatcher keyed by Registry Method name. Depending on this method set rather
-// than the concrete client keeps callEndpoint's contract explicit.
+func dynamicResult(decoded any, headers http.Header) any {
+	if headers.Get("X-Total-Count") == "" && headers.Get("X-Next-Offset") == "" {
+		return decoded
+	}
+
+	return map[string]any{
+		"result":      decoded,
+		"total":       headerInt(headers, "X-Total-Count", 0),
+		"next_offset": headerInt(headers, "X-Next-Offset", -1),
+	}
+}
+
+func headerInt(headers http.Header, name string, fallback int) int {
+	raw := headers.Get(name)
+	if raw == "" {
+		return fallback
+	}
+
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return fallback
+	}
+
+	return value
+}
+
+// caller is the (*RemoteClient).CallWithHeaders surface callEndpoint needs: the
+// generic dispatcher keyed by Registry Method name. Depending on this method set
+// rather than the concrete client keeps callEndpoint's contract explicit.
 type caller interface {
-	Call(ctx context.Context, method string, pathParams []string, query url.Values) (any, error)
+	CallWithHeaders(ctx context.Context, method string, pathParams []string, query url.Values) (any, http.Header, error)
 }

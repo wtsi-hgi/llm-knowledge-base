@@ -27,12 +27,14 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"testing"
 	"time"
 
 	wa "github.com/wtsi-hgi/wa/mlwh"
 
 	"github.com/wtsi-hgi/llm-knowledge-base/internal/core"
+	"github.com/wtsi-hgi/llm-knowledge-base/internal/mlwh"
 
 	. "github.com/smartystreets/goconvey/convey"
 )
@@ -81,6 +83,62 @@ func TestRunVersionFlag(t *testing.T) {
 			out := stdout.String()
 			So(out, ShouldContainSubstring, core.ServerVersion)
 			So(out, ShouldContainSubstring, wa.APIVersion)
+		})
+	})
+}
+
+type testCmdProvider struct{}
+
+func (testCmdProvider) Name() string { return "test" }
+
+func (testCmdProvider) APIVersion() string { return "test 1.0.0" }
+
+func (testCmdProvider) Register(context.Context, core.Registrar) error { return nil }
+
+// TestMaxToolResultBytesConfig exercises A2 command wiring: the MLWH byte-limit
+// flag resolves into core.Options, and an invalid environment fallback aborts
+// startup with the offending variable named before any stdio serving begins.
+func TestMaxToolResultBytesConfig(t *testing.T) {
+	Convey("Given --mlwh-max-tool-result-bytes=2048", t, func() {
+		cfg, showVersion, err := parseArgs([]string{"--mlwh-max-tool-result-bytes=2048"})
+		So(err, ShouldBeNil)
+		So(showVersion, ShouldBeFalse)
+
+		maxBytes, err := cfg.ResolveMaxToolResultBytes(func(string) string { return "" })
+		So(err, ShouldBeNil)
+
+		opts := coreOptions(testCmdProvider{}, maxBytes)
+
+		Convey("A2.3: the resolved core options receive MaxToolResultBytes=2048", func() {
+			So(opts.MaxToolResultBytes, ShouldEqual, 2048)
+		})
+	})
+
+	Convey("Given env MLWH_MAX_TOOL_RESULT_BYTES=bad", t, func() {
+		t.Setenv("MLWH_MAX_TOOL_RESULT_BYTES", "bad")
+
+		done := make(chan error, 1)
+
+		go func() {
+			done <- serve(mlwh.Config{})
+		}()
+
+		var (
+			err     error
+			settled bool
+		)
+
+		select {
+		case err = <-done:
+			settled = true
+		case <-time.After(3 * time.Second):
+			settled = false
+		}
+
+		Convey("A2.4: startup returns an error mentioning MLWH_MAX_TOOL_RESULT_BYTES", func() {
+			So(settled, ShouldBeTrue)
+			So(err, ShouldNotBeNil)
+			So(err.Error(), ShouldContainSubstring, "MLWH_MAX_TOOL_RESULT_BYTES")
 		})
 	})
 }

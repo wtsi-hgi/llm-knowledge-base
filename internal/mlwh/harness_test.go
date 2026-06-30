@@ -201,15 +201,25 @@ func (s *stubMLWH) lastRequest() (recordedRequest, bool) {
 func runMLWHServerWithClient(t *testing.T, stub *stubMLWH) (*mcp.ClientSession, func()) {
 	t.Helper()
 
+	return runMLWHServerWithClientOptions(t, stub, core.Options{})
+}
+
+func runMLWHServerWithClientOptions(
+	t *testing.T,
+	stub *stubMLWH,
+	opts core.Options,
+) (*mcp.ClientSession, func()) {
+	t.Helper()
+
 	provider, err := New(wa.RemoteConfig{BaseURL: stub.server.URL})
 	if err != nil {
 		t.Fatalf("mlwh.New() returned error: %v", err)
 	}
 
-	srv, err := core.New(core.Options{
-		ServerVersion: "test",
-		Providers:     []core.Provider{provider},
-	})
+	opts.ServerVersion = firstNonEmpty(opts.ServerVersion, "test")
+	opts.Providers = []core.Provider{provider}
+
+	srv, err := core.New(opts)
 	if err != nil {
 		t.Fatalf("core.New() returned error: %v", err)
 	}

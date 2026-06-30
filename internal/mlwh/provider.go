@@ -31,6 +31,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 
 	wa "github.com/wtsi-hgi/wa/mlwh"
@@ -42,10 +43,20 @@ import (
 // matching flag (see Config.BindFlags); a flag value, when set, wins over its
 // environment fallback.
 const (
-	envBaseURL = "MLWH_BASE_URL"
-	envCACert  = "MLWH_CA_CERT"
-	envTimeout = "MLWH_TIMEOUT"
+	envBaseURL            = "MLWH_BASE_URL"
+	envCACert             = "MLWH_CA_CERT"
+	envTimeout            = "MLWH_TIMEOUT"
+	envMaxToolResultBytes = "MLWH_MAX_TOOL_RESULT_BYTES"
 )
+
+// DefaultMaxToolResultBytes is the MLWH binary's default result-size budget.
+// Operators can override it with --mlwh-max-tool-result-bytes or
+// MLWH_MAX_TOOL_RESULT_BYTES; values <= 0 disable the core guard.
+const DefaultMaxToolResultBytes = 1048576
+
+// ToolResultSizeGuidance is included in core.ToolResultSizeError for MLWH
+// calls, so agents know to switch to cheaper aggregate/count/page workflows.
+const ToolResultSizeGuidance = "Use MLWH overview, status, or count tools first; for list/detail endpoints request a smaller page with limit and offset."
 
 // ErrBaseURLRequired is returned by New when no MLWH base URL was configured
 // through any source. The MLWH API is reached only by its base URL, so the
@@ -76,6 +87,11 @@ type Config struct {
 	// "5s" (flag --mlwh-timeout, env MLWH_TIMEOUT). Empty leaves the wa client
 	// default in force.
 	Timeout string
+
+	// MaxToolResultBytes is the optional core result-size limit as raw bytes
+	// (flag --mlwh-max-tool-result-bytes, env MLWH_MAX_TOOL_RESULT_BYTES). Empty
+	// uses DefaultMaxToolResultBytes; values <= 0 disable the guard.
+	MaxToolResultBytes string
 }
 
 // BindFlags registers the --mlwh-base-url, --mlwh-ca-cert, and --mlwh-timeout
@@ -86,6 +102,7 @@ func (c *Config) BindFlags(fs *flag.FlagSet) {
 	fs.StringVar(&c.BaseURL, "mlwh-base-url", "", "MLWH REST base URL (required; env "+envBaseURL+")")
 	fs.StringVar(&c.CACert, "mlwh-ca-cert", "", "path to a PEM CA cert trusted for the MLWH TLS connection (env "+envCACert+")")
 	fs.StringVar(&c.Timeout, "mlwh-timeout", "", "MLWH per-request timeout as a Go duration, e.g. 5s (env "+envTimeout+")")
+	fs.StringVar(&c.MaxToolResultBytes, "mlwh-max-tool-result-bytes", "", "maximum marshaled MCP tool-result bytes before returning a structured size error (env "+envMaxToolResultBytes+")")
 }
 
 // Resolve folds the environment into the (flag-sourced) Config and returns the
@@ -133,6 +150,33 @@ func firstNonEmpty(values ...string) string {
 	}
 
 	return ""
+}
+
+// ResolveMaxToolResultBytes folds the flag/env byte-budget setting into the
+// integer value passed to core.Options.MaxToolResultBytes. A non-empty Config
+// field (normally the flag) wins over MLWH_MAX_TOOL_RESULT_BYTES; if neither is
+// set, DefaultMaxToolResultBytes is returned.
+func (c Config) ResolveMaxToolResultBytes(getenv func(string) string) (int, error) {
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+
+	raw := c.MaxToolResultBytes
+	source := "--mlwh-max-tool-result-bytes"
+	if raw == "" {
+		raw = getenv(envMaxToolResultBytes)
+		source = envMaxToolResultBytes
+	}
+	if raw == "" {
+		return DefaultMaxToolResultBytes, nil
+	}
+
+	maxBytes, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, fmt.Errorf("mlwh: invalid %s %q: %w", source, raw, err)
+	}
+
+	return maxBytes, nil
 }
 
 // provider is the MLWH core.Provider. It owns the remote client the tools

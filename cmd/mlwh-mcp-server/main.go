@@ -66,6 +66,19 @@ func main() {
 // transport is opened, so `mlwh-mcp-server --version` works with no MLWH_BASE_URL set
 // and returns promptly without serving or blocking on stdin.
 func run(args []string, stdout io.Writer) error {
+	cfg, showVersion, err := parseArgs(args)
+	if err != nil {
+		return err
+	}
+
+	if showVersion {
+		return printVersion(stdout)
+	}
+
+	return serve(cfg)
+}
+
+func parseArgs(args []string) (mlwh.Config, bool, error) {
 	fs := flag.NewFlagSet("mlwh-mcp-server", flag.ContinueOnError)
 
 	showVersion := fs.Bool("version", false, "print the server version and the targeted MLWH API version, then exit")
@@ -74,14 +87,10 @@ func run(args []string, stdout io.Writer) error {
 	cfg.BindFlags(fs)
 
 	if err := fs.Parse(args); err != nil {
-		return err
+		return mlwh.Config{}, false, err
 	}
 
-	if *showVersion {
-		return printVersion(stdout)
-	}
-
-	return serve(cfg)
+	return cfg, *showVersion, nil
 }
 
 // printVersion writes this server's build version (core.ServerVersion) and the
@@ -106,15 +115,17 @@ func serve(cfg mlwh.Config) error {
 		return err
 	}
 
+	maxToolResultBytes, err := cfg.ResolveMaxToolResultBytes(nil)
+	if err != nil {
+		return err
+	}
+
 	provider, err := mlwh.New(remoteCfg)
 	if err != nil {
 		return err
 	}
 
-	srv, err := core.New(core.Options{
-		ServerVersion: core.ServerVersion,
-		Providers:     []core.Provider{provider},
-	})
+	srv, err := core.New(coreOptions(provider, maxToolResultBytes))
 	if err != nil {
 		return err
 	}
@@ -123,4 +134,13 @@ func serve(cfg mlwh.Config) error {
 	defer stop()
 
 	return srv.Run(ctx, &mcp.StdioTransport{})
+}
+
+func coreOptions(provider core.Provider, maxToolResultBytes int) core.Options {
+	return core.Options{
+		ServerVersion:          core.ServerVersion,
+		Providers:              []core.Provider{provider},
+		MaxToolResultBytes:     maxToolResultBytes,
+		ToolResultSizeGuidance: mlwh.ToolResultSizeGuidance,
+	}
 }

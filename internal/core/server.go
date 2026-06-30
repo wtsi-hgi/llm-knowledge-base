@@ -62,6 +62,14 @@ type Options struct {
 	// Providers are the backing services to register when the server runs. The
 	// shipped binary configures exactly one (MLWH); tests may configure others.
 	Providers []Provider
+
+	// MaxToolResultBytes is the maximum marshaled CallToolResult size the core
+	// will return. Values <= 0 disable result-size guarding.
+	MaxToolResultBytes int
+
+	// ToolResultSizeGuidance is included in oversized-result tool errors so
+	// callers know which cheaper workflow to try next.
+	ToolResultSizeGuidance string
 }
 
 // Server is a configured core MCP server: implementation info, instructions,
@@ -97,6 +105,11 @@ func New(opts Options) (*Server, error) {
 			Logger:       logger,
 		},
 	)
+	if opts.MaxToolResultBytes > 0 {
+		mcpServer.AddReceivingMiddleware(
+			ResultSizeGuard(opts.MaxToolResultBytes, opts.ToolResultSizeGuidance),
+		)
+	}
 
 	// The core registers the version resource itself (Story G2), not via a
 	// provider, so it is present regardless of which providers are configured.

@@ -334,11 +334,28 @@ func TestProviderConfig(t *testing.T) {
 			So(err, ShouldBeNil)
 			So(cfg.BaseURL, ShouldEqual, "http://from-flag.example")
 		})
+
+		Convey("MaxToolResultBytes defaults to the MLWH guard budget", func() {
+			clearMLWHEnv(t)
+
+			maxBytes, err := (Config{}).ResolveMaxToolResultBytes(nil)
+			So(err, ShouldBeNil)
+			So(maxBytes, ShouldEqual, DefaultMaxToolResultBytes)
+		})
+
+		Convey("MLWH_MAX_TOOL_RESULT_BYTES resolves to an integer byte budget", func() {
+			clearMLWHEnv(t)
+			t.Setenv("MLWH_MAX_TOOL_RESULT_BYTES", "4096")
+
+			maxBytes, err := (Config{}).ResolveMaxToolResultBytes(nil)
+			So(err, ShouldBeNil)
+			So(maxBytes, ShouldEqual, 4096)
+		})
 	})
 }
 
 func TestProviderBindFlags(t *testing.T) {
-	Convey("BindFlags registers the three --mlwh-* flags so cmd/mlwh-mcp-server can wire them", t, func() {
+	Convey("BindFlags registers the four --mlwh-* flags so cmd/mlwh-mcp-server can wire them", t, func() {
 		clearMLWHEnv(t)
 
 		var cfg Config
@@ -349,18 +366,24 @@ func TestProviderBindFlags(t *testing.T) {
 			"--mlwh-base-url", "http://flagged.example",
 			"--mlwh-ca-cert", "/tmp/ca.pem",
 			"--mlwh-timeout", "9s",
+			"--mlwh-max-tool-result-bytes", "2048",
 		})
 		So(err, ShouldBeNil)
 
 		So(cfg.BaseURL, ShouldEqual, "http://flagged.example")
 		So(cfg.CACert, ShouldEqual, "/tmp/ca.pem")
 		So(cfg.Timeout, ShouldEqual, "9s")
+		So(cfg.MaxToolResultBytes, ShouldEqual, "2048")
 
 		resolved, err := cfg.Resolve(nil)
 		So(err, ShouldBeNil)
 		So(resolved.BaseURL, ShouldEqual, "http://flagged.example")
 		So(resolved.CACert, ShouldEqual, "/tmp/ca.pem")
 		So(resolved.Timeout, ShouldEqual, 9*time.Second)
+
+		maxBytes, err := cfg.ResolveMaxToolResultBytes(nil)
+		So(err, ShouldBeNil)
+		So(maxBytes, ShouldEqual, 2048)
 	})
 }
 
@@ -373,4 +396,5 @@ func clearMLWHEnv(t *testing.T) {
 	t.Setenv("MLWH_BASE_URL", "")
 	t.Setenv("MLWH_CA_CERT", "")
 	t.Setenv("MLWH_TIMEOUT", "")
+	t.Setenv("MLWH_MAX_TOOL_RESULT_BYTES", "")
 }

@@ -20,5 +20,5 @@ options in `internal/core/`, plus MLWH config flag/env parsing and
 `mlwh_call_endpoint` coverage, covering all 5 acceptance tests from A2.
 Depends on phase 1.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed

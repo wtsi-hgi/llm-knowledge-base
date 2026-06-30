@@ -29,7 +29,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	wa "github.com/wtsi-hgi/wa/mlwh"
+
+	"github.com/wtsi-hgi/llm-knowledge-base/internal/core"
 
 	. "github.com/smartystreets/goconvey/convey"
 )
@@ -131,5 +134,57 @@ func studyMatch() wa.Match {
 		Kind:      wa.KindStudyLimsID,
 		Canonical: "5901",
 		Study:     &wa.Study{IDStudyTmp: 1, IDStudyLims: "5901", Name: "Cancer Study"},
+	}
+}
+
+// TestCallToolResultSizeGuard covers A2.5 at the MLWH boundary: a dynamic
+// mlwh_call_endpoint response is subject to the same core result-size guard as
+// typed curated tools, and the over-budget payload is not returned to the
+// caller.
+func TestCallToolResultSizeGuard(t *testing.T) {
+	Convey("Given mlwh_call_endpoint would return a dynamic payload larger than MaxToolResultBytes", t, func() {
+		stub := newStubMLWH(t)
+		oversizedName := strings.Repeat("x", 1024)
+		stub.respondJSON("/studies", 200, []wa.Study{{IDStudyTmp: 1, IDStudyLims: "S1", Name: oversizedName}})
+
+		cs, cleanup := runMLWHServerWithClientOptions(t, stub, core.Options{
+			MaxToolResultBytes:     200,
+			ToolResultSizeGuidance: "use mlwh_count_studies or pass limit and offset",
+		})
+		defer cleanup()
+
+		res := callTool(t, cs, "mlwh_call_endpoint", map[string]any{"method": "AllStudies"})
+
+		Convey("A2.5: the result is the structured tool_result_too_large error", func() {
+			obj := callSizeErrorObject(res)
+			So(obj["code"], ShouldEqual, "tool_result_too_large")
+			So(numericJSON(obj["limit_bytes"]), ShouldEqual, float64(200))
+			So(numericJSON(obj["actual_bytes"]), ShouldBeGreaterThan, float64(200))
+			So(obj["guidance"], ShouldEqual, "use mlwh_count_studies or pass limit and offset")
+		})
+
+		Convey("the dynamic payload is absent from the returned content", func() {
+			So(firstTextContent(res), ShouldNotContainSubstring, oversizedName)
+		})
+	})
+}
+
+func callSizeErrorObject(res *mcp.CallToolResult) map[string]any {
+	So(res.IsError, ShouldBeTrue)
+
+	obj, ok := res.StructuredContent.(map[string]any)
+	So(ok, ShouldBeTrue)
+
+	return obj
+}
+
+func numericJSON(value any) float64 {
+	switch n := value.(type) {
+	case float64:
+		return n
+	case int:
+		return float64(n)
+	default:
+		return -1
 	}
 }
