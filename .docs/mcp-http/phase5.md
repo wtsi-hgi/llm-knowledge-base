@@ -36,8 +36,8 @@ example that sets `MLWH_BASE_URL` and `MLWH_HTTP_ADDR`. Add GoConvey
 assertions in `cmd/mlwh-mcp-server/readme_test.go`, covering all 4 acceptance
 tests from D1.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 ### Item 5.2: D2 - URL-based client docs
 
@@ -53,8 +53,8 @@ not install or run a local `mlwh-mcp-server` binary for the shared HTTP client
 setup. Also assert HTTP client examples do not include local command forms.
 Cover all 6 acceptance tests from D2.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 ### Item 5.3: E1 - Dependency and test gates
 
@@ -66,5 +66,5 @@ run the targeted `CGO_ENABLED=1 go test -tags netgo --count 1 -v` command for
 `golangci-lint run --fix`, and inspect CI/Makefile shape so no new service
 or binary target is added. Cover the remaining 3 acceptance tests from E1.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
