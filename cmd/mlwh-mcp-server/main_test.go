@@ -298,11 +298,10 @@ func TestServeSelectsHTTP(t *testing.T) {
 		So(fakeServer.ctx, ShouldEqual, signalCtx)
 		So(fakeServer.runCalls, ShouldEqual, 0)
 		So(fakeServer.runHTTPCalls, ShouldEqual, 1)
-		So(fakeServer.httpOpts, ShouldResemble, core.HTTPOptions{
-			Addr:       "127.0.0.1:0",
-			MCPPath:    "/mcp",
-			HealthPath: "/health",
-		})
+		So(fakeServer.httpOpts.Addr, ShouldEqual, "127.0.0.1:0")
+		So(fakeServer.httpOpts.MCPPath, ShouldEqual, "/mcp")
+		So(fakeServer.httpOpts.HealthPath, ShouldEqual, "/health")
+		So(fakeServer.httpOpts.LogWriter, ShouldEqual, os.Stderr)
 		So(stopCalls, ShouldEqual, 1)
 	})
 }

@@ -199,6 +199,7 @@ func serve(cfg commandConfig) error {
 			Addr:       cfg.HTTPAddr,
 			MCPPath:    "/mcp",
 			HealthPath: "/health",
+			LogWriter:  os.Stderr,
 		})
 	}
 
