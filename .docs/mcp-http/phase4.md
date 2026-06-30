@@ -34,8 +34,8 @@ for tools, resources, workflow resource content, dynamic endpoint calls, and
 stub query recording. Include the concurrency coverage called out in the
 Implementation Order. Cover all 5 acceptance tests from C1.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 ### Item 4.2: C2 - Version surfaces still work over HTTP
 
@@ -48,5 +48,5 @@ instructions, and `mcp-server://version` must expose `0.1.0` and
 `wa.APIVersion`. Cover the remaining 3 acceptance tests from C2; C2
 acceptance test 4 is completed in phase 2.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed

@@ -84,6 +84,21 @@ func TestStreamableHTTPHandlerServesSharedCore(t *testing.T) {
 		firstSession, firstCleanup := connectHTTPMCPClient(t, httpServer.URL+"/mcp")
 		defer firstCleanup()
 
+		init := firstSession.InitializeResult()
+
+		Convey("C2.1: InitializeResult advertises the core server name and version over HTTP", func() {
+			So(init.ServerInfo, ShouldNotBeNil)
+			So(init.ServerInfo.Name, ShouldEqual, "mlwh-mcp-server")
+			So(init.ServerInfo.Version, ShouldEqual, "0.1.0")
+		})
+
+		Convey("C2.2: Instructions expose the server, provider API, workflow, and version channels over HTTP", func() {
+			So(init.Instructions, ShouldContainSubstring, "0.1.0")
+			So(init.Instructions, ShouldContainSubstring, "TESTAPI 9.9.9")
+			So(init.Instructions, ShouldContainSubstring, "mlwh://workflow")
+			So(init.Instructions, ShouldContainSubstring, "mcp-server://version")
+		})
+
 		Convey("B1.1: a streamable HTTP client lists exactly the provider tool", func() {
 			res, err := firstSession.ListTools(context.Background(), &mcp.ListToolsParams{})
 			So(err, ShouldBeNil)
