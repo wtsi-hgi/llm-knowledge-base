@@ -23,8 +23,8 @@ Update `workflowGuidance` in `internal/mlwh/workflow.go` so
 freshness tools before expensive detail or list calls, covering all 6
 acceptance tests from E3. Depends on phase 8.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 #### Item 9.2: F1 - Preserve actionable upstream errors [parallel with E3]
 
@@ -35,8 +35,8 @@ Ensure every new handler uses `mapToolError` in
 unsupported identifier, never-synced, and impaired upstream failures,
 covering all 8 acceptance tests from F1. Depends on phase 8.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 ### Item 9.3: F2 - Register the full MLWH surface
 
@@ -47,8 +47,8 @@ Extend `internal/mlwh/provider.go` and
 assertions for every new or updated MLWH tool, covering all 4
 acceptance tests from F2. Depends on batch 1 and all prior phases.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 For parallel batch items, use separate subagents per item.
 Launch review subagents using the `go-reviewer` skill

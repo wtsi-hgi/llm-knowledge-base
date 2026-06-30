@@ -27,6 +27,7 @@ package mlwh
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -67,6 +68,68 @@ func TestWorkflowResource(t *testing.T) {
 			So(contents.Text, ShouldContainSubstring, "resolve")
 			So(contents.Text, ShouldContainSubstring, "detail")
 		})
+
+		Convey("E3.1: the workflow guidance routes common questions to cheap tools first", func() {
+			guidance := workflowGuidancePrefix(t, contents.Text)
+
+			So(guidance, ShouldContainSubstring, "mlwh_study_overview")
+			So(guidance, ShouldContainSubstring, "mlwh_count_samples_with_data_for_study")
+			So(guidance, ShouldContainSubstring, "mlwh_study_status_breakdown")
+			So(guidance, ShouldContainSubstring, "mlwh_sample_progress")
+			So(guidance, ShouldContainSubstring, "mlwh_run_status")
+			So(guidance, ShouldContainSubstring, "mlwh_study_manifest")
+			So(guidance, ShouldContainSubstring, "file_type=cram")
+			So(guidance, ShouldContainSubstring, "mlwh_resolve_person")
+		})
+
+		Convey("E3.2: the workflow guidance describes recency by iRODS created timestamps", func() {
+			guidance := workflowGuidancePrefix(t, contents.Text)
+
+			So(guidance, ShouldContainSubstring, "added_last_7_days")
+			So(guidance, ShouldContainSubstring, "since")
+			So(guidance, ShouldContainSubstring, "until")
+			So(guidance, ShouldContainSubstring, "added to iRODS")
+			So(guidance, ShouldContainSubstring, "iRODS `created`")
+			So(guidance, ShouldNotContainSubstring, "last_changed is new data")
+			So(guidance, ShouldNotContainSubstring, "last_updated is new data")
+		})
+
+		Convey("E3.3: the workflow guidance warns away from expensive detail and iRODS paging", func() {
+			guidance := workflowGuidancePrefix(t, contents.Text)
+
+			So(guidance, ShouldContainSubstring, "do not page iRODS")
+			So(guidance, ShouldContainSubstring, "mlwh_study_detail")
+			So(guidance, ShouldContainSubstring, "availability/count questions")
+			So(guidance, ShouldContainSubstring, "data-access-group questions")
+			So(guidance, ShouldContainSubstring, "do not use study detail")
+		})
+
+		Convey("E3.4: the workflow guidance keeps open phase elapsed time on the agent side", func() {
+			guidance := workflowGuidancePrefix(t, contents.Text)
+
+			So(guidance, ShouldContainSubstring, "open phase elapsed time")
+			So(guidance, ShouldContainSubstring, "agent side")
+			So(guidance, ShouldContainSubstring, "reached_at")
+			So(guidance, ShouldContainSubstring, "entered_at")
+		})
+
+		Convey("E3.5: the Registry-derived catalogue is still appended with study overview", func() {
+			So(contents.Text, ShouldContainSubstring, wa.EndpointReference())
+			So(contents.Text, ShouldContainSubstring, "/study/:id/overview")
+		})
+
+		Convey("E3.6: the workflow guidance explains cache freshness caveats", func() {
+			guidance := workflowGuidancePrefix(t, contents.Text)
+
+			So(guidance, ShouldContainSubstring, "cache_synced_at")
+			So(guidance, ShouldContainSubstring, "when present")
+			So(guidance, ShouldContainSubstring, "mlwh_freshness")
+			So(guidance, ShouldContainSubstring, "bare lists")
+			So(guidance, ShouldContainSubstring, "counts")
+			So(guidance, ShouldContainSubstring, "mlwh_run_status")
+			So(guidance, ShouldContainSubstring, "mlwh_call_endpoint")
+			So(guidance, ShouldContainSubstring, "without cache_synced_at")
+		})
 	})
 }
 
@@ -87,4 +150,17 @@ func readResource(t *testing.T, cs *mcp.ClientSession, uri string) *mcp.Resource
 	}
 
 	return res.Contents[0]
+}
+
+// workflowGuidancePrefix returns the human-authored guidance portion before the
+// Registry-derived endpoint catalogue in the public resource body.
+func workflowGuidancePrefix(t *testing.T, body string) string {
+	t.Helper()
+
+	parts := strings.SplitN(body, "\n---\n\n", 2)
+	if len(parts) != 2 {
+		t.Fatalf("workflow resource body did not contain guidance/catalogue separator")
+	}
+
+	return parts[0]
 }

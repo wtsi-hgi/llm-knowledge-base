@@ -219,7 +219,7 @@ func (p *provider) addCountSamples(r core.Registrar, outputSchema map[string]any
 
 	mcp.AddTool(r.Server(), &mcp.Tool{
 		Name:         "mlwh_count_samples",
-		Description:  countSamplesDescription,
+		Description:  countSamplesDescription + countFreshnessNote,
 		OutputSchema: outputSchema,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in termInput) (*mcp.CallToolResult, wa.Count, error) {
 		if err := guardTerm(in.Term); err != nil {
@@ -242,7 +242,7 @@ func (p *provider) addCountStudiesSearch(r core.Registrar, outputSchema map[stri
 
 	mcp.AddTool(r.Server(), &mcp.Tool{
 		Name:         "mlwh_count_studies_search",
-		Description:  countStudySearchDescription,
+		Description:  countStudySearchDescription + countFreshnessNote,
 		OutputSchema: outputSchema,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in termInput) (*mcp.CallToolResult, wa.Count, error) {
 		if err := guardTerm(in.Term); err != nil {
@@ -271,7 +271,7 @@ func (p *provider) addCountStudies(r core.Registrar, outputSchema map[string]any
 
 	mcp.AddTool(r.Server(), &mcp.Tool{
 		Name:         "mlwh_count_studies",
-		Description:  countStudiesDescription,
+		Description:  countStudiesDescription + countFreshnessNote,
 		OutputSchema: outputSchema,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ emptyInput) (*mcp.CallToolResult, wa.Count, error) {
 		count, err := client.CountStudies(ctx)

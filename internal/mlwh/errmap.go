@@ -68,7 +68,7 @@ func sentinelHints() []errorHint {
 		},
 		{
 			sentinel: wa.ErrUpstreamImpaired,
-			hint:     "the request could not be served (bad request or impaired upstream); fix the input or retry later.",
+			hint:     "the request could not be served (bad request or impaired upstream); fix the input if the upstream message reports a bad request, otherwise retry later after cache or upstream recovery.",
 		},
 	}
 }

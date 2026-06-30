@@ -141,7 +141,7 @@ func (p *provider) addCountStudiesForFacultySponsor(r core.Registrar, outputSche
 
 	mcp.AddTool(r.Server(), &mcp.Tool{
 		Name:         "mlwh_count_studies_for_faculty_sponsor",
-		Description:  description,
+		Description:  description + countFreshnessNote,
 		OutputSchema: outputSchema,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in facultySponsorCountInput) (*mcp.CallToolResult, wa.Count, error) {
 		count, err := client.CountStudiesForFacultySponsor(ctx, in.Name)
@@ -214,7 +214,7 @@ func (p *provider) addCountStudiesForUser(r core.Registrar, outputSchema map[str
 
 	mcp.AddTool(r.Server(), &mcp.Tool{
 		Name:         "mlwh_count_studies_for_user",
-		Description:  description,
+		Description:  description + countFreshnessNote,
 		OutputSchema: outputSchema,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in userCountInput) (*mcp.CallToolResult, wa.Count, error) {
 		count, err := client.CountStudiesForUser(ctx, in.Person, in.Role)
@@ -292,7 +292,7 @@ func (p *provider) addCountResolvePerson(r core.Registrar, outputSchema map[stri
 
 	mcp.AddTool(r.Server(), &mcp.Tool{
 		Name:         "mlwh_count_resolve_person",
-		Description:  description,
+		Description:  description + countFreshnessNote,
 		OutputSchema: outputSchema,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in personTermInput) (*mcp.CallToolResult, wa.Count, error) {
 		count, err := client.CountResolvePerson(ctx, in.Term)

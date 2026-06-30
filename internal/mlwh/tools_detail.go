@@ -59,7 +59,7 @@ func addFanOutCountTool[Input any](
 
 	mcp.AddTool(r.Server(), &mcp.Tool{
 		Name:         toolName,
-		Description:  description,
+		Description:  description + countFreshnessNote,
 		OutputSchema: outputSchema,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in Input) (*mcp.CallToolResult, wa.Count, error) {
 		count, err := call(ctx, in)

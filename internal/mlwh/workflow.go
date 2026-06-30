@@ -44,15 +44,37 @@ const workflowResourceURI = "mlwh://workflow"
 // guessing tools. The mention of "resolve" and "detail" is asserted by Story
 // G1.3, but the guidance is genuine planning help, not test scaffolding.
 const workflowGuidance = "# MLWH workflows\n\n" +
-	"This server bridges the read-only `wa mlwh` API. A common workflow is to " +
-	"**resolve** a raw identifier into a canonical `Match` (e.g. `mlwh_resolve_sample`, " +
-	"`mlwh_resolve_study`), then fetch that entity's **detail** aggregate " +
-	"(e.g. `mlwh_sample_detail`, `mlwh_study_detail`), then **expand** the canonical " +
-	"identifier into related identifiers or downstream search values " +
-	"(`mlwh_expand_identifier`, `mlwh_expand_search_values`). To size a search before " +
-	"transferring rows use the count tools; to caveat answers about staleness use " +
-	"`mlwh_freshness`. The full, always-current endpoint catalogue follows; the generic " +
-	"`mlwh_call_endpoint` tool can reach any endpoint by its Registry Method name.\n\n" +
+	"This server bridges the read-only `wa mlwh` API. Prefer cheap overview, count, " +
+	"status, manifest, person-resolution, and freshness tools before expensive detail " +
+	"or list calls. A common identifier workflow is to **resolve** a raw identifier into " +
+	"a canonical `Match` (e.g. `mlwh_resolve_sample`, `mlwh_resolve_study`), fetch " +
+	"**detail** aggregates only when cheaper tools do not answer the question (e.g. " +
+	"`mlwh_sample_detail`, `mlwh_study_detail`), then **expand** the canonical identifier " +
+	"into related identifiers or downstream search values (`mlwh_expand_identifier`, " +
+	"`mlwh_expand_search_values`).\n\n" +
+	"Cheap-first routes:\n" +
+	"- Availability/counts: use `mlwh_study_overview` or " +
+	"`mlwh_count_samples_with_data_for_study`; do not page iRODS or use " +
+	"`mlwh_study_detail` for availability/count questions.\n" +
+	"- Recency: prefer `added_last_7_days` from `mlwh_study_overview`; otherwise use " +
+	"explicit `since` and `until`. Data \"added to iRODS\" means the iRODS `created` " +
+	"timestamp; `last_changed` and `last_updated` are not new-data timestamps.\n" +
+	"- Data-access-group: use `mlwh_study_overview` or `mlwh_resolve_study`; do not use " +
+	"study detail for data-access-group questions.\n" +
+	"- QC counts: use `mlwh_study_status_breakdown`.\n" +
+	"- Sample/run progress: use `mlwh_sample_progress` and `mlwh_run_status`; compute " +
+	"open phase elapsed time on the agent side from `reached_at` or `entered_at`.\n" +
+	"- CRAM paths: count first, then use an iRODS path tool with `file_type=cram`.\n" +
+	"- Manifest: use `mlwh_study_manifest`; set `with_irods=true` and " +
+	"`file_type=cram` when a CRAM column is requested.\n" +
+	"- People routing: send sponsor questions to faculty-sponsor tools, " +
+	"login/email/membership questions to user tools, and ambiguous names through " +
+	"`mlwh_resolve_person`.\n" +
+	"- Freshness: use response `cache_synced_at` when present; use `mlwh_freshness` for " +
+	"bare lists, counts, `mlwh_run_status`, and `mlwh_call_endpoint` responses without " +
+	"cache_synced_at.\n\n" +
+	"The full, always-current endpoint catalogue follows; the generic `mlwh_call_endpoint` " +
+	"tool can reach any endpoint by its Registry Method name.\n\n" +
 	"---\n\n"
 
 // workflowResourceBody assembles the workflow resource body: the workflow

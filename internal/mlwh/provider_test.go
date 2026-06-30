@@ -38,14 +38,13 @@ import (
 	. "github.com/smartystreets/goconvey/convey"
 )
 
-// aToETools is the full set of tool names the MLWH provider registers for
-// stories A-E: the sample/study search and count tools (A), the
-// resolve/classify, unified find-samples, and expand tools (B), the detail and
-// fan-out enumeration tools (C), the freshness tool (D), and the generic
-// escape-hatch tool (E). I1.1 requires at least the eight headline tools listed
-// in the spec; this fuller set strengthens the assertion so a dropped tool in
-// any group fails the test, not just one of the eight.
-var aToETools = []string{
+// fullSurfaceTools is the full set of typed MLWH tools the provider registers:
+// the original A-E tools plus the phase 5-8 overview/status, availability,
+// manifest, people, and count surfaces that F2 guards. I1.1 requires at least
+// the eight headline tools listed in the spec; this fuller set strengthens the
+// assertion so a dropped tool in any group fails the test, not just one of the
+// named headline tools.
+var fullSurfaceTools = []string{
 	// A: search and count (5).
 	"mlwh_search_samples",
 	"mlwh_count_samples",
@@ -67,6 +66,13 @@ var aToETools = []string{
 	"mlwh_expand_search_values",
 	"mlwh_expand_sample_search_values",
 
+	// B: overview and status (5).
+	"mlwh_study_overview",
+	"mlwh_study_status_breakdown",
+	"mlwh_run_overview",
+	"mlwh_run_status",
+	"mlwh_sample_progress",
+
 	// C: detail (4) and fan-out enumeration (10).
 	"mlwh_sample_detail",
 	"mlwh_study_detail",
@@ -80,6 +86,7 @@ var aToETools = []string{
 	"mlwh_lanes_for_sample",
 	"mlwh_irods_paths_for_sample",
 	"mlwh_irods_paths_for_study",
+	"mlwh_studies_for_sample",
 	"mlwh_count_samples_with_data_for_study",
 	"mlwh_samples_with_data_for_study",
 	"mlwh_samples_without_data_for_study",
@@ -89,8 +96,23 @@ var aToETools = []string{
 	"mlwh_count_irods_paths_for_run",
 	"mlwh_study_manifest",
 	"mlwh_count_study_manifest",
-	"mlwh_studies_for_sample",
 	"mlwh_count_samples_for_study",
+	"mlwh_count_samples_for_run",
+	"mlwh_count_runs_for_study",
+	"mlwh_count_libraries_for_study",
+	"mlwh_count_lanes_for_sample",
+	"mlwh_count_samples_for_library",
+	"mlwh_count_samples_for_library_id",
+	"mlwh_count_samples_for_library_lims_id",
+	"mlwh_count_samples_for_library_type",
+
+	// D2: people and sponsor/user counts (6).
+	"mlwh_studies_for_faculty_sponsor",
+	"mlwh_count_studies_for_faculty_sponsor",
+	"mlwh_studies_for_user",
+	"mlwh_count_studies_for_user",
+	"mlwh_resolve_person",
+	"mlwh_count_resolve_person",
 
 	// D: freshness (1).
 	"mlwh_freshness",
@@ -111,6 +133,24 @@ var i1HeadlineTools = []string{
 	"mlwh_sample_detail",
 	"mlwh_freshness",
 	"mlwh_call_endpoint",
+}
+
+// f2HeadlineTools are the Phase 9 F2 tools explicitly named by the acceptance
+// test. The fullSurfaceTools set above guards every registered surface, while
+// this list keeps the test pinned to F2's named examples.
+var f2HeadlineTools = []string{
+	"mlwh_study_overview",
+	"mlwh_study_status_breakdown",
+	"mlwh_run_overview",
+	"mlwh_run_status",
+	"mlwh_sample_progress",
+	"mlwh_samples_with_data_for_study",
+	"mlwh_samples_without_data_for_study",
+	"mlwh_study_manifest",
+	"mlwh_irods_paths_for_run",
+	"mlwh_studies_for_user",
+	"mlwh_resolve_person",
+	"mlwh_count_find_samples",
 }
 
 func TestProviderNew(t *testing.T) {
@@ -221,24 +261,59 @@ func TestProviderFullSurface(t *testing.T) {
 		cs, cleanup := runMLWHServerWithClient(t, stub)
 		defer cleanup()
 
-		Convey("I1.1: a tools listing includes the MLWH tools from stories A-E", func() {
+		Convey("I1.1/F2.1: a tools listing includes the full MLWH surface", func() {
 			registered := listToolNames(t, cs)
 
 			for _, name := range i1HeadlineTools {
 				So(registered, ShouldContainKey, name)
 			}
 
-			// Strengthen: the full A-E surface registers, so a dropped tool in
-			// any group is caught, not only one of the eight headline tools.
+			for _, name := range f2HeadlineTools {
+				So(registered, ShouldContainKey, name)
+			}
+
+			// Strengthen: the full typed surface registers, so a dropped tool in
+			// any group is caught, not only one of the headline tools.
 			var missing []string
 
-			for _, name := range aToETools {
+			for _, name := range fullSurfaceTools {
 				if _, ok := registered[name]; !ok {
 					missing = append(missing, name)
 				}
 			}
 
 			So(missing, ShouldBeEmpty)
+		})
+
+		Convey("F2.2: every Registry /count method is surfaced by one MCP count tool", func() {
+			tools := listToolsByName(t, cs)
+			registered := toolNameSet(tools)
+			expected := registryCountToolNames()
+
+			missing := missingRegistryCountTools(registered, expected)
+			So(missing, ShouldBeEmpty)
+
+			extra := extraRegisteredCountTools(registered, expected)
+			So(extra, ShouldBeEmpty)
+
+			nonFindMethods := nonFindMethodsUsingCountFindSamples(expected)
+			So(nonFindMethods, ShouldBeEmpty)
+		})
+
+		Convey("F2.3: paged availability and manifest schemas keep semantic fields plus required page metadata", func() {
+			tools := listToolsByName(t, cs)
+
+			failures := pagedToolSchemaFailures(tools, "mlwh_samples_with_data_for_study", "samples")
+			failures = append(failures, pagedToolSchemaFailures(tools, "mlwh_study_manifest", "rows")...)
+
+			So(failures, ShouldBeEmpty)
+		})
+
+		Convey("F2.4: all count tool descriptions point freshness caveats at mlwh_freshness", func() {
+			tools := listToolsByName(t, cs)
+			failures := countToolDescriptionFailures(tools)
+
+			So(failures, ShouldBeEmpty)
 		})
 
 		Convey("I1.2: a resources listing includes mlwh://workflow and mcp-server://version", func() {
@@ -262,17 +337,198 @@ func TestProviderFullSurface(t *testing.T) {
 func listToolNames(t *testing.T, cs *mcp.ClientSession) map[string]struct{} {
 	t.Helper()
 
+	return toolNameSet(listToolsByName(t, cs))
+}
+
+func toolNameSet(tools map[string]*mcp.Tool) map[string]struct{} {
+	names := make(map[string]struct{}, len(tools))
+	for name := range tools {
+		names[name] = struct{}{}
+	}
+
+	return names
+}
+
+// listToolsByName lists the server's tools over the MCP client and returns the
+// full tool metadata by name, so F2 can assert descriptions and schemas as a
+// client observes them.
+func listToolsByName(t *testing.T, cs *mcp.ClientSession) map[string]*mcp.Tool {
+	t.Helper()
+
 	res, err := cs.ListTools(context.Background(), &mcp.ListToolsParams{})
 	if err != nil {
 		t.Fatalf("ListTools() returned error: %v", err)
 	}
 
-	names := make(map[string]struct{}, len(res.Tools))
+	tools := make(map[string]*mcp.Tool, len(res.Tools))
 	for _, tool := range res.Tools {
-		names[tool.Name] = struct{}{}
+		tools[tool.Name] = tool
+	}
+
+	return tools
+}
+
+func registryCountToolNames() map[string]string {
+	names := map[string]string{}
+
+	for _, entry := range wa.Registry {
+		if strings.Contains(entry.Path, "/count") {
+			names[entry.Method] = countToolNameForRegistryMethod(entry.Method)
+		}
 	}
 
 	return names
+}
+
+func countToolNameForRegistryMethod(method string) string {
+	if strings.HasPrefix(method, "CountFindSamplesBy") {
+		return "mlwh_count_find_samples"
+	}
+
+	switch method {
+	case "CountSampleSearch":
+		return "mlwh_count_samples"
+	case "CountStudySearch":
+		return "mlwh_count_studies_search"
+	case "CountSamplesWithData":
+		return "mlwh_count_samples_with_data_for_study"
+	default:
+		return "mlwh_count_" + camelToSnake(strings.TrimPrefix(method, "Count"))
+	}
+}
+
+func camelToSnake(value string) string {
+	var builder strings.Builder
+
+	for i, char := range value {
+		if i > 0 && char >= 'A' && char <= 'Z' {
+			builder.WriteByte('_')
+		}
+
+		if char >= 'A' && char <= 'Z' {
+			char += 'a' - 'A'
+		}
+
+		builder.WriteRune(char)
+	}
+
+	snaked := builder.String()
+	snaked = strings.ReplaceAll(snaked, "i_r_o_d_s", "irods")
+	snaked = strings.ReplaceAll(snaked, "i_d", "id")
+
+	return snaked
+}
+
+func missingRegistryCountTools(registered map[string]struct{}, expected map[string]string) []string {
+	var missing []string
+
+	for method, toolName := range expected {
+		if _, ok := registered[toolName]; !ok {
+			missing = append(missing, method+" -> "+toolName)
+		}
+	}
+
+	return missing
+}
+
+func extraRegisteredCountTools(registered map[string]struct{}, expected map[string]string) []string {
+	expectedNames := map[string]struct{}{}
+	for _, name := range expected {
+		expectedNames[name] = struct{}{}
+	}
+
+	var extra []string
+
+	for name := range registered {
+		if !strings.HasPrefix(name, "mlwh_count_") {
+			continue
+		}
+		if _, ok := expectedNames[name]; !ok {
+			extra = append(extra, name)
+		}
+	}
+
+	return extra
+}
+
+func nonFindMethodsUsingCountFindSamples(expected map[string]string) []string {
+	var methods []string
+
+	for method, toolName := range expected {
+		if toolName == "mlwh_count_find_samples" && !strings.HasPrefix(method, "CountFindSamplesBy") {
+			methods = append(methods, method)
+		}
+	}
+
+	return methods
+}
+
+func pagedToolSchemaFailures(tools map[string]*mcp.Tool, toolName, semanticField string) []string {
+	tool, ok := tools[toolName]
+	if !ok {
+		return []string{toolName + " is not registered"}
+	}
+
+	schema, ok := tool.OutputSchema.(map[string]any)
+	if !ok {
+		return []string{toolName + " output schema is not an object map"}
+	}
+
+	var failures []string
+
+	if schema["type"] != "object" {
+		failures = append(failures, toolName+" output schema type is not object")
+	}
+
+	properties, ok := schema["properties"].(map[string]any)
+	if !ok {
+		return append(failures, toolName+" output schema has no properties object")
+	}
+
+	for _, field := range []string{semanticField, "total", "next_offset"} {
+		if _, ok := properties[field]; !ok {
+			failures = append(failures, toolName+" output schema is missing property "+field)
+		}
+	}
+
+	required := requiredFieldSet(schema)
+	for _, field := range []string{"total", "next_offset"} {
+		if _, ok := required[field]; !ok {
+			failures = append(failures, toolName+" output schema does not require "+field)
+		}
+	}
+
+	return failures
+}
+
+func requiredFieldSet(schema map[string]any) map[string]struct{} {
+	required := map[string]struct{}{}
+
+	fields, _ := schema["required"].([]any)
+	for _, field := range fields {
+		name, ok := field.(string)
+		if ok {
+			required[name] = struct{}{}
+		}
+	}
+
+	return required
+}
+
+func countToolDescriptionFailures(tools map[string]*mcp.Tool) []string {
+	var failures []string
+
+	for name, tool := range tools {
+		if !strings.HasPrefix(name, "mlwh_count_") {
+			continue
+		}
+		if !strings.Contains(tool.Description, "Count responses have no cache_synced_at") ||
+			!strings.Contains(tool.Description, "mlwh_freshness") {
+			failures = append(failures, name)
+		}
+	}
+
+	return failures
 }
 
 // listResourceURIs lists the server's resources over the MCP client and returns
