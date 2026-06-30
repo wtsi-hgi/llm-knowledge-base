@@ -246,3 +246,19 @@ over — any looser phrasing above:
 - **Reuse the SDK's streamable-HTTP handler**; do not hand-roll MCP-over-HTTP.
 - **Tests stay hermetic** (stub MLWH + the SDK's streamable client transport over a
   local listener); never a live warehouse.
+- **HTTP mode is enabled by `--http <addr>` / `MLWH_HTTP_ADDR`.** An absent or
+  empty value keeps the current stdio mode; a non-empty value enables HTTP and the
+  command-line flag takes precedence over the environment.
+- **Serve MCP at `/mcp` and health at `/health` on the same listener.** The health
+  route is separate from MCP and requires no MCP handshake.
+- **Use stateless streamable HTTP.** Configure the SDK handler with
+  `Stateless: true`; the server exposes independent tool/resource requests and
+  needs no server-side session store.
+- **Add a shared core HTTP run path.** The core should expose a `RunHTTP`-style API
+  that registers providers through the same path as stdio, constructs the
+  `go-authserver`, mounts MCP and health routes, logs transport/address metadata,
+  and serves without importing MLWH-specific code.
+- **Use a fixed 5-second graceful drain and a static health response.** On
+  shutdown, stop accepting new HTTP connections and allow up to five seconds for
+  in-flight requests to finish. `GET /health` returns HTTP 200 with
+  `{"status":"ok"}` and does not call MLWH.
