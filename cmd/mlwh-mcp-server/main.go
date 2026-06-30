@@ -50,6 +50,32 @@ import (
 	"github.com/wtsi-hgi/llm-knowledge-base/internal/mlwh"
 )
 
+type signalNotifyContextFunc func(context.Context, ...os.Signal) (context.Context, context.CancelFunc)
+
+var signalNotifyContext signalNotifyContextFunc = signal.NotifyContext
+
+type stdioCoreServer interface {
+	Run(context.Context, mcp.Transport) error
+}
+
+func serveStdio(srv stdioCoreServer) error {
+	ctx, stop := signalNotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	return srv.Run(ctx, &mcp.StdioTransport{})
+}
+
+type httpCoreServer interface {
+	RunHTTP(context.Context, core.HTTPOptions) error
+}
+
+func serveHTTP(srv httpCoreServer, opts core.HTTPOptions) error {
+	ctx, stop := signalNotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	return srv.RunHTTP(ctx, opts)
+}
+
 func main() {
 	if err := run(os.Args[1:], os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, "mlwh-mcp-server:", err)
@@ -130,10 +156,7 @@ func serve(cfg mlwh.Config) error {
 		return err
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	return srv.Run(ctx, &mcp.StdioTransport{})
+	return serveStdio(srv)
 }
 
 func coreOptions(provider core.Provider, maxToolResultBytes int) core.Options {

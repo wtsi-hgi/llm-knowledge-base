@@ -28,6 +28,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"os"
 	"testing"
 	"time"
 
@@ -141,4 +142,79 @@ func TestMaxToolResultBytesConfig(t *testing.T) {
 			So(err.Error(), ShouldContainSubstring, "MLWH_MAX_TOOL_RESULT_BYTES")
 		})
 	})
+}
+
+type recordingHTTPCoreServer struct {
+	ctx     context.Context
+	opts    core.HTTPOptions
+	started chan struct{}
+}
+
+func (s *recordingHTTPCoreServer) RunHTTP(ctx context.Context, opts core.HTTPOptions) error {
+	s.ctx = ctx
+	s.opts = opts
+	close(s.started)
+	<-ctx.Done()
+
+	return nil
+}
+
+func TestServeHTTPUsesSignalNotifyContext(t *testing.T) {
+	Convey("B3.5: Given HTTP serving uses an injected signal.NotifyContext wrapper", t, func() {
+		signalCtx, cancelSignal := context.WithCancel(context.Background())
+		stopCalls := 0
+		previousSignalNotifyContext := signalNotifyContext
+		signalNotifyContext = func(context.Context, ...os.Signal) (context.Context, context.CancelFunc) {
+			return signalCtx, func() {
+				stopCalls++
+			}
+		}
+
+		fakeServer := &recordingHTTPCoreServer{
+			started: make(chan struct{}),
+		}
+		done := make(chan error, 1)
+
+		Reset(func() {
+			cancelSignal()
+			signalNotifyContext = previousSignalNotifyContext
+		})
+
+		go func() {
+			done <- serveHTTP(fakeServer, core.HTTPOptions{
+				Addr:       "127.0.0.1:0",
+				MCPPath:    "/mcp",
+				HealthPath: "/health",
+			})
+		}()
+
+		waitForCommandSignal(t, fakeServer.started, 3*time.Second, "RunHTTP did not start")
+		cancelSignal()
+
+		err, settled := waitForCommandResult(done, 3*time.Second)
+
+		So(fakeServer.ctx, ShouldEqual, signalCtx)
+		So(settled, ShouldBeTrue)
+		So(err, ShouldBeNil)
+		So(stopCalls, ShouldEqual, 1)
+	})
+}
+
+func waitForCommandSignal(t *testing.T, signal <-chan struct{}, timeout time.Duration, message string) {
+	t.Helper()
+
+	select {
+	case <-signal:
+	case <-time.After(timeout):
+		t.Fatal(message)
+	}
+}
+
+func waitForCommandResult(results <-chan error, timeout time.Duration) (error, bool) {
+	select {
+	case err := <-results:
+		return err, true
+	case <-time.After(timeout):
+		return nil, false
+	}
 }

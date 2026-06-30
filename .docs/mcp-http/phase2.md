@@ -34,8 +34,8 @@ shutdown on context cancellation, `http.ErrServerClosed` handling, and
 `cmd/mlwh-mcp-server/main.go` as needed for the shutdown test, covering all
 5 acceptance tests from B3.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 ### Item 2.2: C2 - Version surfaces still work over HTTP
 
@@ -47,5 +47,5 @@ so HTTP mode logs `server_version`, `api_versions`, `transport=http`,
 fields. This covers C2 acceptance test 4; the remaining C2 HTTP client
 version checks are completed in phase 4.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed

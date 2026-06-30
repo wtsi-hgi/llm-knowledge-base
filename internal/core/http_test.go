@@ -31,6 +31,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -518,6 +519,303 @@ func TestPlainHTTPRouteNotFound(t *testing.T) {
 	})
 }
 
+func TestRunHTTPGracefulShutdownNoInflightRequests(t *testing.T) {
+	Convey("B3.1: Given RunHTTP is serving on a local listener with no requests in flight", t, func() {
+		srv := newHTTPTestCore(t, []Provider{httpPingProvider{}})
+		restoreHandlerFactory := replaceStreamableHTTPHandlerFactory(sentinelHTTPHandler())
+		ctx, cancel := context.WithCancel(context.Background())
+		runErr := make(chan error, 1)
+		addr := reserveLocalHTTPAddr(t)
+
+		Reset(func() {
+			cancel()
+			restoreHandlerFactory()
+		})
+
+		go func() {
+			runErr <- srv.RunHTTP(ctx, HTTPOptions{
+				Addr:      addr,
+				LogWriter: io.Discard,
+			})
+		}()
+
+		waitForHTTPStatus(t, "http://"+addr+"/health", http.StatusOK)
+		cancel()
+
+		err, settled := waitForHTTPResult(runErr, 3*time.Second)
+
+		So(settled, ShouldBeTrue)
+		So(err, ShouldBeNil)
+	})
+}
+
+func reserveLocalHTTPAddr(t *testing.T) string {
+	t.Helper()
+
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserving local HTTP addr: %v", err)
+	}
+
+	addr := listener.Addr().String()
+	if err := listener.Close(); err != nil {
+		t.Fatalf("closing reserved listener: %v", err)
+	}
+
+	return addr
+}
+
+func waitForHTTPStatus(t *testing.T, url string, status int) {
+	t.Helper()
+
+	deadline := time.Now().Add(3 * time.Second)
+	client := &http.Client{Timeout: 200 * time.Millisecond}
+
+	for time.Now().Before(deadline) {
+		resp, err := client.Get(url)
+		if err == nil {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+			if resp.StatusCode == status {
+				return
+			}
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	t.Fatalf("timed out waiting for %s to return status %d", url, status)
+}
+
+func waitForHTTPResult(results <-chan error, timeout time.Duration) (error, bool) {
+	select {
+	case err := <-results:
+		return err, true
+	case <-time.After(timeout):
+		return nil, false
+	}
+}
+
+func TestRunHTTPGracefulShutdownDrainsInflightRequest(t *testing.T) {
+	Convey("B3.2: Given a request is in flight when RunHTTP context is cancelled", t, func() {
+		srv := newHTTPTestCore(t, []Provider{httpPingProvider{}})
+		started := make(chan struct{})
+		release := make(chan struct{})
+		handler := blockingStatusHandler(started, release, http.StatusOK)
+		restoreHandlerFactory := replaceStreamableHTTPHandlerFactory(handler)
+		ctx, cancel := context.WithCancel(context.Background())
+		runErr := make(chan error, 1)
+		requestResult := make(chan httpStatusResult, 1)
+		addr := reserveLocalHTTPAddr(t)
+
+		Reset(func() {
+			cancel()
+			closeIfOpen(release)
+			restoreHandlerFactory()
+		})
+
+		go func() {
+			runErr <- srv.RunHTTP(ctx, HTTPOptions{
+				Addr:            addr,
+				ShutdownTimeout: time.Second,
+				LogWriter:       io.Discard,
+			})
+		}()
+
+		waitForHTTPStatus(t, "http://"+addr+"/health", http.StatusOK)
+
+		go func() {
+			requestResult <- doHTTPStatus(http.MethodGet, "http://"+addr+"/mcp")
+		}()
+
+		waitForSignal(t, started, 3*time.Second, "MCP handler did not start")
+		cancel()
+		closeIfOpen(release)
+
+		gotResponse, responseSettled := waitForHTTPStatusResult(requestResult, 3*time.Second)
+		err, runSettled := waitForHTTPResult(runErr, 3*time.Second)
+
+		So(responseSettled, ShouldBeTrue)
+		So(gotResponse.err, ShouldBeNil)
+		So(gotResponse.status, ShouldEqual, http.StatusOK)
+		So(runSettled, ShouldBeTrue)
+		So(err, ShouldBeNil)
+	})
+}
+
+func blockingStatusHandler(started chan<- struct{}, release <-chan struct{}, status int) http.Handler {
+	var startedOnce sync.Once
+
+	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		startedOnce.Do(func() {
+			close(started)
+		})
+		<-release
+		w.WriteHeader(status)
+	})
+}
+
+func closeIfOpen(ch chan struct{}) {
+	select {
+	case <-ch:
+	default:
+		close(ch)
+	}
+}
+
+func doHTTPStatus(method, url string) httpStatusResult {
+	req, err := http.NewRequest(method, url, nil)
+	if err != nil {
+		return httpStatusResult{err: err}
+	}
+
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return httpStatusResult{err: err}
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	_, _ = io.Copy(io.Discard, resp.Body)
+
+	return httpStatusResult{status: resp.StatusCode}
+}
+
+func waitForSignal(t *testing.T, signal <-chan struct{}, timeout time.Duration, message string) {
+	t.Helper()
+
+	select {
+	case <-signal:
+	case <-time.After(timeout):
+		t.Fatal(message)
+	}
+}
+
+func waitForHTTPStatusResult(
+	results <-chan httpStatusResult,
+	timeout time.Duration,
+) (httpStatusResult, bool) {
+	select {
+	case result := <-results:
+		return result, true
+	case <-time.After(timeout):
+		return httpStatusResult{}, false
+	}
+}
+
+func TestRunHTTPShutdownTimeoutReturnsDeadlineExceeded(t *testing.T) {
+	Convey("B3.3: Given ShutdownTimeout expires while an MCP handler remains blocked", t, func() {
+		srv := newHTTPTestCore(t, []Provider{httpPingProvider{}})
+		started := make(chan struct{})
+		release := make(chan struct{})
+		handler := blockingStatusHandler(started, release, http.StatusOK)
+		restoreHandlerFactory := replaceStreamableHTTPHandlerFactory(handler)
+		ctx, cancel := context.WithCancel(context.Background())
+		runErr := make(chan error, 1)
+		requestResult := make(chan httpStatusResult, 1)
+		addr := reserveLocalHTTPAddr(t)
+
+		Reset(func() {
+			cancel()
+			closeIfOpen(release)
+			restoreHandlerFactory()
+		})
+
+		go func() {
+			runErr <- srv.RunHTTP(ctx, HTTPOptions{
+				Addr:            addr,
+				ShutdownTimeout: 50 * time.Millisecond,
+				LogWriter:       io.Discard,
+			})
+		}()
+
+		waitForHTTPStatus(t, "http://"+addr+"/health", http.StatusOK)
+
+		go func() {
+			requestResult <- doHTTPStatus(http.MethodPost, "http://"+addr+"/mcp")
+		}()
+
+		waitForSignal(t, started, 3*time.Second, "MCP handler did not start")
+		cancel()
+
+		clientErr := waitForHTTPClientError(t, "http://"+addr+"/health", 500*time.Millisecond)
+		err, settled := waitForHTTPResult(runErr, 500*time.Millisecond)
+
+		So(clientErr, ShouldNotBeNil)
+		So(settled, ShouldBeTrue)
+		So(errors.Is(err, context.DeadlineExceeded), ShouldBeTrue)
+
+		select {
+		case <-requestResult:
+			t.Fatalf("blocked MCP request completed before the test released it")
+		default:
+		}
+	})
+}
+
+func waitForHTTPClientError(t *testing.T, url string, timeout time.Duration) error {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	transport := &http.Transport{DisableKeepAlives: true}
+	defer transport.CloseIdleConnections()
+
+	client := &http.Client{
+		Timeout:   100 * time.Millisecond,
+		Transport: transport,
+	}
+
+	for time.Now().Before(deadline) {
+		resp, err := client.Get(url)
+		if err != nil {
+			return err
+		}
+
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	t.Fatalf("timed out waiting for %s to fail", url)
+
+	return nil
+}
+
+func TestRunHTTPStopsAuthServerOnExit(t *testing.T) {
+	Convey("B3.4: Given the fake auth server records calls", t, func() {
+		srv := newHTTPTestCore(t, []Provider{httpPingProvider{}})
+		fakeAuthServer := newFakeHTTPAuthServer()
+		var recordedShutdownTimeout time.Duration
+		restoreAuthServerFactory := replaceAuthServerFactory(fakeAuthServer)
+		restoreHandlerFactory := replaceStreamableHTTPHandlerFactory(sentinelHTTPHandler())
+		restoreStartHTTPServer := replaceStartHTTPServer(func(
+			_ context.Context,
+			_ string,
+			_ http.Handler,
+			shutdownTimeout time.Duration,
+		) error {
+			recordedShutdownTimeout = shutdownTimeout
+
+			return nil
+		})
+
+		Reset(func() {
+			restoreStartHTTPServer()
+			restoreHandlerFactory()
+			restoreAuthServerFactory()
+		})
+
+		err := srv.RunHTTP(context.Background(), HTTPOptions{
+			Addr:      "127.0.0.1:0",
+			LogWriter: io.Discard,
+		})
+
+		So(err, ShouldBeNil)
+		So(fakeAuthServer.stopCalls, ShouldEqual, 1)
+		So(recordedShutdownTimeout, ShouldEqual, 5*time.Second)
+	})
+}
+
 type pingCallResult struct {
 	message string
 	err     error
@@ -574,6 +872,11 @@ func TestHealthRouteBeforeMCPUse(t *testing.T) {
 		So(recorder.Body.String(), ShouldEqual, `{"status":"ok"}`)
 		So(toolCalls, ShouldEqual, 0)
 	})
+}
+
+type httpStatusResult struct {
+	status int
+	err    error
 }
 
 type recordedHTTPRoute struct {

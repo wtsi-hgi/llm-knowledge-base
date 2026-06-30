@@ -29,6 +29,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"time"
@@ -119,7 +120,12 @@ func (s *Server) RunHTTP(ctx context.Context, opts HTTPOptions) error {
 	}
 	defer authServer.Stop()
 
-	s.logStartupVersion()
+	s.logStartupVersion(
+		slog.String("transport", "http"),
+		slog.String("addr", opts.Addr),
+		slog.String("mcp_path", opts.MCPPath),
+		slog.String("health_path", opts.HealthPath),
+	)
 
 	return startHTTPServer(ctx, opts.Addr, authServer.Router(), opts.ShutdownTimeout)
 }
@@ -219,19 +225,29 @@ func startPlainHTTPServer(
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 
-	serveDone := make(chan struct{})
+	serveErr := make(chan error, 1)
 	go func() {
-		select {
-		case <-ctx.Done():
-			shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-			defer cancel()
-			_ = httpServer.Shutdown(shutdownCtx)
-		case <-serveDone:
-		}
+		serveErr <- httpServer.Serve(listener)
 	}()
 
-	err = httpServer.Serve(listener)
-	close(serveDone)
+	select {
+	case err := <-serveErr:
+		return normalizeHTTPServeError(err)
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancel()
+
+		shutdownErr := httpServer.Shutdown(shutdownCtx)
+		err := <-serveErr
+		if shutdownErr != nil {
+			return shutdownErr
+		}
+
+		return normalizeHTTPServeError(err)
+	}
+}
+
+func normalizeHTTPServeError(err error) error {
 	if errors.Is(err, http.ErrServerClosed) {
 		return nil
 	}
