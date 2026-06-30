@@ -2,6 +2,10 @@
 # Start frontend and backend dev servers and stop them cleanly on exit.
 set -euo pipefail
 
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+cd "$SCRIPT_DIR"
+GIT_PREFIX=$(git rev-parse --show-prefix 2>/dev/null || true)
+
 usage() {
   cat <<-EOF
 Usage: $0 [--frontend-port PORT] [--backend-port PORT]
@@ -72,14 +76,14 @@ done
 echo "Running frontend format and lint check on changed files..."
 
 # Get list of changed files in frontend directory that match supported extensions
-CHANGED_FILES=$(git diff --name-only --diff-filter=d HEAD | grep "^frontend/.*\.\(ts\|tsx\|js\|jsx\|json\|css\)$" || true)
+CHANGED_FILES=$(git diff --name-only --diff-filter=d HEAD | grep "^${GIT_PREFIX}frontend/.*\.\(ts\|tsx\|js\|jsx\|json\|css\)$" || true)
 # ESLint only runs on JS/TS files (not JSON/CSS)
-ESLINT_FILES=$(git diff --name-only --diff-filter=d HEAD | grep "^frontend/.*\.\(ts\|tsx\|js\|jsx\)$" || true)
+ESLINT_FILES=$(git diff --name-only --diff-filter=d HEAD | grep "^${GIT_PREFIX}frontend/.*\.\(ts\|tsx\|js\|jsx\)$" || true)
 
 if [ -n "$CHANGED_FILES" ]; then
     # Strip 'frontend/' prefix for running commands inside the directory
-    RELATIVE_FILES=$(echo "$CHANGED_FILES" | sed 's/^frontend\///')
-    RELATIVE_ESLINT_FILES=$(echo "$ESLINT_FILES" | sed 's/^frontend\///' || true)
+    RELATIVE_FILES=$(echo "$CHANGED_FILES" | sed "s#^${GIT_PREFIX}frontend/##")
+    RELATIVE_ESLINT_FILES=$(echo "$ESLINT_FILES" | sed "s#^${GIT_PREFIX}frontend/##" || true)
     
     # Run prettier on all files, eslint only on JS/TS files
     LINT_FAILED=0
@@ -120,7 +124,7 @@ fi
 
 # Backend linting with ruff (if installed)
 echo "Running backend lint check..."
-BACKEND_CHANGED=$(git diff --name-only --diff-filter=d HEAD | grep "^backend/.*\.py$" || true)
+BACKEND_CHANGED=$(git diff --name-only --diff-filter=d HEAD | grep "^${GIT_PREFIX}backend/.*\.py$" || true)
 
 if [ -n "$BACKEND_CHANGED" ]; then
     if command -v ruff &> /dev/null || [ -x "backend/.venv/bin/ruff" ]; then
