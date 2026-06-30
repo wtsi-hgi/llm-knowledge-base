@@ -32,8 +32,8 @@ Add `github.com/wtsi-hgi/go-authserver v1.6.0` as a direct dependency in
 acceptance test 1 only; the remaining E1 gate checks are completed in
 phase 5.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 ### Item 1.2: B1 - Shared streamable HTTP handler
 
@@ -45,8 +45,8 @@ provider registration from `internal/core/transport.go`. Define
 test injection seams, and service-agnostic import boundaries, covering all
 7 acceptance tests from B1.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 ### Item 1.3: B2 - go-authserver foundation and plain routes
 
@@ -58,5 +58,5 @@ the unauthenticated `/health` route, and keep auth/TLS/token paths unused
 but locally reachable through the adapter. Cover all 6 acceptance tests
 from B2.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
