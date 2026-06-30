@@ -28,6 +28,7 @@ package mlwh
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -36,6 +37,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	. "github.com/smartystreets/goconvey/convey"
 	wa "github.com/wtsi-hgi/wa/mlwh"
 
 	"github.com/wtsi-hgi/llm-knowledge-base/internal/core"
@@ -67,11 +69,12 @@ type recordedRequest struct {
 // carries a non-2xx status and is rendered as wa's {"code","message"} envelope
 // so the remote client maps it back to the matching Err* sentinel.
 type stubResponse struct {
-	status int
-	body   any
-	isErr  bool
-	code   string
-	msg    string
+	status  int
+	body    any
+	headers http.Header
+	isErr   bool
+	code    string
+	msg     string
 }
 
 // stubMLWH is the hermetic MLWH stub: an httptest.Server that serves canned
@@ -110,10 +113,18 @@ func newStubMLWH(t *testing.T) *stubMLWH {
 // RemoteClient decodes for that endpoint, or the typed method (and so the tool
 // under test) will surface a decode error.
 func (s *stubMLWH) respondJSON(path string, status int, body any) {
+	s.respondJSONWithHeaders(path, status, body, nil)
+}
+
+// respondJSONWithHeaders makes the stub reply with the given 2xx status, JSON
+// body, and HTTP headers for requests to exactly this path. It is used for
+// header-aware wa RemoteClient page methods that read X-Total-Count and
+// X-Next-Offset while still decoding the body as the endpoint's normal JSON.
+func (s *stubMLWH) respondJSONWithHeaders(path string, status int, body any, headers http.Header) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.routes[path] = stubResponse{status: status, body: body}
+	s.routes[path] = stubResponse{status: status, body: body, headers: headers.Clone()}
 }
 
 // respondError makes the stub reply with the given non-2xx status and wa error
@@ -140,13 +151,17 @@ func (s *stubMLWH) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Unlock()
 
-	w.Header().Set("Content-Type", "application/json")
-
 	if !ok {
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
 		_ = json.NewEncoder(w).Encode(httpErrorBody{Code: "not_found", Message: "stub: no route for " + r.URL.Path})
 
 		return
+	}
+
+	copyHeaders(w.Header(), resp.headers)
+	if w.Header().Get("Content-Type") == "" {
+		w.Header().Set("Content-Type", "application/json")
 	}
 
 	if resp.isErr {
@@ -158,6 +173,14 @@ func (s *stubMLWH) handle(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(resp.status)
 	_ = json.NewEncoder(w).Encode(resp.body)
+}
+
+func copyHeaders(dst, src http.Header) {
+	for name, values := range src {
+		for _, value := range values {
+			dst.Add(name, value)
+		}
+	}
 }
 
 // httpErrorBody is the on-the-wire shape of wa's HTTP error envelope, which the
@@ -256,6 +279,62 @@ func runMLWHServerWithClientOptions(
 	}
 
 	return clientSession, cleanup
+}
+
+func TestStubMLWHHeaderAwareResponses(t *testing.T) {
+	Convey("F3.1: Given respondJSONWithHeaders is configured with X-Total-Count: 2 and an MCP tool calls that route", t, func() {
+		stub := newStubMLWH(t)
+		stub.respondJSONWithHeaders("/studies", http.StatusOK, []wa.Study{
+			{IDStudyLims: "S1", Name: "Alpha"},
+			{IDStudyLims: "S2", Name: "Beta"},
+		}, http.Header{
+			"X-Total-Count": {"2"},
+			"X-Next-Offset": {"-1"},
+		})
+
+		cs, cleanup := runMLWHServerWithClient(t, stub)
+		defer cleanup()
+
+		res := callTool(t, cs, "mlwh_call_endpoint", map[string]any{
+			"method":       "AllStudies",
+			"query_params": map[string]any{"limit": "100", "offset": "0"},
+		})
+
+		obj := structuredObject(res)
+
+		So(obj["total"], ShouldEqual, 2)
+		So(obj["next_offset"], ShouldEqual, -1)
+		result, ok := obj["result"].([]any)
+		So(ok, ShouldBeTrue)
+		So(len(result), ShouldEqual, 2)
+
+		req, ok := stub.lastRequest()
+		So(ok, ShouldBeTrue)
+		So(req.Path, ShouldEqual, "/studies")
+		So(req.Query.Get("limit"), ShouldEqual, "100")
+		So(req.Query.Get("offset"), ShouldEqual, "0")
+	})
+}
+
+func TestStubMLWHUnmatchedRouteReturnsWAEnvelope(t *testing.T) {
+	Convey("F3.2: Given an unmatched route, when the remote client calls it, then the stub preserves wa-shaped 404 errors", t, func() {
+		stub := newStubMLWH(t)
+
+		client, err := wa.NewRemoteClient(wa.RemoteConfig{BaseURL: stub.server.URL})
+		So(err, ShouldBeNil)
+		defer func() {
+			So(client.Close(), ShouldBeNil)
+		}()
+
+		_, err = client.ResolveStudy(context.Background(), "missing-study")
+
+		So(err, ShouldNotBeNil)
+		So(errors.Is(err, wa.ErrNotFound), ShouldBeTrue)
+
+		req, ok := stub.lastRequest()
+		So(ok, ShouldBeTrue)
+		So(req.Path, ShouldEqual, "/resolve/study/missing-study")
+	})
 }
 
 // callTool calls the named tool over the connected MCP client with the given

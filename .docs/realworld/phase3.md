@@ -19,5 +19,5 @@ Extend `internal/mlwh/harness_test.go` with HTTP headers on
 wa-shaped unmatched-route 404 behavior, covering all 2 acceptance tests
 from F3. Depends on phase 2.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
