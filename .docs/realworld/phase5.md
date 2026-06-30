@@ -21,8 +21,8 @@ call `(*wa.RemoteClient).StudyOverview`, and use Registry/OpenAPI
 description and schema, covering all 3 acceptance tests from B1.
 Depends on phase 4.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 #### Item 5.2: B2 - Study status breakdown [parallel with B1, B3]
 
@@ -33,8 +33,8 @@ Register `mlwh_study_status_breakdown` in
 platform, QC, timeline, and cache fields, covering all 3 acceptance
 tests from B2. Depends on phase 4.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 #### Item 5.3: B3 - Run overview, run status, and sample progress
 
@@ -47,8 +47,8 @@ Register `mlwh_run_overview`, `mlwh_run_status`, and
 `RunOverview`, `RunStatus`, and `SampleProgress`, covering all 5
 acceptance tests from B3. Depends on phase 4.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 For parallel batch items, use separate subagents per item.
 Launch review subagents using the `go-reviewer` skill
