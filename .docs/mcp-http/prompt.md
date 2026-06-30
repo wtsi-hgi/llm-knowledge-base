@@ -8,6 +8,10 @@ and **many users connect to it over the network** from their agent CLIs (Claude
 Code, Codex) by pointing at its URL — **with no copy of the binary on any user's
 machine and nothing on their PATH**.
 
+The spec-writer workflow should use this file as the feature-description source
+of truth and write the resulting specification to `.docs/mcp-http/spec.md`, with
+phase documents in `.docs/mcp-http/`.
+
 Today the server (this repo's `mlwh-mcp-server`, specified in
 [`../mcp/spec.md`](../mcp/spec.md)) ships the **stdio** transport only: each user
 runs their own copy as a local subprocess that their agent CLI launches, so the
@@ -131,8 +135,10 @@ local binary** — pointing their agent CLI at the URL:
 - **Claude Code:** the HTTP transport form, e.g.
   `claude mcp add --transport http mlwh http://mlwh-mcp.internal:8080/<mcp-path>`
   (and the equivalent `.mcp.json` entry with the URL/transport).
-- **Codex CLI:** the HTTP MCP server entry in `~/.codex/config.toml` (a URL-based
-  server, not a launched command).
+- **Codex CLI:** the current documented HTTP MCP server form in
+  `~/.codex/config.toml`; verify the exact syntax against the installed CLI or
+  official docs during spec authoring. The important requirement is that it is a
+  URL-based server, not a launched command.
 
 The admin-run instructions (how to start the one shared instance, suitable
 systemd/container invocation) also belong in the README.
