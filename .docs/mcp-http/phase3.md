@@ -35,8 +35,8 @@ Update `cmd/mlwh-mcp-server/main.go` and
 and keeps `--version` short-circuit behaviour. Cover all 4 acceptance tests
 from A1.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 ### Item 3.2: A2 - HTTP config selects HTTP
 
@@ -47,5 +47,5 @@ the precedence rule that a present flag wins over env even when empty, and
 call `RunHTTP` with `HTTPOptions{Addr, MCPPath:"/mcp", HealthPath:"/health"}`
 for non-empty resolved addresses. Cover all 4 acceptance tests from A2.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
