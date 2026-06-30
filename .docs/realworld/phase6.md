@@ -24,8 +24,8 @@ Register samples-with-data count and list tools plus
 methods and RFC3339 windows, covering all 6 acceptance tests from C1.
 Depends on phase 4.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 #### Item 6.2: C2 - IRODS path tools with file-type counts
 
@@ -38,8 +38,8 @@ in `internal/mlwh/tools_availability.go`, using file-type-aware paged
 and count `wa` methods, covering all 9 acceptance tests from C2.
 Depends on phase 4.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 #### Item 6.3: C3 - Study manifest and count [parallel with C1, C2]
 
@@ -50,8 +50,8 @@ Register `mlwh_study_manifest` and `mlwh_count_study_manifest` in
 `CountStudyManifest`, and flatten manifest output, covering all 5
 acceptance tests from C3. Depends on phase 4.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 For parallel batch items, use separate subagents per item.
 Launch review subagents using the `go-reviewer` skill

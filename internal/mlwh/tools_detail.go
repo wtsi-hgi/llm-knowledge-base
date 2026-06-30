@@ -363,8 +363,8 @@ func (p *provider) addAllStudies(r core.Registrar, outputSchema map[string]any) 
 }
 
 // studyPageInput is the input for the study-keyed paged fan-out tools
-// (mlwh_samples_for_study, mlwh_libraries_for_study, mlwh_runs_for_study,
-// mlwh_irods_paths_for_study): a LIMS study id plus bounded pagination.
+// (mlwh_samples_for_study, mlwh_libraries_for_study, mlwh_runs_for_study): a
+// LIMS study id plus bounded pagination.
 type studyPageInput struct {
 	StudyLimsID string `json:"study_lims_id" jsonschema:"the LIMS identifier of the study to enumerate"`
 	Limit       int    `json:"limit,omitempty" jsonschema:"maximum rows to return; defaults to 100, maximum 1000 (a larger limit is rejected, not clamped)"`
@@ -524,8 +524,7 @@ func (p *provider) addRunsForStudy(r core.Registrar, outputSchema map[string]any
 }
 
 // samplePageInput is the input for the sample-keyed paged fan-out tools
-// (mlwh_lanes_for_sample, mlwh_irods_paths_for_sample): a Sanger sample name
-// plus bounded pagination.
+// (mlwh_lanes_for_sample): a Sanger sample name plus bounded pagination.
 type samplePageInput struct {
 	SangerName string `json:"sanger_name" jsonschema:"the Sanger sample name to enumerate"`
 	Limit      int    `json:"limit,omitempty" jsonschema:"maximum rows to return; defaults to 100, maximum 1000 (a larger limit is rejected, not clamped)"`
@@ -584,13 +583,13 @@ func (p *provider) addIRODSPathsForSample(r core.Registrar, outputSchema map[str
 		Name:         "mlwh_irods_paths_for_sample",
 		Description:  description,
 		OutputSchema: outputSchema,
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in samplePageInput) (*mcp.CallToolResult, pagedIRODSPathsResult, error) {
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in irodsSamplePageInput) (*mcp.CallToolResult, pagedIRODSPathsResult, error) {
 		limit, offset, err := boundedPagination(in.Limit, in.Offset)
 		if err != nil {
 			return core.ToolError[pagedIRODSPathsResult](err)
 		}
 
-		page, err := client.IRODSPathsForSamplePage(ctx, in.SangerName, limit, offset)
+		page, err := client.IRODSPathsForSampleByFileTypePage(ctx, in.SangerName, in.FileType, limit, offset)
 		if err != nil {
 			return core.ToolError[pagedIRODSPathsResult](mapToolError(err))
 		}
@@ -621,13 +620,13 @@ func (p *provider) addIRODSPathsForStudy(r core.Registrar, outputSchema map[stri
 		Name:         "mlwh_irods_paths_for_study",
 		Description:  description,
 		OutputSchema: outputSchema,
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in studyPageInput) (*mcp.CallToolResult, pagedIRODSPathsResult, error) {
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in irodsStudyPageInput) (*mcp.CallToolResult, pagedIRODSPathsResult, error) {
 		limit, offset, err := boundedPagination(in.Limit, in.Offset)
 		if err != nil {
 			return core.ToolError[pagedIRODSPathsResult](err)
 		}
 
-		page, err := client.IRODSPathsForStudyPage(ctx, in.StudyLimsID, limit, offset)
+		page, err := client.IRODSPathsForStudyByFileTypePage(ctx, in.StudyLimsID, in.FileType, limit, offset)
 		if err != nil {
 			return core.ToolError[pagedIRODSPathsResult](mapToolError(err))
 		}

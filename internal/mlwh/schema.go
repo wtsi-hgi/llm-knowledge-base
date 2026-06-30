@@ -103,6 +103,15 @@ type pagedSamplesResult struct {
 	NextOffset int         `json:"next_offset"`
 }
 
+// pagedSamplesWithDataResult wraps a header-aware sample availability page as
+// {"samples":[...],"total":N,"next_offset":M}. Each row carries the sample and
+// its platform qualifiers.
+type pagedSamplesWithDataResult struct {
+	Samples    []wa.SampleWithData `json:"samples"`
+	Total      int                 `json:"total"`
+	NextOffset int                 `json:"next_offset"`
+}
+
 // pagedStudiesResult wraps a header-aware study page as
 // {"studies":[...],"total":N,"next_offset":M}.
 type pagedStudiesResult struct {
@@ -222,6 +231,37 @@ func outputSchemaForPagedSlice(propertyName, componentName string) (map[string]a
 		},
 		"required": []any{propertyName, "total", "next_offset"},
 	}, nil
+}
+
+// outputSchemaForPagedObject returns the OpenAPI-sourced object schema for an
+// upstream envelope with the required pagination metadata added at the top
+// level. It is used for paged typed tools whose semantic response is already an
+// object, such as StudyManifest, so the MCP result stays flattened instead of
+// wrapping the object under another property.
+func outputSchemaForPagedObject(componentName string) (map[string]any, error) {
+	schema, err := outputSchemaFor(componentName)
+	if err != nil {
+		return nil, err
+	}
+
+	properties, ok := schema["properties"].(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("mlwh: component schema %q has no properties object", componentName)
+	}
+
+	properties["total"] = map[string]any{
+		"type":        "integer",
+		"description": "total number of matching rows from X-Total-Count",
+	}
+	properties["next_offset"] = map[string]any{
+		"type":        "integer",
+		"description": "offset of the next page from X-Next-Offset, or -1 when absent or on the last page",
+	}
+
+	required, _ := schema["required"].([]any)
+	schema["required"] = append(required, "total", "next_offset")
+
+	return schema, nil
 }
 
 // boundedPagination resolves a typed paged tool's effective limit and offset.

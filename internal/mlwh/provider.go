@@ -205,8 +205,9 @@ func (p *provider) APIVersion() string {
 // registerResolveTools, aggregate overview/status tools via
 // registerOverviewTools, the detail and fan-out enumeration tools via
 // registerDetailTools, the cache-freshness tool via registerFreshnessTool, and
-// the generic escape-hatch tool via registerCallTool. The workflow /
-// endpoint-catalogue resource (Story G1) is added by registerWorkflowResource.
+// the generic escape-hatch tool via registerCallTool. The phase 6 availability
+// tools are added by registerAvailabilityTools. The workflow / endpoint-catalogue
+// resource (Story G1) is added by registerWorkflowResource.
 func (p *provider) Register(_ context.Context, r core.Registrar) error {
 	if err := p.registerSearchTools(r); err != nil {
 		return err
@@ -221,6 +222,10 @@ func (p *provider) Register(_ context.Context, r core.Registrar) error {
 	}
 
 	if err := p.registerDetailTools(r); err != nil {
+		return err
+	}
+
+	if err := p.registerAvailabilityTools(r); err != nil {
 		return err
 	}
 
