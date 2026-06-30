@@ -17,10 +17,11 @@ call for aggregates, and bounded/paged calls for lists.
 - "What study id matches this name?"
 - "Which studies are associated with this sponsor/person/login/email?"
 
-The upstream `wa` MLWH REST API already exposes the needed endpoints (API 1.7.0).
-This feature wraps those endpoints as MCP tools and hardens the MCP result path so
-large responses fail with actionable guidance instead of overflowing the agent's
-budget.
+The upstream `wa` MLWH REST API already exposes the needed endpoints (API 1.7.0),
+and the upstream `wa` Go client now exposes header-aware remote-client methods for
+paged lists, paged manifest/detail envelopes, and dynamic calls. This feature wraps
+those endpoints as MCP tools and hardens the MCP result path so large responses fail
+with actionable guidance instead of overflowing the agent's budget.
 
 Everything in this prompt is in scope to build. The `wa` code is authoritative; this
 prompt describes the downstream MCP work only.
@@ -45,6 +46,12 @@ Descriptions and output schemas in the MCP layer must be sourced from the upstre
 `Registry`/OpenAPI wherever the existing code pattern supports that. Re-verify
 against `~/wa` before implementing.
 
+The header-aware pagination surface in `wa` is part of the upstream contract. Use
+the current `~/wa` code, and the corresponding released tag or exact commit that
+contains it, when updating the `github.com/wtsi-hgi/wa` dependency. The local
+dependency is currently older than this surface and must be updated before the MCP
+tools can use it.
+
 ## Upstream Surface
 
 All endpoints are `GET`. Aggregate/progress endpoints return one small object. Bare
@@ -52,7 +59,10 @@ list endpoints return a JSON array plus `X-Total-Count` and `X-Next-Offset`; typ
 client page variants expose those headers as `Page[T]` (`items`, `total`,
 `next_offset`). `StudyManifest` is the exception: it returns an envelope object with
 study metadata, `rows`, and `cache_synced_at`; its `rows` are paged and sized by the
-same headers and by `/study/:id/manifest/count`.
+same headers, and the upstream client exposes `StudyManifestPage` returning
+`PagedStudyManifest`. `StudyDetailWithOptions` and `RunDetailWithOptions` expose
+the paged/lean detail responses with header metadata. `CallWithHeaders` exposes
+headers for Registry-driven dynamic calls.
 
 | Endpoint | Registry method | Returns | Notes |
 | --- | --- | --- | --- |
@@ -115,6 +125,19 @@ runs, study libraries, and sample lanes.
 - **`PersonCandidate`**: `source` (`faculty_sponsor|study_users`), `name`, optional
   `login`, optional `email`, optional `role`, `study_count`.
 - **`Count`**: `{count}`. No `cache_synced_at`.
+
+## MCP Paged Result Shape
+
+Paged MCP list tools must preserve the existing semantic wrapper convention and add
+top-level sizing fields. Use named list fields plus `total` and `next_offset`, for
+example `{samples:[...], total, next_offset}` or `{irods_paths:[...], total,
+next_offset}`. Do not switch normal typed tools to a generic `{items:[...], ...}`
+shape. `next_offset` is `-1` when there is no next page.
+
+The sizing fields must come from the upstream `wa` header-aware client result for
+the same request and filters. Count tools still return `{count}` and are used when
+the caller explicitly asks for a count, not as hidden MCP-side fan-out for paged
+list metadata.
 
 ## Query Semantics
 
@@ -205,9 +228,14 @@ as-of caveat there.
   caller to the relevant overview/count/page workflow.
 - The guard must cover all tools, including large MLWH tools and
   `mlwh_call_endpoint`. The mechanism is core-level and service-agnostic; the
-  `mlwh-mcp-server` binary names and wires its own `MLWH_*` flag/env knob.
-- Change the MLWH paged fan-out default from fetch-all to a bounded page. Include a
-  sizing hint in paged results using upstream `X-Total-Count` and `X-Next-Offset`.
+  `mlwh-mcp-server` binary names and wires its own `MLWH_*` flag/env knob. For
+  MLWH, expose `MLWH_MAX_TOOL_RESULT_BYTES` and
+  `--mlwh-max-tool-result-bytes`; default the budget to 1 MiB. Over-budget tools
+  must return `IsError=true` with structured, actionable error content.
+- Change the MLWH paged fan-out default from fetch-all to a bounded page. Use
+  default `limit=100` and maximum `limit=1000`, matching existing search-tool
+  bounds. Include `total` and `next_offset` in paged results using upstream
+  header-aware `wa` client results for the exact filtered request.
 - Surface `lean` on `mlwh_study_detail` and `mlwh_run_detail` only.
 - Do not implement aggregates by fetching lists and counting in MCP. Use upstream
   aggregate/count endpoints.
@@ -238,7 +266,9 @@ Update `mlwh://workflow` so agents choose the cheap tool first:
 
 1. One-call aggregate answers for availability, recency, overview, progress, QC, and
    study metadata questions; no per-sample fan-out.
-2. Bounded-by-default list tools with count counterparts and sizing hints.
+2. Bounded-by-default list tools with count counterparts and sizing hints. Paged
+   list wrappers use semantic list fields with top-level `total` and `next_offset`,
+   sourced from upstream header-aware `wa` client results.
 3. Correct timestamp wording: "added to iRODS" means iRODS `created`, never
    `last_changed`.
 4. Clear cache-freshness caveats, sourced from `cache_synced_at` when present and
@@ -275,8 +305,50 @@ Update `mlwh://workflow` so agents choose the cheap tool first:
 
 ## Out Of Scope
 
-- Upstream `wa` API work. It is already implemented in `~/wa`; wrap it, do not
-  rebuild it.
+- Further upstream `wa` API work. The required API 1.7.0 endpoints and
+  header-aware remote-client surface are already implemented in `~/wa`; update the
+  dependency and wrap that surface rather than rebuilding it downstream.
 - HTTP transport or web UI work.
 - Client-side caching, quotas, or non-MLWH provider behavior beyond the generic core
   size guard.
+
+## Notes
+
+Header-aware envelope tools should keep the existing envelope body shape and add
+`total` and `next_offset` at the same top level. For example, `mlwh_study_manifest`
+should return its normal manifest fields plus top-level paging metadata, not nest
+the manifest under an upstream-style wrapper.
+
+MCP should expose every upstream `/count` Registry method that is not already
+surfaced as a tool, even when the matching list tool is narrow or not part of the
+main curated workflow.
+
+Exact sample-finder count endpoints should be surfaced through one unified
+`mlwh_count_find_samples` tool using the same `field` enum pattern as
+`mlwh_find_samples`, rather than through one dedicated tool per upstream finder.
+
+Over-budget tool results should return `IsError=true` with a provider-neutral
+structured error object containing at least `code`, `message`, `limit_bytes`,
+`actual_bytes`, and `guidance`. MLWH may provide MLWH-specific guidance text, but
+the core error shape should remain service-agnostic.
+
+The response-size guard should measure the serialized MCP tool result that will be
+returned to the client. If the implementation cannot access that final envelope, it
+must conservatively measure the larger of the structured content JSON and any
+generated text content.
+
+All paginated typed MCP list tools should return top-level `total` and
+`next_offset`, including existing tools such as `mlwh_search_samples`,
+`mlwh_search_studies`, `mlwh_all_studies`, and existing fan-out/list tools. The
+rule should not apply only to newly added tools.
+
+`mlwh_study_detail` and `mlwh_run_detail` should expose upstream `limit`, `offset`,
+and `lean` support while keeping their existing detail fields at the top level and
+adding top-level `total` and `next_offset`, matching the flattened envelope rule
+used for manifest.
+
+`mlwh_call_endpoint` should use upstream `CallWithHeaders` and, when pagination
+headers are present on the dynamic response, return a generic wrapper containing
+`result`, `total`, and `next_offset`. Typed curated tools should keep their
+semantic wrappers; the generic endpoint should not try to infer semantic field
+names.
