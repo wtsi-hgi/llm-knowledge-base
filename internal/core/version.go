@@ -49,7 +49,7 @@ const versionResourceMIMEType = "application/json"
 // registerVersionResource registers the version MCP resource (Story G2) on the
 // MCP server. The resource lives at versionResourceURI and its body is the
 // supplied VersionInfo marshaled to JSON
-// (e.g. {"server_version":"0.1.0","api_versions":{"mlwh":"1.6.0"}}), so a client
+// (e.g. {"server_version":"0.1.0","api_versions":{"mlwh":"1.7.0"}}), so a client
 // can read this server's version and each provider's targeted upstream API
 // version at runtime. The core registers it itself, not via a provider, so it is
 // present even with no providers; the per-provider versions still arrive only

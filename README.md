@@ -12,7 +12,7 @@ server is a thin, well-described bridge whose value is making those endpoints
 ergonomic and correctly usable by an LLM, not re-implementing them: it imports
 `github.com/wtsi-hgi/wa/mlwh` and reuses its typed client, response types,
 registry, and OpenAPI document directly, so there is no type drift and the server
-is compile-time-locked to the upstream API version (currently MLWH API 1.6.0).
+is compile-time-locked to the upstream API version (currently MLWH API 1.7.0).
 
 This first round ships the MLWH provider over the **stdio** transport only, so it
 runs as a local subprocess launched per user by an agent CLI. Streamable HTTP —
@@ -44,7 +44,7 @@ below. Check the build and the versions it targets:
 ```bash
 mlwh-mcp-server --version
 # mlwh-mcp-server version <build version>
-# MLWH API version 1.6.0
+# MLWH API version 1.7.0
 ```
 
 ## Configuration
@@ -52,11 +52,12 @@ mlwh-mcp-server --version
 The server needs to know where your MLWH API lives. Configure it with environment
 variables, or the equivalent command-line flags (a flag overrides its env var):
 
-| Env var         | Flag               | Required | Meaning                                                                          |
-| --------------- | ------------------ | -------- | -------------------------------------------------------------------------------- |
-| `MLWH_BASE_URL` | `--mlwh-base-url`  | **yes**  | Base URL of the `wa mlwh serve` HTTP API, e.g. `http://mlwh.internal:8080`.      |
-| `MLWH_CA_CERT`  | `--mlwh-ca-cert`   | no       | Path to a PEM CA-certificate file, if the API is served over TLS with a private CA. |
-| `MLWH_TIMEOUT`  | `--mlwh-timeout`   | no       | Per-request HTTP timeout as a Go duration (e.g. `15s`, `1m`).                     |
+| Env var                      | Flag                          | Required | Meaning                                                                          |
+| ---------------------------- | ----------------------------- | -------- | -------------------------------------------------------------------------------- |
+| `MLWH_BASE_URL`              | `--mlwh-base-url`             | **yes**  | Base URL of the `wa mlwh serve` HTTP API, e.g. `http://mlwh.internal:8080`.      |
+| `MLWH_CA_CERT`               | `--mlwh-ca-cert`              | no       | Path to a PEM CA-certificate file, if the API is served over TLS with a private CA. |
+| `MLWH_TIMEOUT`               | `--mlwh-timeout`              | no       | Per-request HTTP timeout as a Go duration (e.g. `15s`, `1m`).                     |
+| `MLWH_MAX_TOOL_RESULT_BYTES` | `--mlwh-max-tool-result-bytes` | no       | Maximum marshaled MCP tool-result size before a structured size error is returned; defaults to `1048576`, and values `<=0` disable the guard. |
 
 The MLWH API is internal and unauthenticated, so there is no token to set. A
 missing base URL is a clear startup error. `mlwh-mcp-server --version` needs no
@@ -158,8 +159,9 @@ A curated, LLM-ergonomic tool surface generated from the MLWH endpoint registry
   endpoints), and the `mlwh_expand_*` tools.
 - **Detail & fan-out** — `mlwh_sample_detail` / `_study_detail` / `_run_detail` /
   `_library_detail`, plus list/fan-out tools (`mlwh_all_studies`,
-  `mlwh_samples_for_study`, `mlwh_irods_paths_for_sample`, …). Omitting `limit` on
-  a fan-out fetches every row.
+  `mlwh_samples_for_study`, `mlwh_irods_paths_for_sample`, …). Paged list and
+  detail tools default to `limit=100`, reject `limit > 1000`, and return `total`
+  plus `next_offset` for paging.
 - **Freshness** — `mlwh_freshness` reports per-table sync state so answers can be
   caveated; it succeeds even against a never-synced cache.
 - **Escape hatch** — `mlwh_call_endpoint` dispatches any registry method by name,
@@ -184,8 +186,9 @@ CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs `make lint` and
 `make build` + `make test` on pushes and pull requests to `main` / `develop`,
 using the same Makefile targets.
 
-See [`.docs/mcp/spec.md`](.docs/mcp/spec.md) for the full specification and
-[`.docs/mcp/`](.docs/mcp/) for the phased implementation plan.
+See [`.docs/mcp/spec.md`](.docs/mcp/spec.md) for the original MCP server
+specification, and [`.docs/realworld/spec.md`](.docs/realworld/spec.md) for the
+RealWorld MLWH tool expansion reviewed here.
 
 ## Architecture
 

@@ -36,7 +36,7 @@ import (
 )
 
 const (
-	availabilityBareListFreshnessNote = " Bare list responses have no cache_synced_at; " +
+	bareListFreshnessNote = " Bare list responses have no cache_synced_at; " +
 		"call mlwh_freshness for the cache as-of caveat."
 	countFreshnessNote = " Count responses have no cache_synced_at; call mlwh_freshness for the cache as-of caveat."
 )
@@ -108,7 +108,7 @@ func availabilityListDescription(method string) (string, error) {
 		return "", err
 	}
 
-	return base + pagedFanOutPaginationNote + availabilityBareListFreshnessNote, nil
+	return base + pagedFanOutPaginationNote + bareListFreshnessNote, nil
 }
 
 // registerAvailabilityTools adds the phase 6 availability-family tools: C1

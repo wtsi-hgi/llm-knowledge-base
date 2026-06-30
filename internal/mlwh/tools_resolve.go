@@ -43,7 +43,8 @@ import (
 const findSamplesDescription = "Find samples by an exact field value. Choose the field to match on " +
 	"(sanger_id, lims_id, accession, supplier_name, or library_type) and give the exact value; " +
 	"returns every sample whose chosen field equals that value (an exact match, not a search). " +
-	"This unifies the five per-field sample finders behind one field enum."
+	"This unifies the five per-field sample finders behind one field enum." +
+	bareListFreshnessNote
 
 const countFindSamplesDescription = "Count samples by an exact field value. Choose the field to match on " +
 	"(sanger_id, lims_id, accession, supplier_name, or library_type) and give the exact value; " +
@@ -391,7 +392,7 @@ func (p *provider) registerExpandTools(r core.Registrar) error {
 
 		tool.add(p, r, &mcp.Tool{
 			Name:         tool.name,
-			Description:  description,
+			Description:  description + bareListFreshnessNote,
 			InputSchema:  expandInputSchema(),
 			OutputSchema: tool.outputSchema,
 		})

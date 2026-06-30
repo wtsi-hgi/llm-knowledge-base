@@ -153,6 +153,33 @@ var f2HeadlineTools = []string{
 	"mlwh_count_find_samples",
 }
 
+// bareListTools are list-like tools whose successful responses do not carry
+// cache_synced_at, so their descriptions must route agents to mlwh_freshness
+// for the cache as-of caveat.
+var bareListTools = []string{
+	"mlwh_search_samples",
+	"mlwh_search_studies",
+	"mlwh_find_samples",
+	"mlwh_expand_identifier",
+	"mlwh_expand_search_values",
+	"mlwh_expand_sample_search_values",
+	"mlwh_all_studies",
+	"mlwh_samples_for_study",
+	"mlwh_samples_for_run",
+	"mlwh_libraries_for_study",
+	"mlwh_runs_for_study",
+	"mlwh_lanes_for_sample",
+	"mlwh_irods_paths_for_sample",
+	"mlwh_irods_paths_for_study",
+	"mlwh_studies_for_sample",
+	"mlwh_samples_with_data_for_study",
+	"mlwh_samples_without_data_for_study",
+	"mlwh_irods_paths_for_run",
+	"mlwh_studies_for_faculty_sponsor",
+	"mlwh_studies_for_user",
+	"mlwh_resolve_person",
+}
+
 func TestProviderNew(t *testing.T) {
 	Convey("New builds an MLWH provider from a resolved RemoteConfig", t, func() {
 		Convey("H2.2: a missing base URL is a clear startup error mentioning it is required", func() {
@@ -312,6 +339,13 @@ func TestProviderFullSurface(t *testing.T) {
 		Convey("F2.4: all count tool descriptions point freshness caveats at mlwh_freshness", func() {
 			tools := listToolsByName(t, cs)
 			failures := countToolDescriptionFailures(tools)
+
+			So(failures, ShouldBeEmpty)
+		})
+
+		Convey("F2: all bare list tool descriptions point freshness caveats at mlwh_freshness", func() {
+			tools := listToolsByName(t, cs)
+			failures := bareListToolDescriptionFailures(tools)
 
 			So(failures, ShouldBeEmpty)
 		})
@@ -523,6 +557,26 @@ func countToolDescriptionFailures(tools map[string]*mcp.Tool) []string {
 			continue
 		}
 		if !strings.Contains(tool.Description, "Count responses have no cache_synced_at") ||
+			!strings.Contains(tool.Description, "mlwh_freshness") {
+			failures = append(failures, name)
+		}
+	}
+
+	return failures
+}
+
+func bareListToolDescriptionFailures(tools map[string]*mcp.Tool) []string {
+	var failures []string
+
+	for _, name := range bareListTools {
+		tool, ok := tools[name]
+		if !ok {
+			failures = append(failures, name+" is not registered")
+
+			continue
+		}
+
+		if !strings.Contains(tool.Description, "Bare list responses have no cache_synced_at") ||
 			!strings.Contains(tool.Description, "mlwh_freshness") {
 			failures = append(failures, name)
 		}

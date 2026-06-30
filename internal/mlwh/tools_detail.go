@@ -105,14 +105,14 @@ func fanOutSliceSchemas() (map[string]map[string]any, error) {
 
 // paginatedFanOutDescription derives a paged fan-out tool's LLM-facing
 // description from its Registry entry (Summary + Description) and appends the
-// bounded pagination note.
+// bounded pagination and freshness-caveat notes.
 func paginatedFanOutDescription(method string) (string, error) {
 	base, err := resolveDescription(method)
 	if err != nil {
 		return "", err
 	}
 
-	return base + pagedFanOutPaginationNote, nil
+	return base + pagedFanOutPaginationNote + bareListFreshnessNote, nil
 }
 
 // registerDetailTools adds the grouped detail tools (Story C1) and the fan-out
@@ -817,7 +817,7 @@ func (p *provider) addStudiesForSample(r core.Registrar) error {
 
 	mcp.AddTool(r.Server(), &mcp.Tool{
 		Name:         "mlwh_studies_for_sample",
-		Description:  description,
+		Description:  description + bareListFreshnessNote,
 		OutputSchema: outputSchema,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in sampleNameInput) (*mcp.CallToolResult, studiesResult, error) {
 		studies, err := client.StudiesForSample(ctx, in.SangerName)

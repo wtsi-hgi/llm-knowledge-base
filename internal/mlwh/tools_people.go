@@ -102,7 +102,7 @@ func (p *provider) addStudiesForFacultySponsor(r core.Registrar, outputSchema ma
 
 	mcp.AddTool(r.Server(), &mcp.Tool{
 		Name:         "mlwh_studies_for_faculty_sponsor",
-		Description:  description,
+		Description:  description + pagedFanOutPaginationNote + bareListFreshnessNote,
 		OutputSchema: outputSchema,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in facultySponsorInput) (*mcp.CallToolResult, pagedPersonStudiesResult, error) {
 		limit, offset, err := boundedPagination(in.Limit, in.Offset)
@@ -174,7 +174,7 @@ func (p *provider) addStudiesForUser(r core.Registrar, outputSchema map[string]a
 
 	mcp.AddTool(r.Server(), &mcp.Tool{
 		Name:         "mlwh_studies_for_user",
-		Description:  description,
+		Description:  description + pagedFanOutPaginationNote + bareListFreshnessNote,
 		OutputSchema: outputSchema,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in userStudiesInput) (*mcp.CallToolResult, pagedPersonStudiesResult, error) {
 		limit, offset, err := boundedPagination(in.Limit, in.Offset)
@@ -254,7 +254,7 @@ func (p *provider) addResolvePerson(r core.Registrar, outputSchema map[string]an
 
 	mcp.AddTool(r.Server(), &mcp.Tool{
 		Name:         "mlwh_resolve_person",
-		Description:  description,
+		Description:  description + pagedFanOutPaginationNote + bareListFreshnessNote,
 		OutputSchema: outputSchema,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in resolvePersonInput) (*mcp.CallToolResult, pagedPeopleResult, error) {
 		limit, offset, err := boundedPagination(in.Limit, in.Offset)

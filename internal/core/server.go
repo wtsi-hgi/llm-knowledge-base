@@ -137,7 +137,7 @@ func (s *Server) VersionInfo() VersionInfo {
 // logStartupVersion emits the single startup version line (Story G5) when the
 // server begins serving. It is sourced from the same VersionInfo the core
 // assembled at New time, so it names this server's version and each provider's
-// targeted upstream API version (e.g. mlwh=1.6.0) without the core knowing any
+// targeted upstream API version (e.g. mlwh=1.7.0) without the core knowing any
 // provider's domain. If no logger was configured the default logger is used, so
 // a configured logger always receives the line. The per-provider versions are
 // attached as one structured attribute so the line carries each as

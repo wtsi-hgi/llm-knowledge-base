@@ -59,7 +59,7 @@ type Provider interface {
 	Name() string
 
 	// APIVersion is the provider's compile-time targeted upstream API version
-	// (e.g. the MLWH provider returns mlwh.APIVersion, currently "1.6.0").
+	// (e.g. the MLWH provider returns mlwh.APIVersion).
 	// Reading it must not contact any server. The core asks every provider for
 	// this so it can assemble VersionInfo without knowing any provider's domain;
 	// this keeps the seam service-agnostic (no wa/MLWH types leak into the core)

@@ -51,7 +51,7 @@ const (
 		"(case-insensitive word-prefix match, minimum 3 characters). So \"musculus\" " +
 		"and \"mus\" both match \"Mus Musculus\"; a substring inside a word does not. " +
 		"Defaults to a page of 100 rows, maximum 1000 (a larger limit is rejected, not clamped); " +
-		"use offset to page."
+		"use offset to page." + bareListFreshnessNote
 
 	searchStudiesDescription = "Search studies by substring for study-name/id lookup questions " +
 		"(for example, \"What study id matches this name?\"): returns studies whose " +
@@ -60,7 +60,7 @@ const (
 		"Defaults to a page of 100 rows, maximum 1000 (a larger limit is rejected, not clamped); " +
 		"use offset to page. Rows expose study identifiers and context fields such as " +
 		"id_study_lims, name, study_title, programme, faculty_sponsor, and accession_number " +
-		"to disambiguate candidate study ids."
+		"to disambiguate candidate study ids." + bareListFreshnessNote
 
 	countSamplesDescription = "Count samples matching a word-prefix search, the count counterpart of " +
 		"mlwh_search_samples (same case-insensitive word-prefix over name, supplier_name, " +
