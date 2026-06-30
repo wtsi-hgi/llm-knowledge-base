@@ -16,10 +16,10 @@ most common class of question users ask this server:
 Today this server (`mlwh-mcp-server`, specified in [`../mcp/spec.md`](../mcp/spec.md))
 cannot answer these without abuse, because its giant pass-through endpoints overflow
 the agent's token budget (see the motivating incident below). The **upstream `wa`
-API has now landed** the aggregates/recency/overview/progress endpoints that make
-clean answers possible (MLWH API **1.6.0**). This feature surfaces those upstream
-capabilities as tools, and hardens the MCP layer so large results stop being
-dead-ends.
+API has now landed** the aggregate/recency/overview/progress/manifest/people
+endpoints that make clean answers possible (MLWH API **1.7.0**). This feature
+surfaces those upstream capabilities as tools, and hardens the MCP layer so large
+results stop being dead-ends.
 
 **Scope rule for this spec: everything described here is in scope to build.** The
 "Design decisions" section settles _how_ each item is implemented, never _whether_.
@@ -34,51 +34,75 @@ bugfixing, **the only authority for endpoint shapes, field names and semantics i
 the `wa` Go code** — specifically `~/wa/mlwh/registry.go` (the per-endpoint
 `Description`/`Summary`/`Query` entries that this server sources tool descriptions
 from), `~/wa/mlwh/types.go` (the exact `json:` field tags), and the
-availability/progress/remote handlers. The generated reference at
+availability/progress/manifest/people/remote handlers. The generated reference at
 `~/wa/.docs/mcp/api-reference.md` and the OpenAPI document
 (`wa.OpenAPIDocument()`) mirror that code. Do **not** trust `~/wa/.docs/realworld/`
-spec/phase docs for exact names — verify against the code.
+spec/phase docs for exact names -- verify against the code.
 
 Tool descriptions and output schemas here are sourced from the upstream
 `Registry`/OpenAPI (see Background), so this spec must agree with the upstream code's
 wording and semantics. The endpoint surface below was read from the code at API
-1.6.0; re-verify before building.
+1.7.0; re-verify before building.
 
-### The landed upstream surface (verified against `~/wa` at API 1.6.0)
+### The landed upstream surface (verified against `~/wa` at API 1.7.0)
 
 All new endpoints are `GET`. Aggregate/progress endpoints return a single small
-object; list endpoints return a **bare JSON array** plus `X-Total-Count` /
-`X-Next-Offset` headers (the typed Go client exposes these as `Page[T]` =
-`{items, total, next_offset}`).
+object; array-list endpoints return a **bare JSON array** plus `X-Total-Count` /
+`X-Next-Offset` headers (the typed Go client exposes page variants as `Page[T]` =
+`{items, total, next_offset}`). `StudyManifest` is the exception: it is a paged
+envelope object with `rows`, study metadata once, and `cache_synced_at`; its row
+collection is sized by the same headers and by `/study/:id/manifest/count`.
 
-| Endpoint                              | Registry method      | Returns                                | Notes                                                       |
-| ------------------------------------- | -------------------- | -------------------------------------- | ---------------------------------------------------------- |
-| `/study/:id/overview`                 | `StudyOverview`      | `StudyOverview`                        | the one cheap study aggregate (availability + recency)     |
-| `/study/:id/status-breakdown`         | `StatusBreakdown`    | `StatusBreakdown`                      | phase ladder, distinct + per-platform                      |
-| `/study/:id/samples-with-data`        | `SamplesWithData`    | `[]SampleWithData` (paged)             | accepts `since`,`until`                                     |
-| `/study/:id/samples-with-data/count`  | `CountSamplesWithData` | `Count`                              | accepts `since`,`until`                                     |
-| `/study/:id/samples-without-data`     | `SamplesWithoutData` | `[]SampleWithData` (paged)             |                                                            |
-| `/run/:id/overview`                   | `RunOverview`        | `RunOverview`                          | cheap run aggregate                                         |
-| `/run/:id/status`                     | `RunStatus`          | `RunStatusTimeline`                    | within-sequencing status timeline                          |
-| `/sample/:id/progress`                | `SampleProgress`     | `SampleProgress`                       | baseline + milestones + per-run status                     |
-| `/study/:id/samples-with-data/count`, `/study/:id/samples/count`, `/run/:id/samples/count`, `/study/:id/runs/count`, `/study/:id/libraries/count`, `/sample/:id/lanes/count`, `/sample/:id/irods/count`, `/study/:id/irods/count` | `Count*` | `Count` (`{count:N}`) | `/count` counterpart for every large list |
+| Endpoint                             | Registry method                  | Returns                         | Notes                                                        |
+| ------------------------------------ | -------------------------------- | ------------------------------- | ------------------------------------------------------------ |
+| `/study/:id/overview`                | `StudyOverview`                  | `StudyOverview`                 | cheap study aggregate + metadata + recency                   |
+| `/study/:id/status-breakdown`        | `StatusBreakdown`                | `StatusBreakdown`               | phase ladder + per-platform + QC split                       |
+| `/study/:id/samples-with-data`       | `SamplesWithData`                | `[]SampleWithData` (paged)      | accepts `since`,`until`                                      |
+| `/study/:id/samples-with-data/count` | `CountSamplesWithData`           | `Count`                         | accepts `since`,`until`                                      |
+| `/study/:id/samples-without-data`    | `SamplesWithoutData`             | `[]SampleWithData` (paged)      |                                                              |
+| `/run/:id/overview`                  | `RunOverview`                    | `RunOverview`                   | cheap run aggregate                                          |
+| `/run/:id/status`                    | `RunStatus`                      | `RunStatusTimeline`             | within-sequencing status timeline                            |
+| `/sample/:id/progress`               | `SampleProgress`                 | `SampleProgress`                | baseline + milestones + per-run status                       |
+| `/run/:id/irods`                     | `IRODSPathsForRun`               | `[]IRODSPath` (paged)           | accepts `file_type`; Illumina NPG run id                     |
+| `/run/:id/irods/count`               | `CountIRODSPathsForRun`          | `Count`                         | accepts `file_type`                                          |
+| `/study/:id/manifest`                | `StudyManifest`                  | `StudyManifest` (paged `rows`)  | accepts `with_irods`, `file_type`; carries `cache_synced_at` |
+| `/study/:id/manifest/count`          | `CountStudyManifest`             | `Count`                         | product-grained count; ignores `with_irods`/`file_type`      |
+| `/studies/faculty-sponsor/:name`     | `StudiesForFacultySponsor`       | `[]PersonStudy` (paged)         | named PI/sponsor, substring on `study.faculty_sponsor`       |
+| `/studies/faculty-sponsor/:name/count` | `CountStudiesForFacultySponsor` | `Count`                         |                                                              |
+| `/studies/user/:person`              | `StudiesForUser`                 | `[]PersonStudy` (paged)         | `study_users` membership; accepts role override              |
+| `/studies/user/:person/count`        | `CountStudiesForUser`            | `Count`                         | accepts `role`                                               |
+| `/resolve-person/:term`              | `ResolvePerson`                  | `[]PersonCandidate` (paged)     | candidates from `faculty_sponsor` and `study_users`          |
+| `/resolve-person/:term/count`        | `CountResolvePerson`             | `Count`                         |                                                              |
+| all other large lists' `/count` endpoints | `Count*`                    | `Count` (`{count:N}`)           | `/count` counterpart for sizing before transfer              |
 
 **Changed existing endpoints:**
 
 - `/study/:id/irods` and `/sample/:id/irods` rows (`IRODSPath`) now carry sample
   identity: **`id_sample_tmp`** (int64) and **`name`** (Sanger sample name; empty
-  when the sample isn't in the sample mirror). This is what finally lets iRODS rows
-  be aggregated to "distinct samples with data".
-- `/study/:id/detail`, `/run/:id/detail`, `/sample/:id/detail` gained a **`lean`**
-  boolean query param, and their nested sample collections are paginated
-  (`limit`/`offset` + sizing headers). They are still large; prefer the overview
-  tools.
+  when the sample isn't in the sample mirror), plus **`id_run`** (0 when not
+  derivable) and **`platform`**. This is what finally lets iRODS rows be aggregated
+  to "distinct samples with data" and tied back to an Illumina run when possible.
+- `/study/:id/irods`, `/sample/:id/irods`, and their `/count` endpoints now accept
+  `file_type`, a case-insensitive filename-suffix filter with a leading dot stripped
+  (`cram`, `.CRAM`, and `CRAM` are equivalent). Empty/whitespace values, `%`, `_`,
+  or `/` are 400s; a valid but unmatched suffix returns an empty result/zero count.
+- `/study/:id/overview` now carries cheap study metadata: `name`,
+  `accession_number`, `faculty_sponsor`, and `data_access_group`.
+- `/study/:id/status-breakdown` now carries the study QC split as `qc`.
+- `/search/study/:term` still searches by substring, but its description now makes
+  clear that it matches `name`, `study_title`, `programme`, and `faculty_sponsor`,
+  and that rows carry enough fields to disambiguate duplicate names.
+- `/study/:id/detail` and `/run/:id/detail` gained a **`lean`** boolean query param,
+  and their nested sample collections are paginated (`limit`/`offset` + sizing
+  headers). `/sample/:id/detail` did **not** gain `lean` in the landed code. The
+  detail endpoints are still large; prefer the overview/progress/manifest tools.
 - `/study/` (`AllStudies`) is unchanged and still large. There is **no** all-studies
   overview endpoint.
 
 ### Exact result shapes (the `json:` field names the tools surface)
 
-- **`StudyOverview`**: `id_study_lims`, `samples_total`, `samples_with_data`,
+- **`StudyOverview`**: `id_study_lims`, `name`, `accession_number`,
+  `faculty_sponsor`, `data_access_group`, `samples_total`, `samples_with_data`,
   `samples_without_data`, `samples_sequenced_no_data`, `data_objects`, `runs`,
   `libraries`, `library_types` (`[]string`), `sequencing_date_range`
   (`{earliest, latest}`, omitempty), `newest_data_added` (latest iRODS `created`,
@@ -90,7 +114,8 @@ object; list endpoints return a **bare JSON array** plus `X-Total-Count` /
   (`PhaseLadder` = `{with_data, sequenced_no_data, registered}`, partitions
   `samples_total`), `per_platform` (`[]{platform, ladder:PhaseLadder}`; a
   multi-platform sample is counted under every platform, so the grand total may
-  exceed `samples_total`), `with_detailed_timeline`, `cache_synced_at`.
+  exceed `samples_total`), `qc` (`{qc_pass, qc_fail, qc_pending}` for sequenced
+  distinct samples), `with_detailed_timeline`, `cache_synced_at`.
 - **`SampleProgress`**: `sample`, `platforms` (`[]string`), `baseline_phase`
   (`registered|sequenced|delivered`), `qc` (`pass|fail|pending|not_tracked`),
   `delivered_at` (earliest iRODS `created`, empty if none), `detailed_timeline`
@@ -104,6 +129,17 @@ object; list endpoints return a **bare JSON array** plus `X-Total-Count` /
 - **`SampleWithData`** (the with/without-data row): `sample`, `platforms`
   (`[]string`; `[]` for registered-only, `["ONT"]` for ONT). **No
   `cache_synced_at`.**
+- **`IRODSPath`**: `id_product`, `collection`, `data_object`, `irods_path`,
+  `id_sample_tmp`, `name`, `id_run` (0 when not derivable), `platform`.
+- **`StudyManifest`**: `id_study_lims`, `name`, `accession_number`,
+  `faculty_sponsor`, `data_access_group`, `rows` (`[]ManifestRow`),
+  `cache_synced_at`. `ManifestRow` is `name`, `supplier_name`, `accession_number`,
+  `sanger_sample_id`, `id_run`, `lane`, `tag_index`, and optional `irods_path`
+  (present only when `with_irods` is set).
+- **`PersonStudy`**: `study` (`Study`), `role` (omitempty; empty for faculty
+  sponsor, set for `study_users` membership).
+- **`PersonCandidate`**: `source` (`faculty_sponsor|study_users`), `name`, `login`
+  (omitempty), `email` (omitempty), `role` (omitempty), `study_count`.
 - **`Count`**: `{count}`. **No `cache_synced_at`.**
 
 ## Why this is needed (the motivating incident — read this)
@@ -146,12 +182,12 @@ The recency question depends on presenting the right time:
    separate from the data-added time — never as the answer.
 
 **Freshness is NOT on every response.** `cache_synced_at` is present on
-`StudyOverview`, `RunOverview`, `StatusBreakdown`, and `SampleProgress` only. It is
-**absent** from the list responses (`SamplesWithData`), the `Count` responses, and
-the standalone `RunStatusTimeline` (`/run/:id/status`). For those, the freshness
-caveat must come from `mlwh_freshness` (and for run status, note that
-`mlwh_sample_progress` embeds the same run timelines _and_ carries
-`cache_synced_at`).
+`StudyOverview`, `RunOverview`, `StatusBreakdown`, `SampleProgress`, and
+`StudyManifest`. It is **absent** from bare list responses (`SamplesWithData`,
+`IRODSPath` arrays, people/study arrays), `Count` responses, and the standalone
+`RunStatusTimeline` (`/run/:id/status`). For those, the freshness caveat must come
+from `mlwh_freshness` (and for run status, note that `mlwh_sample_progress` embeds
+the same run timelines _and_ carries `cache_synced_at`).
 
 ## Background: what exists today in THIS repo (this code is authoritative — read it)
 
@@ -172,7 +208,8 @@ handler)` over the service-agnostic `internal/core` seam (`provider.go`
   direct cause of the overflow.
 - **The iRODS result shape.** `internal/mlwh/schema.go` `irodsPathsResult`
   (~69–72) wraps `[]wa.IRODSPath`; field docs come from upstream OpenAPI via
-  `outputSchemaFor("IRODSPath")` (~97–114) — now including `id_sample_tmp`/`name`.
+  `outputSchemaFor("IRODSPath")` (~97–114) -- now including `id_sample_tmp`,
+  `name`, `id_run`, and `platform`.
   The MCP **passes responses through verbatim** — no reshaping, truncation, or size
   checks anywhere.
 - **Descriptions/schemas sourced from upstream.** `internal/mlwh/tools_resolve.go`
@@ -202,18 +239,20 @@ handler)` over the service-agnostic `internal/core` seam (`provider.go`
 - **(A1) A study overview tool** (`mlwh_study_overview`) returning `StudyOverview`
   in one call: `samples_with_data` / `samples_without_data` /
   `samples_sequenced_no_data`, `data_objects` (the "how much"), the recency fields
-  (`newest_data_added`, `added_last_7_days`), and `cache_synced_at`. This is the
-  default answer to "what's the sequencing-data situation for study X" and to the
+  (`newest_data_added`, `added_last_7_days`), the cheap study metadata
+  (`name`, `accession_number`, `faculty_sponsor`, `data_access_group`), and
+  `cache_synced_at`. This is the default answer to "what's the sequencing-data
+  situation for study X", "what data access group is study X in?", and to the
   zero-argument "anything new this week?" (`added_last_7_days`). There is **one**
-  overview endpoint — do not invent a separate "summary".
+  overview endpoint -- do not invent a separate "summary".
 - **(A2) A count tool** for samples-with-data
   (`mlwh_count_samples_with_data_for_study` → `CountSamplesWithData`), built like the
   existing count tools; it also accepts the recency window (see A4).
 - **(A3) Enumeration tools** — `mlwh_samples_with_data_for_study` /
   `..._without_data_for_study` (paginated fan-outs over `SamplesWithData`), so the
   agent can act on the samples still missing data; and surface the new
-  sample-identity fields (`id_sample_tmp`, `name`) on `mlwh_irods_paths_for_*`
-  (additive output-schema change).
+  sample/run/platform fields (`id_sample_tmp`, `name`, `id_run`, `platform`) on
+  `mlwh_irods_paths_for_*` (additive output-schema change).
 - **(A4) Recency window** — pass an explicit `since` (and optional `until`,
   RFC3339) through to `mlwh_count_samples_with_data_for_study` and
   `mlwh_samples_with_data_for_study`. The window is **half-open `[since, until)`
@@ -234,8 +273,10 @@ handler)` over the service-agnostic `internal/core` seam (`provider.go`
   **structured, actionable error** instead of the oversized payload — e.g. "this
   result is ~X KB (~Y rows); call `mlwh_<count tool>` to size it then page with
   `limit`/`offset`, or use `mlwh_study_overview`." This covers
-  `mlwh_irods_paths_for_study`, `mlwh_study_detail`, `mlwh_run_detail`,
-  `mlwh_all_studies`, and the untyped `mlwh_call_endpoint`. Because it measures
+  `mlwh_irods_paths_for_study`, `mlwh_irods_paths_for_sample`,
+  `mlwh_irods_paths_for_run`, `mlwh_study_manifest`, the people/study list tools,
+  `mlwh_study_detail`, `mlwh_run_detail`, `mlwh_all_studies`, and the untyped
+  `mlwh_call_endpoint`. Because it measures
   serialised bytes generically, it lives in the **shared `internal/core`** result
   path (alongside `errs.go`/the `Registrar` seam) so every current and future
   provider inherits it and the core stays service-agnostic. The threshold is a
@@ -244,11 +285,13 @@ handler)` over the service-agnostic `internal/core` seam (`provider.go`
   mechanism, the binary names the knob.
 - **(N) Count tools for every upstream `/count` counterpart** —
   `mlwh_count_samples_with_data_for_study`, `mlwh_count_irods_paths_for_study`,
-  `mlwh_count_irods_paths_for_sample`, `mlwh_count_runs_for_study`,
-  `mlwh_count_libraries_for_study`, `mlwh_count_lanes_for_sample`,
-  `mlwh_count_samples_for_run` (and the existing `mlwh_count_samples_for_study`),
-  next to the existing count tools. (Each maps to a real `/count` endpoint listed
-  above.)
+  `mlwh_count_irods_paths_for_sample`, `mlwh_count_irods_paths_for_run`,
+  `mlwh_count_study_manifest`, `mlwh_count_studies_for_faculty_sponsor`,
+  `mlwh_count_studies_for_user`, `mlwh_count_resolve_person`,
+  `mlwh_count_runs_for_study`, `mlwh_count_libraries_for_study`,
+  `mlwh_count_lanes_for_sample`, `mlwh_count_samples_for_run` (and the existing
+  `mlwh_count_samples_for_study`), next to the existing count tools. (Each maps to
+  a real `/count` endpoint listed above.)
 - **(P) Bounded-by-default paging with sizing hints.** Change `fanOutPagination`'s
   fetch-all default to a bounded page (the agent opts into more via an explicit
   `limit`), and include a hint in every paged result — "returned N of M; pass
@@ -256,10 +299,10 @@ handler)` over the service-agnostic `internal/core` seam (`provider.go`
   (`X-Total-Count` / `X-Next-Offset`, exposed by the typed client as `Page[T]`
   `{items, total, next_offset}`). Reconcile with the C2 fetch-all stories in
   [`../mcp/spec.md`](../mcp/spec.md).
-- **(L) Lean detail.** Surface the upstream **`lean`** query param on the detail
-  tools (`mlwh_study_detail`, `mlwh_run_detail`, `mlwh_sample_detail`), and steer
-  "tell me about study X / this run" to the overview tools (A1/A5), never the giant
-  full-detail payloads.
+- **(L) Lean detail.** Surface the upstream **`lean`** query param on
+  `mlwh_study_detail` and `mlwh_run_detail` only (there is no landed sample-detail
+  `lean` param), and steer "tell me about study X / this run" to the overview tools
+  (A1/A5), never the giant full-detail payloads.
 
 ### Sample progress / pipeline status tools
 
@@ -288,9 +331,10 @@ no QC, e.g. ONT).
 - **(Q3) `mlwh_study_status_breakdown`** (→ `StatusBreakdown`) — counts of **all**
   the study's samples by phase: the `distinct` ladder
   (`with_data`/`sequenced_no_data`/`registered`, partitioning `samples_total`), the
-  `per_platform` ladders, and `with_detailed_timeline`, in one small call (never N
+  `per_platform` ladders, `qc` (`qc_pass`/`qc_fail`/`qc_pending` over sequenced
+  distinct samples), and `with_detailed_timeline`, in one small call (never N
   per-sample lookups). Carries `cache_synced_at`. Nothing silently dropped (ONT and
-  registered-only samples land in `registered`).
+  registered-only samples land in `registered` and are excluded from the QC split).
 - **(Q4) Honest progress presentation.** Present the **current phase**
   (`current_milestone` / run `current`); for an open phase, "time in phase so far"
   computed by the **agent** (which knows "now") from the upstream
@@ -313,7 +357,12 @@ no QC, e.g. ONT).
   progress/breakdown tools, read the current phase as **as-of last sync**, let the
   agent compute elapsed time in the open phase from `reached_at`/`entered_at`, and
   present the baseline-vs-detailed difference as detail level (never "broken for
-  this sample"). Make the new tools' descriptions unambiguously the right pick for
+  this sample"); (v) **realworld2 workflows** -- route data-access-group questions
+  to `mlwh_study_overview`, run cram-path questions to `mlwh_irods_paths_for_run`
+  with `file_type`, tabular sample/run/accession questions to `mlwh_study_manifest`,
+  QC count questions to `mlwh_study_status_breakdown`, and person/study questions
+  to the faculty-sponsor, user-membership, or resolve-person tools as appropriate.
+  Make the new tools' descriptions unambiguously the right pick for
   these questions, including the definition of "available", the recency semantics,
   and the study-scoping caveat.
 
@@ -326,7 +375,8 @@ no QC, e.g. ONT).
    (iRODS `created`), never `last_changed`; always attach the cache-freshness caveat
    (`cache_synced_at` where the response carries it, otherwise `mlwh_freshness`),
    clearly distinct from the data-added time. Note the freshness field is present
-   only on `StudyOverview`/`RunOverview`/`StatusBreakdown`/`SampleProgress`.
+   only on `StudyOverview`/`RunOverview`/`StatusBreakdown`/`SampleProgress`/
+   `StudyManifest` among the new response types.
 3. **Thin pass-throughs (except G).** Counts/summaries come from upstream
    aggregates, not MCP-side counting of fetched lists; follow the existing
    count-tool pattern, derive descriptions/output-schemas from the upstream
@@ -338,8 +388,8 @@ no QC, e.g. ONT).
    hints the existing study tools produce.
 6. **Hermetic tests.** Extend `harness_test.go`: stub the new endpoints with
    `respondJSON`, call each tool through the MCP client, assert request path/query
-   (including the recency `since`/`until` params, the `lean` param, and which
-   responses carry `cache_synced_at`) and returned shape; cover error paths via
+   (including the recency `since`/`until` params, the study/run detail `lean` params,
+   and which responses carry `cache_synced_at`) and returned shape; cover error paths via
    `respondError`. For the size guard, stub an over-large upstream response and
    assert the structured guard error (not a raw dump) and that an under-budget
    response is unaffected.
@@ -371,8 +421,10 @@ Each item below **will be built**; settle only the implementation:
 - **Tool names/shapes**, tracking the landed upstream endpoints (`mlwh_study_overview`,
   `mlwh_run_overview`, `mlwh_run_status`, `mlwh_sample_progress`,
   `mlwh_study_status_breakdown`, `mlwh_samples_with[out]_data_for_study`,
-  `mlwh_count_samples_with_data_for_study`, the other `mlwh_count_*`) — consistent
-  with the existing `mlwh_*_for_study` / `mlwh_count_*` conventions and with the
+  `mlwh_irods_paths_for_run`, `mlwh_study_manifest`,
+  `mlwh_studies_for_faculty_sponsor`, `mlwh_studies_for_user`,
+  `mlwh_resolve_person`, and the `mlwh_count_*` counterparts) -- consistent with
+  the existing `mlwh_*_for_study` / `mlwh_count_*` conventions and with the
   upstream registry method names.
 - **The size-guard threshold default and config name**, the structured error's
   shape/wording, and how it estimates size (serialised bytes vs a token estimate).
@@ -380,77 +432,89 @@ Each item below **will be built**; settle only the implementation:
   reconciled with the C2 fetch-all stories.
 - **How "added to iRODS" is worded** in tool descriptions, the exact `since`/`until`
   parameter surfacing, and how the freshness caveat is presented — including the
-  fact that `cache_synced_at` is on the four aggregate/progress responses only, so
-  the caveat for lists/counts/`mlwh_run_status` is sourced from `mlwh_freshness`.
+  fact that `cache_synced_at` is on `StudyOverview`, `RunOverview`,
+  `StatusBreakdown`, `SampleProgress`, and `StudyManifest`, so the caveat for bare
+  lists/counts/`mlwh_run_status` is sourced from `mlwh_freshness`.
 - **Progress tool shapes** — how the open phase's elapsed time, the freshness
   caveat, and the three-layer (baseline / `milestones` / `runs`) presentation (incl.
   `detailed_timeline: false` + `timeline_reason`) are surfaced — matching the
   upstream `SampleProgress`/`RunStatusTimeline`.
-- **Lean surfacing** — how the upstream `lean` param is exposed on the detail tools.
+- **Lean surfacing** — how the upstream `lean` param is exposed on study/run detail
+  tools only.
 
 ## Second wave (realworld2): more question shapes to make easy
 
 A further batch of real user questions must also be one cheap call. These build on a
-**second upstream feature** being added in the `wa` repo
-([`~/wa/.docs/realworld2/prompt.md`](../../../wa/.docs/realworld2/prompt.md), **not
-yet built** — the contract is the `wa` code once it lands). Same rules as above: thin
+**second upstream feature** that has now landed in the `wa` repo
+([`~/wa/.docs/realworld2/prompt.md`](../../../wa/.docs/realworld2/prompt.md) is only
+background; the contract is the `wa` code at API 1.7.0). Same rules as above: thin
 pass-throughs, one small/bounded response, the freshness/timestamp discipline, the
-size guard (G), bounded paging (P), `/count` tools (N), descriptions sourced from the
-upstream Registry/OpenAPI. Source-schema facts below were verified against the live
-MLWH source.
+size guard (G), bounded paging (P), `/count` tools (N), descriptions sourced from
+the upstream Registry/OpenAPI. Source-schema facts below were verified against the
+live MLWH source, but exact names/fields come from current `wa` code.
 
-| Question (study/run/person)                                            | Today                                                            | New tool / behaviour (realworld2)                                                                 |
-| --------------------------------------------------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| Q1 "data access groups for study X"                                   | answerable: `data_access_group` is on the `Study` object        | (A10) make a **cheap** study tool surface it; never route to `mlwh_study_detail`                  |
-| Q2 "iRODS path for cram files from run X"                             | **gap**                                                         | (A6) `mlwh_irods_paths_for_run` + a `file_type` filter on the iRODS tools                         |
-| Q3 "list study details, run_id, sample name, supplier_name, accession" | **gap** (multi-call)                                          | (A7) `mlwh_study_manifest` (paginated tabular + count)                                            |
-| Q4 Q3 + iRODS path to the cram files                                  | **gap**                                                         | (A7) `mlwh_study_manifest` with iRODS path + `file_type`                                          |
-| Q5 "study ID for `<name>`" (ambiguous)                               | answerable: `mlwh_search_studies` (+count)                      | ensure results expose `id_study_lims`/`name`/`faculty_sponsor`; workflow note on multiple matches |
-| Q6 "not-sequenced / sequenced / passed manual QC counts"             | **gap** (aggregate; `qc` data exists)                           | (A8) study **QC counts** on the overview/breakdown tool                                           |
-| Q7 "studies for `<person>`" / "my studies"                          | partial: `faculty_sponsor` already matched by `mlwh_search_studies` | (A9) `mlwh_studies_for_person` (faculty_sponsor) + a `study_users`/login tool, with routing    |
+| Question (study/run/person)                                            | Upstream `wa` contract now landed                                      | MCP tool / behaviour to add                                                                     |
+| --------------------------------------------------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Q1 "data access groups for study X"                                   | `StudyOverview` carries `data_access_group` plus study metadata          | (A10) surface it via `mlwh_study_overview`; never route to `mlwh_study_detail`                   |
+| Q2 "iRODS path for cram files from run X"                             | `IRODSPathsForRun` + `file_type` on run/study/sample iRODS endpoints     | (A6) `mlwh_irods_paths_for_run` + `file_type` filter on iRODS tools                              |
+| Q3 "list study details, run_id, sample name, supplier_name, accession" | `StudyManifest` envelope with paged `rows` and count                     | (A7) `mlwh_study_manifest` (paginated tabular + count)                                           |
+| Q4 Q3 + iRODS path to the cram files                                  | `StudyManifest` accepts `with_irods=true&file_type=cram`                 | (A7) `mlwh_study_manifest` with iRODS path + `file_type`                                         |
+| Q5 "study ID for `<name>`" (ambiguous)                               | `SearchStudies` rows expose `id_study_lims`/`name`/`faculty_sponsor`     | workflow note on multiple matches                                                               |
+| Q6 "not-sequenced / sequenced / passed manual QC counts"             | `StatusBreakdown.qc` gives `qc_pass`/`qc_fail`/`qc_pending`              | (A8) study **QC counts** via `mlwh_study_status_breakdown`                                       |
+| Q7 "studies for `<person>`" / "my studies"                          | `StudiesForFacultySponsor`, `StudiesForUser`, `ResolvePerson`            | (A9/A9b) sponsor, role-membership, and person-resolution tools with routing                      |
 
 ### New MCP deliverables
 
 - **(A6) iRODS by file type + run-scoped iRODS.** A `mlwh_irods_paths_for_run`
   (+ `mlwh_count_irods_paths_for_run`) wrapping the new `/run/:id/irods`, and a
-  `file_type` param (e.g. `cram`) on `mlwh_irods_paths_for_{study,sample,run}`.
-  Upstream "cram" is a filename-suffix match and run-scope is a product→run join —
-  pass through; surface the run on rows where upstream provides it.
+  `file_type` param (e.g. `cram`) on `mlwh_irods_paths_for_{study,sample,run}` and
+  their count tools. Upstream `file_type` is a filename-suffix match with the
+  leading dot stripped; invalid values are 400s, while a valid but unmatched suffix
+  is an empty result/zero count. Run-scope is an Illumina product-to-run join; pass
+  through `id_run` and `platform` from `IRODSPath`.
 - **(A7) Study manifest.** `mlwh_study_manifest` wrapping the new paginated study
-  manifest: per-(sample, run/product) rows with sample `name`, `supplier_name`,
-  `accession_number`, `sanger_sample_id`, `id_run`, and — with a `file_type`/with-iRODS
-  switch — the iRODS cram path; study-level metadata returned once. This is the most
-  budget-sensitive new tool: bounded-by-default, paged with sizing hints, a
-  `mlwh_count_*` counterpart, and **fully under the size guard (G)**.
+  manifest envelope: study metadata (`id_study_lims`, `name`, `accession_number`,
+  `faculty_sponsor`, `data_access_group`) returned once, plus paged product rows
+  (`name`, `supplier_name`, `accession_number`, `sanger_sample_id`, `id_run`, `lane`,
+  `tag_index`, optional `irods_path`). Set `with_irods=true` to include `irods_path`;
+  set `file_type=cram` to narrow that joined path. `with_irods` without `file_type`
+  does **not** default to cram; it returns any one object for the product. The count
+  counterpart is `mlwh_count_study_manifest` / `CountStudyManifest`, product-grained
+  and unaffected by `with_irods`/`file_type`. This is the most budget-sensitive new
+  tool: bounded-by-default, paged with sizing hints, and **fully under the size guard
+  (G)**.
 - **(A8) Study QC counts.** Surface the new study-level QC dimension —
   **received** (`samples_total`), **sequenced** (has product-metrics),
   **not-sequenced** (registered), and **qc_pass / qc_fail / qc_pending** — on the
-  study overview/status-breakdown tool, in one cheap call (no per-sample fan-out),
-  consistent with `mlwh_sample_progress`'s `qc`.
-- **(A9) People → studies, with routing.** `mlwh_studies_for_person` for the named
-  **faculty sponsor** (already matched by `mlwh_search_studies`'s `faculty_sponsor`
-  substring — give it a clear dedicated tool/description), and a separate
-  **`study_users`**-backed tool for "my studies" / a login (role-based membership,
-  **role-filtered** to `owner`/`manager` by default, excluding the noisy `follower`).
-  Both must match **case-insensitively across `name`, `login`, and `email`** so an
-  email/login query and a name query both work.
-- **(A9b) Person resolution (name → stored identifier).** A `mlwh_resolve_person` /
-  `mlwh_find_people` tool wrapping the upstream people-directory endpoint: given a
-  partial term it returns the **distinct candidate people** with their canonical
-  stored forms (distinct `faculty_sponsor` values; `study_users`
-  `name`/`login`/`email`/`role`) and a study count each — so the agent can translate
-  a spoken/partial name into the exact stored value and disambiguate, instead of
-  guessing a spelling and dead-ending.
+  `mlwh_study_status_breakdown` tool, in one cheap call (no per-sample fan-out),
+  consistent with `mlwh_sample_progress`'s `qc`. The landed upstream does **not** put
+  these QC fields on `StudyOverview`.
+- **(A9) People -> studies, with routing.** Add `mlwh_studies_for_faculty_sponsor`
+  (+ `mlwh_count_studies_for_faculty_sponsor`) for the named **faculty sponsor** and
+  `mlwh_studies_for_user` (+ `mlwh_count_studies_for_user`) for `study_users` role
+  membership. `StudiesForUser` matches the person term case-insensitively across
+  `name`, `login`, and `email`; its default role set is `owner`, `manager`, and
+  `data_access_contact`. A supplied `role` is a comma-separated **override** of that
+  default, so `role=follower` deliberately widens to followers only. Rows are
+  `PersonStudy` (`study`, optional `role`).
+- **(A9b) Person resolution (name -> stored identifier).** A `mlwh_resolve_person`
+  tool wrapping the upstream `/resolve-person/:term` endpoint, plus
+  `mlwh_count_resolve_person`: given a partial term it returns distinct
+  `PersonCandidate` rows from both sources (`source`, `name`, optional `login` /
+  `email` / `role`, `study_count`) so the agent can translate a spoken/partial name
+  into the exact stored value and disambiguate, instead of guessing a spelling and
+  dead-ending.
 - **(A10) Cheap study metadata.** Ensure `data_access_group`, `faculty_sponsor`,
-  `name`, `accession_number` come from a cheap study tool (`mlwh_resolve_study` / the
-  overview), never the giant `mlwh_study_detail` (Q1).
+  `name`, `accession_number` come from a cheap study tool (`mlwh_study_overview` /
+  `mlwh_resolve_study`), never the giant `mlwh_study_detail` (Q1).
 
 ### Routing & semantics the descriptions + `mlwh://workflow` must encode
 
 - **`faculty_sponsor` (named PI/sponsor) ≠ `study_users` (role membership).** "Studies
   for `<person>`" → faculty_sponsor (e.g. ~91 studies for "Carl Anderson"); "my
-  studies"/a login → `study_users`, role-filtered (`owner`/`manager`; `follower` is
-  noise). They return different sets — never conflate; route by name-vs-login.
+  studies"/a login → `study_users`, role-filtered by default to `owner`, `manager`,
+  and `data_access_contact`; `follower` is noisy and must be requested explicitly.
+  They return different sets — never conflate; route by name-vs-login.
 - **Translate the user's name to what's stored; never dead-end on a narrow search.**
   People are stored as free-text full names (`faculty_sponsor`) and as
   `name`/`login`/`email` (`study_users`) — a user won't type these exactly. The
@@ -467,20 +531,20 @@ MLWH source.
   "not got sequence data" = not sequenced (registered). One call, no per-sample
   fan-out.
 - The manifest and run-iRODS **lists are large** → count/summarise → page; the size
-  guard (G) applies; carry the freshness caveat via `mlwh_freshness` (these
-  list/manifest responses do not carry `cache_synced_at`).
+  guard (G) applies. `StudyManifest` carries `cache_synced_at`; the run-iRODS and
+  people list responses do not, so their freshness caveat must come from
+  `mlwh_freshness`.
 
 These reuse the same MCP-layer machinery specified above (size guard G, bounded
 paging P, count tools N, `mapToolError`, upstream-sourced descriptions, the hermetic
-harness). When the realworld2 endpoints land, re-verify exact paths/field names
-against the `wa` code before building, exactly as for the first wave.
+harness). The realworld2 endpoints have landed; keep re-verifying exact paths/field
+names against the `wa` code before building.
 
 ## Out of scope
 
-- The upstream API work itself — the first wave is **already implemented and merged**
-  in `~/wa` (API 1.6.0); the second wave (realworld2) is **being built** in `~/wa`
-  per [`~/wa/.docs/realworld2/prompt.md`](../../../wa/.docs/realworld2/prompt.md).
-  This spec wraps those endpoints and treats the `wa` code as the contract.
+- The upstream API work itself — the first and second waves are **already implemented**
+  in `~/wa` (API 1.7.0). This spec wraps those endpoints and treats the `wa` code as
+  the contract.
 - Any `internal/core` change beyond the generic size guard (G) and what
   registering new MLWH tools requires.
 - HTTP transport / web UI work (separate features); client-side caching or quotas.
@@ -490,10 +554,11 @@ against the `wa` code before building, exactly as for the first wave.
 1. **The upstream `wa` CODE** (the contract these tools wrap; descriptions/schemas
    are sourced from it): `~/wa/mlwh/registry.go` (per-endpoint `Description` /
    `Summary` / `Query`), `~/wa/mlwh/types.go` (exact `json:` field tags),
-   `~/wa/mlwh/availability.go` + `~/wa/mlwh/progress.go` (semantics),
-   `~/wa/mlwh/remote.go` (the typed client + `Page[T]`), and
+   `~/wa/mlwh/availability.go` + `~/wa/mlwh/progress.go` + `~/wa/mlwh/manifest.go`
+   + `~/wa/mlwh/people.go` (semantics), `~/wa/mlwh/remote.go` (the typed client +
+   `Page[T]` where available), and
    `~/wa/.docs/mcp/api-reference.md` / `wa.OpenAPIDocument()` (generated mirrors).
-   MLWH API **1.6.0**.
+   MLWH API **1.7.0**.
 2. **This repo's code**: `internal/mlwh/tools_detail.go`
    (`mlwh_count_samples_for_study`, `addIRODSPathsForStudy`, `addStudyDetail`,
    `addAllStudies`, `fanOutPagination`/`fetchAllLimit`),
