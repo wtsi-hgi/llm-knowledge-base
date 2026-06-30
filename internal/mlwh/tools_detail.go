@@ -35,42 +35,15 @@ import (
 	"github.com/wtsi-hgi/llm-knowledge-base/internal/core"
 )
 
-// fetchAllLimit is the upstream fetch-all sentinel (wa's mlwhServerFetchAllLimit,
-// verified equal to 1_000_000 in wa/mlwh/server.go). It is the limit the
-// paginated fan-out handlers send when the caller omits limit, so the agent
-// receives every row by default.
-//
-// This default is the OPPOSITE of the search tools' bounded default, and it is
-// required: the typed []T Queryer methods take (limit, offset int) and the
-// remote client serialises both literally (remotePagination -> strconv.Itoa), so
-// an explicit limit=0 reaches the server as LIMIT 0 and returns ZERO rows. The
-// server substitutes its fetch-all page only when the limit query param is
-// ABSENT, which the int method cannot express; so the handler must default the
-// limit to this sentinel itself rather than passing 0.
-const fetchAllLimit = 1_000_000
+// pagedFanOutPaginationNote is appended to every paged fan-out tool's
+// description so the agent sees the A3 bounded-page default and maximum even
+// when the upstream Registry wording is terse.
+const pagedFanOutPaginationNote = " Defaults to a page of 100 rows, maximum 1000 " +
+	"(a larger limit is rejected, not clamped); use offset to page."
 
-// fetchAllPaginationNote is the clause appended to every paginated fan-out tool's
-// description so the agent knows omitting limit fetches all rows (and that an
-// explicit limit/offset pages instead). It makes the fetch-all default explicit
-// regardless of the upstream Registry wording.
-const fetchAllPaginationNote = " Omitting limit fetches all matching rows (the default); " +
-	"set limit (and offset) to page through the results instead."
-
-// fanOutPagination resolves the effective (limit, offset) a paginated fan-out
-// handler sends upstream. An omitted (zero or negative) limit becomes
-// fetchAllLimit so the caller receives every row; an explicit positive limit is
-// passed through unchanged. The offset is passed through, defaulting to 0.
-func fanOutPagination(limit, offset int) (int, int) {
-	if limit <= 0 {
-		limit = fetchAllLimit
-	}
-
-	return limit, offset
-}
-
-// fanOutSliceSchemas builds the slice-wrapper output schemas (F2) shared by the
-// paginated fan-out tools, keyed by the wrapper property name so each tool picks
-// the one matching its element type.
+// fanOutSliceSchemas builds the paged slice-wrapper output schemas shared by
+// the paged fan-out tools, keyed by the wrapper property name so each tool
+// picks the one matching its element type.
 func fanOutSliceSchemas() (map[string]map[string]any, error) {
 	specs := []struct {
 		property  string
@@ -87,7 +60,7 @@ func fanOutSliceSchemas() (map[string]map[string]any, error) {
 	schemas := make(map[string]map[string]any, len(specs))
 
 	for _, spec := range specs {
-		schema, err := outputSchemaForSlice(spec.property, spec.component)
+		schema, err := outputSchemaForPagedSlice(spec.property, spec.component)
 		if err != nil {
 			return nil, fmt.Errorf("mlwh: build %s output schema: %w", spec.property, err)
 		}
@@ -98,17 +71,16 @@ func fanOutSliceSchemas() (map[string]map[string]any, error) {
 	return schemas, nil
 }
 
-// paginatedFanOutDescription derives a paginated fan-out tool's LLM-facing
+// paginatedFanOutDescription derives a paged fan-out tool's LLM-facing
 // description from its Registry entry (Summary + Description) and appends the
-// fetch-all note, so the description tracks the upstream Registry yet always
-// states the fetch-all default this server applies.
+// bounded pagination note.
 func paginatedFanOutDescription(method string) (string, error) {
 	base, err := resolveDescription(method)
 	if err != nil {
 		return "", err
 	}
 
-	return base + fetchAllPaginationNote, nil
+	return base + pagedFanOutPaginationNote, nil
 }
 
 // registerDetailTools adds the grouped detail tools (Story C1) and the fan-out
@@ -116,11 +88,10 @@ func paginatedFanOutDescription(method string) (string, error) {
 // tool pre-sets its OpenAPI-sourced output schema so the upstream doc: field
 // descriptions survive (the SDK's own reflection would drop them), and every
 // handler maps an upstream error to a clear tool error via mapToolError. The
-// paginated fan-out tools default an omitted limit to the fetch-all sentinel so
-// the caller receives every row, never the zero rows an explicit limit=0 would
-// yield. Building a schema or deriving a description fails only on a programming
-// error (the schemas and Registry are compiled in), so such a failure is a
-// registration error.
+// paged fan-out tools default an omitted limit to 100 and reject limits above
+// 1000 before HTTP. Building a schema or deriving a description fails only on a
+// programming error (the schemas and Registry are compiled in), so such a
+// failure is a registration error.
 func (p *provider) registerDetailTools(r core.Registrar) error {
 	if err := p.registerDetailGroup(r); err != nil {
 		return err
@@ -295,10 +266,9 @@ func (p *provider) addLibraryDetail(r core.Registrar, outputSchema map[string]an
 	return nil
 }
 
-// registerFanOutTools adds the fan-out enumeration tools (Story C2): the
-// paginated list tools (which default an omitted limit to the fetch-all
-// sentinel) and the two non-paginated tools (studies-for-sample and the
-// samples-in-study count).
+// registerFanOutTools adds the fan-out enumeration tools: the paged list tools
+// and the two non-paged tools (studies-for-sample and the samples-in-study
+// count).
 func (p *provider) registerFanOutTools(r core.Registrar) error {
 	if err := p.registerPaginatedFanOuts(r); err != nil {
 		return err
@@ -307,10 +277,10 @@ func (p *provider) registerFanOutTools(r core.Registrar) error {
 	return p.registerNonPaginatedFanOuts(r)
 }
 
-// registerPaginatedFanOuts adds the eight paginated fan-out tools. Each pre-sets
-// its slice wrapper output schema (F2) and appends the fetch-all note to its
-// Registry-derived description, then registers a handler that defaults an omitted
-// limit to the fetch-all sentinel before the typed call.
+// registerPaginatedFanOuts adds the eight paged fan-out tools. Each pre-sets
+// its paged wrapper output schema and appends the bounded-page note to its
+// Registry-derived description, then registers a handler that rejects
+// over-large pages before the typed call.
 func (p *provider) registerPaginatedFanOuts(r core.Registrar) error {
 	schemas, err := fanOutSliceSchemas()
 	if err != nil {
@@ -348,17 +318,17 @@ func (p *provider) registerPaginatedFanOuts(r core.Registrar) error {
 	return p.addIRODSPathsForStudy(r, schemas["irods_paths"])
 }
 
-// pageInput is the input for the paginated fan-out tool that takes no path param
-// (mlwh_all_studies): just the fetch-all pagination controls. An omitted Limit
-// triggers the fetch-all default; an omitted Offset is 0.
+// pageInput is the input for the paged fan-out tool that takes no path param
+// (mlwh_all_studies): just the bounded pagination controls. An omitted Limit
+// defaults to 100; an omitted Offset is 0.
 type pageInput struct {
-	Limit  int `json:"limit,omitempty" jsonschema:"maximum rows to return; omit to fetch all rows (the default), or set to page"`
+	Limit  int `json:"limit,omitempty" jsonschema:"maximum rows to return; defaults to 100, maximum 1000 (a larger limit is rejected, not clamped)"`
 	Offset int `json:"offset,omitempty" jsonschema:"number of leading rows to skip before returning results; defaults to 0"`
 }
 
 // addAllStudies registers mlwh_all_studies (Story C2): it lists every study,
-// defaulting an omitted limit to the fetch-all sentinel, and wraps the result
-// under {"studies":[...]}.
+// defaulting an omitted limit to a bounded page, and wraps the result under
+// {"studies":[...],"total":N,"next_offset":M}.
 func (p *provider) addAllStudies(r core.Registrar, outputSchema map[string]any) error {
 	description, err := paginatedFanOutDescription("AllStudies")
 	if err != nil {
@@ -371,32 +341,39 @@ func (p *provider) addAllStudies(r core.Registrar, outputSchema map[string]any) 
 		Name:         "mlwh_all_studies",
 		Description:  description,
 		OutputSchema: outputSchema,
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in pageInput) (*mcp.CallToolResult, studiesResult, error) {
-		limit, offset := fanOutPagination(in.Limit, in.Offset)
-
-		studies, err := client.AllStudies(ctx, limit, offset)
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in pageInput) (*mcp.CallToolResult, pagedStudiesResult, error) {
+		limit, offset, err := boundedPagination(in.Limit, in.Offset)
 		if err != nil {
-			return core.ToolError[studiesResult](mapToolError(err))
+			return core.ToolError[pagedStudiesResult](err)
 		}
 
-		return nil, studiesResult{Studies: studies}, nil
+		page, err := client.AllStudiesPage(ctx, limit, offset)
+		if err != nil {
+			return core.ToolError[pagedStudiesResult](mapToolError(err))
+		}
+
+		return nil, pagedStudiesResult{
+			Studies:    page.Items,
+			Total:      page.Total,
+			NextOffset: page.NextOffset,
+		}, nil
 	})
 
 	return nil
 }
 
-// studyPageInput is the input for the study-keyed paginated fan-out tools
+// studyPageInput is the input for the study-keyed paged fan-out tools
 // (mlwh_samples_for_study, mlwh_libraries_for_study, mlwh_runs_for_study,
-// mlwh_irods_paths_for_study): a LIMS study id plus the fetch-all pagination.
+// mlwh_irods_paths_for_study): a LIMS study id plus bounded pagination.
 type studyPageInput struct {
 	StudyLimsID string `json:"study_lims_id" jsonschema:"the LIMS identifier of the study to enumerate"`
-	Limit       int    `json:"limit,omitempty" jsonschema:"maximum rows to return; omit to fetch all rows (the default), or set to page"`
+	Limit       int    `json:"limit,omitempty" jsonschema:"maximum rows to return; defaults to 100, maximum 1000 (a larger limit is rejected, not clamped)"`
 	Offset      int    `json:"offset,omitempty" jsonschema:"number of leading rows to skip before returning results; defaults to 0"`
 }
 
 // addSamplesForStudy registers mlwh_samples_for_study (Story C2): it lists the
-// distinct samples linked to a study, with the fetch-all default, wrapping the
-// result under {"samples":[...]}.
+// distinct samples linked to a study, with the bounded page default, wrapping
+// the result under {"samples":[...],"total":N,"next_offset":M}.
 func (p *provider) addSamplesForStudy(r core.Registrar, outputSchema map[string]any) error {
 	description, err := paginatedFanOutDescription("SamplesForStudy")
 	if err != nil {
@@ -409,31 +386,38 @@ func (p *provider) addSamplesForStudy(r core.Registrar, outputSchema map[string]
 		Name:         "mlwh_samples_for_study",
 		Description:  description,
 		OutputSchema: outputSchema,
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in studyPageInput) (*mcp.CallToolResult, samplesResult, error) {
-		limit, offset := fanOutPagination(in.Limit, in.Offset)
-
-		samples, err := client.SamplesForStudy(ctx, in.StudyLimsID, limit, offset)
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in studyPageInput) (*mcp.CallToolResult, pagedSamplesResult, error) {
+		limit, offset, err := boundedPagination(in.Limit, in.Offset)
 		if err != nil {
-			return core.ToolError[samplesResult](mapToolError(err))
+			return core.ToolError[pagedSamplesResult](err)
 		}
 
-		return nil, samplesResult{Samples: samples}, nil
+		page, err := client.SamplesForStudyPage(ctx, in.StudyLimsID, limit, offset)
+		if err != nil {
+			return core.ToolError[pagedSamplesResult](mapToolError(err))
+		}
+
+		return nil, pagedSamplesResult{
+			Samples:    page.Items,
+			Total:      page.Total,
+			NextOffset: page.NextOffset,
+		}, nil
 	})
 
 	return nil
 }
 
-// runPageInput is the input for the run-keyed paginated fan-out tool
-// (mlwh_samples_for_run): a run id plus the fetch-all pagination.
+// runPageInput is the input for the run-keyed paged fan-out tool
+// (mlwh_samples_for_run): a run id plus bounded pagination.
 type runPageInput struct {
 	IDRun  string `json:"id_run" jsonschema:"the sequencing run identifier to enumerate"`
-	Limit  int    `json:"limit,omitempty" jsonschema:"maximum rows to return; omit to fetch all rows (the default), or set to page"`
+	Limit  int    `json:"limit,omitempty" jsonschema:"maximum rows to return; defaults to 100, maximum 1000 (a larger limit is rejected, not clamped)"`
 	Offset int    `json:"offset,omitempty" jsonschema:"number of leading rows to skip before returning results; defaults to 0"`
 }
 
 // addSamplesForRun registers mlwh_samples_for_run (Story C2): it lists the
-// samples sequenced on a run, with the fetch-all default, wrapping the result
-// under {"samples":[...]}.
+// samples sequenced on a run, with the bounded page default, wrapping the
+// result under {"samples":[...],"total":N,"next_offset":M}.
 func (p *provider) addSamplesForRun(r core.Registrar, outputSchema map[string]any) error {
 	description, err := paginatedFanOutDescription("SamplesForRun")
 	if err != nil {
@@ -446,23 +430,30 @@ func (p *provider) addSamplesForRun(r core.Registrar, outputSchema map[string]an
 		Name:         "mlwh_samples_for_run",
 		Description:  description,
 		OutputSchema: outputSchema,
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in runPageInput) (*mcp.CallToolResult, samplesResult, error) {
-		limit, offset := fanOutPagination(in.Limit, in.Offset)
-
-		samples, err := client.SamplesForRun(ctx, in.IDRun, limit, offset)
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in runPageInput) (*mcp.CallToolResult, pagedSamplesResult, error) {
+		limit, offset, err := boundedPagination(in.Limit, in.Offset)
 		if err != nil {
-			return core.ToolError[samplesResult](mapToolError(err))
+			return core.ToolError[pagedSamplesResult](err)
 		}
 
-		return nil, samplesResult{Samples: samples}, nil
+		page, err := client.SamplesForRunPage(ctx, in.IDRun, limit, offset)
+		if err != nil {
+			return core.ToolError[pagedSamplesResult](mapToolError(err))
+		}
+
+		return nil, pagedSamplesResult{
+			Samples:    page.Items,
+			Total:      page.Total,
+			NextOffset: page.NextOffset,
+		}, nil
 	})
 
 	return nil
 }
 
 // addLibrariesForStudy registers mlwh_libraries_for_study (Story C2): it lists
-// the libraries belonging to a study, with the fetch-all default, wrapping the
-// result under {"libraries":[...]}.
+// the libraries belonging to a study, with the bounded page default, wrapping
+// the result under {"libraries":[...],"total":N,"next_offset":M}.
 func (p *provider) addLibrariesForStudy(r core.Registrar, outputSchema map[string]any) error {
 	description, err := paginatedFanOutDescription("LibrariesForStudy")
 	if err != nil {
@@ -475,23 +466,30 @@ func (p *provider) addLibrariesForStudy(r core.Registrar, outputSchema map[strin
 		Name:         "mlwh_libraries_for_study",
 		Description:  description,
 		OutputSchema: outputSchema,
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in studyPageInput) (*mcp.CallToolResult, librariesResult, error) {
-		limit, offset := fanOutPagination(in.Limit, in.Offset)
-
-		libraries, err := client.LibrariesForStudy(ctx, in.StudyLimsID, limit, offset)
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in studyPageInput) (*mcp.CallToolResult, pagedLibrariesResult, error) {
+		limit, offset, err := boundedPagination(in.Limit, in.Offset)
 		if err != nil {
-			return core.ToolError[librariesResult](mapToolError(err))
+			return core.ToolError[pagedLibrariesResult](err)
 		}
 
-		return nil, librariesResult{Libraries: libraries}, nil
+		page, err := client.LibrariesForStudyPage(ctx, in.StudyLimsID, limit, offset)
+		if err != nil {
+			return core.ToolError[pagedLibrariesResult](mapToolError(err))
+		}
+
+		return nil, pagedLibrariesResult{
+			Libraries:  page.Items,
+			Total:      page.Total,
+			NextOffset: page.NextOffset,
+		}, nil
 	})
 
 	return nil
 }
 
 // addRunsForStudy registers mlwh_runs_for_study (Story C2): it lists the
-// sequencing runs associated with a study, with the fetch-all default, wrapping
-// the result under {"runs":[...]}.
+// sequencing runs associated with a study, with the bounded page default,
+// wrapping the result under {"runs":[...],"total":N,"next_offset":M}.
 func (p *provider) addRunsForStudy(r core.Registrar, outputSchema map[string]any) error {
 	description, err := paginatedFanOutDescription("RunsForStudy")
 	if err != nil {
@@ -504,32 +502,39 @@ func (p *provider) addRunsForStudy(r core.Registrar, outputSchema map[string]any
 		Name:         "mlwh_runs_for_study",
 		Description:  description,
 		OutputSchema: outputSchema,
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in studyPageInput) (*mcp.CallToolResult, runsResult, error) {
-		limit, offset := fanOutPagination(in.Limit, in.Offset)
-
-		runs, err := client.RunsForStudy(ctx, in.StudyLimsID, limit, offset)
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in studyPageInput) (*mcp.CallToolResult, pagedRunsResult, error) {
+		limit, offset, err := boundedPagination(in.Limit, in.Offset)
 		if err != nil {
-			return core.ToolError[runsResult](mapToolError(err))
+			return core.ToolError[pagedRunsResult](err)
 		}
 
-		return nil, runsResult{Runs: runs}, nil
+		page, err := client.RunsForStudyPage(ctx, in.StudyLimsID, limit, offset)
+		if err != nil {
+			return core.ToolError[pagedRunsResult](mapToolError(err))
+		}
+
+		return nil, pagedRunsResult{
+			Runs:       page.Items,
+			Total:      page.Total,
+			NextOffset: page.NextOffset,
+		}, nil
 	})
 
 	return nil
 }
 
-// samplePageInput is the input for the sample-keyed paginated fan-out tools
+// samplePageInput is the input for the sample-keyed paged fan-out tools
 // (mlwh_lanes_for_sample, mlwh_irods_paths_for_sample): a Sanger sample name
-// plus the fetch-all pagination.
+// plus bounded pagination.
 type samplePageInput struct {
 	SangerName string `json:"sanger_name" jsonschema:"the Sanger sample name to enumerate"`
-	Limit      int    `json:"limit,omitempty" jsonschema:"maximum rows to return; omit to fetch all rows (the default), or set to page"`
+	Limit      int    `json:"limit,omitempty" jsonschema:"maximum rows to return; defaults to 100, maximum 1000 (a larger limit is rejected, not clamped)"`
 	Offset     int    `json:"offset,omitempty" jsonschema:"number of leading rows to skip before returning results; defaults to 0"`
 }
 
 // addLanesForSample registers mlwh_lanes_for_sample (Story C2): it lists the
-// run/lane/tag combinations on which a sample was sequenced, with the fetch-all
-// default, wrapping the result under {"lanes":[...]}.
+// run/lane/tag combinations on which a sample was sequenced, with the bounded
+// page default, wrapping the result under {"lanes":[...],"total":N,"next_offset":M}.
 func (p *provider) addLanesForSample(r core.Registrar, outputSchema map[string]any) error {
 	description, err := paginatedFanOutDescription("LanesForSample")
 	if err != nil {
@@ -542,23 +547,31 @@ func (p *provider) addLanesForSample(r core.Registrar, outputSchema map[string]a
 		Name:         "mlwh_lanes_for_sample",
 		Description:  description,
 		OutputSchema: outputSchema,
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in samplePageInput) (*mcp.CallToolResult, lanesResult, error) {
-		limit, offset := fanOutPagination(in.Limit, in.Offset)
-
-		lanes, err := client.LanesForSample(ctx, in.SangerName, limit, offset)
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in samplePageInput) (*mcp.CallToolResult, pagedLanesResult, error) {
+		limit, offset, err := boundedPagination(in.Limit, in.Offset)
 		if err != nil {
-			return core.ToolError[lanesResult](mapToolError(err))
+			return core.ToolError[pagedLanesResult](err)
 		}
 
-		return nil, lanesResult{Lanes: lanes}, nil
+		page, err := client.LanesForSamplePage(ctx, in.SangerName, limit, offset)
+		if err != nil {
+			return core.ToolError[pagedLanesResult](mapToolError(err))
+		}
+
+		return nil, pagedLanesResult{
+			Lanes:      page.Items,
+			Total:      page.Total,
+			NextOffset: page.NextOffset,
+		}, nil
 	})
 
 	return nil
 }
 
 // addIRODSPathsForSample registers mlwh_irods_paths_for_sample (Story C2): it
-// lists the iRODS data-object paths exported for a sample, with the fetch-all
-// default, wrapping the result under {"irods_paths":[...]}.
+// lists the iRODS data-object paths exported for a sample, with the bounded
+// page default, wrapping the result under
+// {"irods_paths":[...],"total":N,"next_offset":M}.
 func (p *provider) addIRODSPathsForSample(r core.Registrar, outputSchema map[string]any) error {
 	description, err := paginatedFanOutDescription("IRODSPathsForSample")
 	if err != nil {
@@ -571,23 +584,31 @@ func (p *provider) addIRODSPathsForSample(r core.Registrar, outputSchema map[str
 		Name:         "mlwh_irods_paths_for_sample",
 		Description:  description,
 		OutputSchema: outputSchema,
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in samplePageInput) (*mcp.CallToolResult, irodsPathsResult, error) {
-		limit, offset := fanOutPagination(in.Limit, in.Offset)
-
-		paths, err := client.IRODSPathsForSample(ctx, in.SangerName, limit, offset)
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in samplePageInput) (*mcp.CallToolResult, pagedIRODSPathsResult, error) {
+		limit, offset, err := boundedPagination(in.Limit, in.Offset)
 		if err != nil {
-			return core.ToolError[irodsPathsResult](mapToolError(err))
+			return core.ToolError[pagedIRODSPathsResult](err)
 		}
 
-		return nil, irodsPathsResult{IRODSPaths: paths}, nil
+		page, err := client.IRODSPathsForSamplePage(ctx, in.SangerName, limit, offset)
+		if err != nil {
+			return core.ToolError[pagedIRODSPathsResult](mapToolError(err))
+		}
+
+		return nil, pagedIRODSPathsResult{
+			IRODSPaths: page.Items,
+			Total:      page.Total,
+			NextOffset: page.NextOffset,
+		}, nil
 	})
 
 	return nil
 }
 
 // addIRODSPathsForStudy registers mlwh_irods_paths_for_study (Story C2): it lists
-// the iRODS data-object paths exported for a study, with the fetch-all default,
-// wrapping the result under {"irods_paths":[...]}.
+// the iRODS data-object paths exported for a study, with the bounded page
+// default, wrapping the result under
+// {"irods_paths":[...],"total":N,"next_offset":M}.
 func (p *provider) addIRODSPathsForStudy(r core.Registrar, outputSchema map[string]any) error {
 	description, err := paginatedFanOutDescription("IRODSPathsForStudy")
 	if err != nil {
@@ -600,15 +621,22 @@ func (p *provider) addIRODSPathsForStudy(r core.Registrar, outputSchema map[stri
 		Name:         "mlwh_irods_paths_for_study",
 		Description:  description,
 		OutputSchema: outputSchema,
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in studyPageInput) (*mcp.CallToolResult, irodsPathsResult, error) {
-		limit, offset := fanOutPagination(in.Limit, in.Offset)
-
-		paths, err := client.IRODSPathsForStudy(ctx, in.StudyLimsID, limit, offset)
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in studyPageInput) (*mcp.CallToolResult, pagedIRODSPathsResult, error) {
+		limit, offset, err := boundedPagination(in.Limit, in.Offset)
 		if err != nil {
-			return core.ToolError[irodsPathsResult](mapToolError(err))
+			return core.ToolError[pagedIRODSPathsResult](err)
 		}
 
-		return nil, irodsPathsResult{IRODSPaths: paths}, nil
+		page, err := client.IRODSPathsForStudyPage(ctx, in.StudyLimsID, limit, offset)
+		if err != nil {
+			return core.ToolError[pagedIRODSPathsResult](mapToolError(err))
+		}
+
+		return nil, pagedIRODSPathsResult{
+			IRODSPaths: page.Items,
+			Total:      page.Total,
+			NextOffset: page.NextOffset,
+		}, nil
 	})
 
 	return nil

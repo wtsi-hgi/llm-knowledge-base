@@ -19,5 +19,5 @@ existing typed search and fan-out tools to header-aware bounded pages
 with default `limit=100`, maximum `1000`, and `offset=0`, covering all
 5 acceptance tests from A3. Depends on phase 3.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed

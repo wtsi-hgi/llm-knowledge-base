@@ -26,6 +26,7 @@
 package mlwh
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 
@@ -134,17 +135,20 @@ func libraryDetailP1() wa.LibraryDetail {
 	}
 }
 
-// TestFanOutTools covers Story C2: the paginated and non-paginated fan-out
-// enumeration tools, including the critical fetch-all default (an omitted limit
-// becomes limit=1000000, never limit=0).
+// TestFanOutTools covers the fan-out enumeration tools, including the A3
+// bounded-page behaviour for paged tools and the unchanged non-paged/count
+// tools.
 func TestFanOutTools(t *testing.T) {
 	Convey("Given the MLWH server (stub-backed) with the fan-out tools", t, func() {
 		stub := newStubMLWH(t)
 		cs, cleanup := runMLWHServerWithClient(t, stub)
 		defer cleanup()
 
-		Convey("C2.1: mlwh_all_studies with {} sends limit=1000000 and offset=0 (the fetch-all sentinel, NOT limit=0)", func() {
-			stub.respondJSON("/studies", 200, threeStudies()[:2])
+		Convey("A3.1: mlwh_all_studies with {} sends limit=100 and offset=0 and returns header page metadata", func() {
+			stub.respondJSONWithHeaders("/studies", 200, threeStudies()[:2], http.Header{
+				"X-Total-Count": {"250"},
+				"X-Next-Offset": {"100"},
+			})
 
 			res := callTool(t, cs, "mlwh_all_studies", map[string]any{})
 
@@ -152,13 +156,23 @@ func TestFanOutTools(t *testing.T) {
 			studies, ok := obj["studies"].([]any)
 			So(ok, ShouldBeTrue)
 			So(len(studies), ShouldEqual, 2)
+			So(obj["total"], ShouldEqual, 250)
+			So(obj["next_offset"], ShouldEqual, 100)
 
 			req, ok := stub.lastRequest()
 			So(ok, ShouldBeTrue)
 			So(req.Path, ShouldEqual, "/studies")
-			So(req.Query.Get("limit"), ShouldEqual, "1000000")
+			So(req.Query.Get("limit"), ShouldEqual, "100")
 			So(req.Query.Get("limit"), ShouldNotEqual, "0")
 			So(req.Query.Get("offset"), ShouldEqual, "0")
+		})
+
+		Convey("A3.2: mlwh_all_studies with limit=1001 is a tool error mentioning 1000 and makes no request", func() {
+			res := callTool(t, cs, "mlwh_all_studies", map[string]any{"limit": 1001})
+
+			So(res.IsError, ShouldBeTrue)
+			So(firstTextContent(res), ShouldContainSubstring, "1000")
+			So(stub.requestCount(), ShouldEqual, 0)
 		})
 
 		Convey("C2.2: mlwh_samples_for_study with explicit limit=50/offset=50 passes them through unchanged", func() {
@@ -175,6 +189,21 @@ func TestFanOutTools(t *testing.T) {
 			So(req.Path, ShouldEqual, "/study/5901/samples")
 			So(req.Query.Get("limit"), ShouldEqual, "50")
 			So(req.Query.Get("offset"), ShouldEqual, "50")
+		})
+
+		Convey("A3.3: mlwh_samples_for_study returns next_offset=-1 when X-Next-Offset is absent", func() {
+			stub.respondJSONWithHeaders("/study/S1/samples", 200, twoSamples(), http.Header{
+				"X-Total-Count": {"2"},
+			})
+
+			res := callTool(t, cs, "mlwh_samples_for_study", map[string]any{"study_lims_id": "S1"})
+
+			obj := structuredObject(res)
+			samples, ok := obj["samples"].([]any)
+			So(ok, ShouldBeTrue)
+			So(len(samples), ShouldEqual, 2)
+			So(obj["total"], ShouldEqual, 2)
+			So(obj["next_offset"], ShouldEqual, -1)
 		})
 
 		Convey("C2.3: mlwh_count_samples_for_study returns {\"count\":300} from /study/5901/samples/count", func() {
@@ -209,12 +238,11 @@ func TestFanOutTools(t *testing.T) {
 	})
 }
 
-// TestFanOutPaginatedDefaults proves the fetch-all default is applied uniformly
-// across the paginated fan-out tools (not just mlwh_all_studies): each paginated
-// fan-out tool, when called without a limit, sends limit=1000000 and offset=0 to
-// its upstream path, and an explicit limit is passed through unchanged. This
-// guards against the limit=0 trap (an explicit 0 reaches the server as LIMIT 0,
-// returning zero rows) being reintroduced for any one of them.
+// TestFanOutPaginatedDefaults proves the A3 bounded-page default is applied
+// uniformly across the paged fan-out tools (not just mlwh_all_studies): each
+// paged fan-out tool, when called without a limit, sends limit=100 and offset=0
+// to its upstream path, and an explicit in-range limit is passed through
+// unchanged.
 func TestFanOutPaginatedDefaults(t *testing.T) {
 	cases := []struct {
 		tool string
@@ -236,8 +264,8 @@ func TestFanOutPaginatedDefaults(t *testing.T) {
 		cs, cleanup := runMLWHServerWithClient(t, stub)
 		defer cleanup()
 
-		Convey("each paginated fan-out tool defaults an omitted limit to 1000000 and offset to 0", func() {
-			fetchAllMisses := 0
+		Convey("each paginated fan-out tool defaults an omitted limit to 100 and offset to 0", func() {
+			limitMisses := 0
 			offsetMisses := 0
 
 			for _, tc := range cases {
@@ -247,13 +275,13 @@ func TestFanOutPaginatedDefaults(t *testing.T) {
 
 				req, ok := stub.lastRequest()
 				if !ok || req.Path != tc.path {
-					fetchAllMisses++
+					limitMisses++
 
 					continue
 				}
 
-				if req.Query.Get("limit") != "1000000" {
-					fetchAllMisses++
+				if req.Query.Get("limit") != "100" {
+					limitMisses++
 				}
 
 				if req.Query.Get("offset") != "0" {
@@ -261,7 +289,7 @@ func TestFanOutPaginatedDefaults(t *testing.T) {
 				}
 			}
 
-			So(fetchAllMisses, ShouldEqual, 0)
+			So(limitMisses, ShouldEqual, 0)
 			So(offsetMisses, ShouldEqual, 0)
 		})
 
@@ -282,9 +310,9 @@ func TestFanOutPaginatedDefaults(t *testing.T) {
 	})
 }
 
-// TestFanOutToolDescriptions proves the paginated fan-out tools advertise the
-// fetch-all default in their descriptions (so an agent knows that omitting limit
-// fetches every row), and that the curated fan-out tool set is registered.
+// TestFanOutToolDescriptions proves the paged fan-out tools advertise the
+// bounded default and maximum, and that the curated fan-out tool set is
+// registered.
 func TestFanOutToolDescriptions(t *testing.T) {
 	paginated := []string{
 		"mlwh_all_studies",
@@ -302,7 +330,7 @@ func TestFanOutToolDescriptions(t *testing.T) {
 		cs, cleanup := runMLWHServerWithClient(t, stub)
 		defer cleanup()
 
-		Convey("each paginated fan-out tool's description states the fetch-all default", func() {
+		Convey("each paginated fan-out tool's description states the bounded page default and maximum", func() {
 			missing := 0
 
 			for _, name := range paginated {
@@ -314,10 +342,8 @@ func TestFanOutToolDescriptions(t *testing.T) {
 				}
 
 				lower := strings.ToLower(tool.Description)
-				// The description must convey that omitting limit fetches every
-				// row (the fetch-all default this server applies), so an agent
-				// knows not to expect a bounded page like the search tools.
-				if !strings.Contains(lower, "omitting limit fetches all") {
+				if !strings.Contains(lower, "defaults to a page of 100") ||
+					!strings.Contains(tool.Description, "1000") {
 					missing++
 				}
 			}

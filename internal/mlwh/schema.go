@@ -40,6 +40,15 @@ const openAPISchemaRefPrefix = "#/components/schemas/"
 // exact-field sample finders the mlwh_find_samples tool unifies.
 const findSamplesMethodPrefix = "FindSamplesBy"
 
+// Shared typed-tool pagination bounds. A missing or non-positive limit becomes
+// one bounded page; values above pagedMaxLimit are rejected before any HTTP
+// request reaches MLWH.
+const (
+	pagedDefaultLimit  = 100
+	pagedDefaultOffset = 0
+	pagedMaxLimit      = 1000
+)
+
 // slice wrapper structs give each list-returning tool an object-typed Out, as
 // MCP requires (output schemas and StructuredContent must be JSON objects, not
 // bare arrays). Each wraps exactly one slice under a JSON field name that is
@@ -84,6 +93,54 @@ type taggedIDsResult struct {
 // valuesResult wraps a []string as {"values":[...]}.
 type valuesResult struct {
 	Values []string `json:"values"`
+}
+
+// pagedSamplesResult wraps a header-aware sample page as
+// {"samples":[...],"total":N,"next_offset":M}.
+type pagedSamplesResult struct {
+	Samples    []wa.Sample `json:"samples"`
+	Total      int         `json:"total"`
+	NextOffset int         `json:"next_offset"`
+}
+
+// pagedStudiesResult wraps a header-aware study page as
+// {"studies":[...],"total":N,"next_offset":M}.
+type pagedStudiesResult struct {
+	Studies    []wa.Study `json:"studies"`
+	Total      int        `json:"total"`
+	NextOffset int        `json:"next_offset"`
+}
+
+// pagedRunsResult wraps a header-aware run page as
+// {"runs":[...],"total":N,"next_offset":M}.
+type pagedRunsResult struct {
+	Runs       []wa.Run `json:"runs"`
+	Total      int      `json:"total"`
+	NextOffset int      `json:"next_offset"`
+}
+
+// pagedLanesResult wraps a header-aware lane page as
+// {"lanes":[...],"total":N,"next_offset":M}.
+type pagedLanesResult struct {
+	Lanes      []wa.Lane `json:"lanes"`
+	Total      int       `json:"total"`
+	NextOffset int       `json:"next_offset"`
+}
+
+// pagedIRODSPathsResult wraps a header-aware iRODS path page as
+// {"irods_paths":[...],"total":N,"next_offset":M}.
+type pagedIRODSPathsResult struct {
+	IRODSPaths []wa.IRODSPath `json:"irods_paths"`
+	Total      int            `json:"total"`
+	NextOffset int            `json:"next_offset"`
+}
+
+// pagedLibrariesResult wraps a header-aware library page as
+// {"libraries":[...],"total":N,"next_offset":M}.
+type pagedLibrariesResult struct {
+	Libraries  []wa.Library `json:"libraries"`
+	Total      int          `json:"total"`
+	NextOffset int          `json:"next_offset"`
 }
 
 // outputSchemaFor returns an MCP-ready output schema (a map[string]any of type
@@ -135,6 +192,55 @@ func outputSchemaForSlice(propertyName, componentName string) (map[string]any, e
 		},
 		"required": []any{propertyName},
 	}, nil
+}
+
+// outputSchemaForPagedSlice returns the object-typed output schema for a paged
+// list tool: the semantic slice field plus the required pagination metadata
+// sourced from upstream response headers.
+func outputSchemaForPagedSlice(propertyName, componentName string) (map[string]any, error) {
+	itemSchema, err := outputSchemaFor(componentName)
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"properties": map[string]any{
+			propertyName: map[string]any{
+				"type":  "array",
+				"items": itemSchema,
+			},
+			"total": map[string]any{
+				"type":        "integer",
+				"description": "total number of matching rows from X-Total-Count",
+			},
+			"next_offset": map[string]any{
+				"type":        "integer",
+				"description": "offset of the next page from X-Next-Offset, or -1 when absent or on the last page",
+			},
+		},
+		"required": []any{propertyName, "total", "next_offset"},
+	}, nil
+}
+
+// boundedPagination resolves a typed paged tool's effective limit and offset.
+// It rejects over-large limits before HTTP, defaults omitted/non-positive limits
+// to the bounded page size, and otherwise preserves the caller's offset.
+func boundedPagination(limit, offset int) (int, int, error) {
+	if limit > pagedMaxLimit {
+		return 0, 0, fmt.Errorf("limit %d exceeds the maximum of %d (a larger limit is rejected, not clamped); request a smaller page", limit, pagedMaxLimit)
+	}
+
+	if limit <= 0 {
+		limit = pagedDefaultLimit
+	}
+
+	if offset == 0 {
+		offset = pagedDefaultOffset
+	}
+
+	return limit, offset, nil
 }
 
 // componentSchemas returns the components.schemas map from the freshly built

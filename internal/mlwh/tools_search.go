@@ -35,17 +35,10 @@ import (
 	"github.com/wtsi-hgi/llm-knowledge-base/internal/core"
 )
 
-// Search guard and pagination constants, mirrored from the upstream
-// searchPaginationParams contract: both searches require a term of at least
-// searchTermMinLength characters, default to a page of searchDefaultLimit, and
-// reject a limit above searchMaxLimit (the upstream rejects, not clamps). These
-// cheap bounds are enforced before the HTTP call so the agent gets an immediate,
-// clear error without a round-trip.
-const (
-	searchTermMinLength = 3
-	searchDefaultLimit  = 100
-	searchMaxLimit      = 1000
-)
+// searchTermMinLength mirrors the upstream searchPaginationParams contract:
+// both searches require at least three characters. Page bounds are shared with
+// other typed paged tools through boundedPagination.
+const searchTermMinLength = 3
 
 // searchSamplesDescription, searchStudiesDescription, countSamplesDescription,
 // countStudySearchDescription, and countStudiesDescription are the LLM-facing
@@ -101,18 +94,22 @@ func (p *provider) addSearchSamples(r core.Registrar, outputSchema map[string]an
 		Name:         "mlwh_search_samples",
 		Description:  searchSamplesDescription,
 		OutputSchema: outputSchema,
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in searchInput) (*mcp.CallToolResult, samplesResult, error) {
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in searchInput) (*mcp.CallToolResult, pagedSamplesResult, error) {
 		limit, offset, err := guardSearch(in)
 		if err != nil {
-			return core.ToolError[samplesResult](err)
+			return core.ToolError[pagedSamplesResult](err)
 		}
 
-		samples, err := client.SearchSamples(ctx, in.Term, limit, offset)
+		page, err := client.SearchSamplesPage(ctx, in.Term, limit, offset)
 		if err != nil {
-			return core.ToolError[samplesResult](mapToolError(err))
+			return core.ToolError[pagedSamplesResult](mapToolError(err))
 		}
 
-		return nil, samplesResult{Samples: samples}, nil
+		return nil, pagedSamplesResult{
+			Samples:    page.Items,
+			Total:      page.Total,
+			NextOffset: page.NextOffset,
+		}, nil
 	})
 }
 
@@ -126,18 +123,22 @@ func (p *provider) addSearchStudies(r core.Registrar, outputSchema map[string]an
 		Name:         "mlwh_search_studies",
 		Description:  searchStudiesDescription,
 		OutputSchema: outputSchema,
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in searchInput) (*mcp.CallToolResult, studiesResult, error) {
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in searchInput) (*mcp.CallToolResult, pagedStudiesResult, error) {
 		limit, offset, err := guardSearch(in)
 		if err != nil {
-			return core.ToolError[studiesResult](err)
+			return core.ToolError[pagedStudiesResult](err)
 		}
 
-		studies, err := client.SearchStudies(ctx, in.Term, limit, offset)
+		page, err := client.SearchStudiesPage(ctx, in.Term, limit, offset)
 		if err != nil {
-			return core.ToolError[studiesResult](mapToolError(err))
+			return core.ToolError[pagedStudiesResult](mapToolError(err))
 		}
 
-		return nil, studiesResult{Studies: studies}, nil
+		return nil, pagedStudiesResult{
+			Studies:    page.Items,
+			Total:      page.Total,
+			NextOffset: page.NextOffset,
+		}, nil
 	})
 }
 
@@ -152,16 +153,7 @@ func guardSearch(in searchInput) (limit, offset int, err error) {
 		return 0, 0, err
 	}
 
-	if in.Limit > searchMaxLimit {
-		return 0, 0, fmt.Errorf("limit %d exceeds the maximum of %d (a larger limit is rejected, not clamped); request a smaller page", in.Limit, searchMaxLimit)
-	}
-
-	limit = in.Limit
-	if limit <= 0 {
-		limit = searchDefaultLimit
-	}
-
-	return limit, in.Offset, nil
+	return boundedPagination(in.Limit, in.Offset)
 }
 
 // guardTerm rejects a search term shorter than the minimum length before any
@@ -185,12 +177,12 @@ func guardTerm(term string) error {
 // (the schemas come from the compiled-in OpenAPI document), so such a failure is
 // surfaced as a registration error.
 func (p *provider) registerSearchTools(r core.Registrar) error {
-	samplesSchema, err := outputSchemaForSlice("samples", "Sample")
+	samplesSchema, err := outputSchemaForPagedSlice("samples", "Sample")
 	if err != nil {
 		return fmt.Errorf("mlwh: build samples output schema: %w", err)
 	}
 
-	studiesSchema, err := outputSchemaForSlice("studies", "Study")
+	studiesSchema, err := outputSchemaForPagedSlice("studies", "Study")
 	if err != nil {
 		return fmt.Errorf("mlwh: build studies output schema: %w", err)
 	}

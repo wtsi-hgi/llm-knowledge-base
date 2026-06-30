@@ -27,6 +27,7 @@ package mlwh
 
 import (
 	"encoding/json"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -63,17 +64,23 @@ func TestSearchSamplesTool(t *testing.T) {
 		cs, cleanup := runMLWHServerWithClient(t, stub)
 		defer cleanup()
 
-		Convey("A1.1/A1.2/F2.1: two samples for /search/sample/mus", func() {
-			stub.respondJSON("/search/sample/mus", 200, twoSamples())
+		Convey("A1.1/A1.2/A3.4/F2.1: two samples for /search/sample/mus with header page metadata", func() {
+			stub.respondJSONWithHeaders("/search/sample/mus", 200, twoSamples(), http.Header{
+				"X-Total-Count": {"7"},
+				"X-Next-Offset": {"-1"},
+			})
 
 			res := callTool(t, cs, "mlwh_search_samples", map[string]any{"term": "mus"})
 
-			Convey("A1.1: StructuredContent holds those two samples and IsError is false", func() {
+			Convey("A1.1/A3.4: StructuredContent holds samples, total, and next_offset", func() {
 				obj := structuredObject(res)
+				So(len(obj), ShouldEqual, 3)
 
 				samples, ok := obj["samples"].([]any)
 				So(ok, ShouldBeTrue)
 				So(len(samples), ShouldEqual, 2)
+				So(obj["total"], ShouldEqual, 7)
+				So(obj["next_offset"], ShouldEqual, -1)
 
 				first, ok := samples[0].(map[string]any)
 				So(ok, ShouldBeTrue)
@@ -260,7 +267,10 @@ func TestSearchStudiesTool(t *testing.T) {
 
 			lower := strings.ToLower(tool.Description)
 			So(lower, ShouldContainSubstring, "substring")
+			So(lower, ShouldContainSubstring, "name")
 			So(lower, ShouldContainSubstring, "study_title")
+			So(lower, ShouldContainSubstring, "programme")
+			So(lower, ShouldContainSubstring, "faculty_sponsor")
 			So(tool.Description, ShouldContainSubstring, "3")
 			So(tool.Description, ShouldContainSubstring, "1000")
 		})

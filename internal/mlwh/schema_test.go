@@ -251,6 +251,22 @@ func TestOutputSchemaForSlice(t *testing.T) {
 	})
 }
 
+func TestOutputSchemaForPagedSlice(t *testing.T) {
+	Convey("outputSchemaForPagedSlice builds a semantic list wrapper with required page metadata", t, func() {
+		schema, err := outputSchemaForPagedSlice("samples", "Sample")
+		So(err, ShouldBeNil)
+		So(schema["type"], ShouldEqual, "object")
+
+		props, ok := schema["properties"].(map[string]any)
+		So(ok, ShouldBeTrue)
+		So(props["samples"].(map[string]any)["type"], ShouldEqual, "array")
+		So(props["total"].(map[string]any)["type"], ShouldEqual, "integer")
+		So(props["next_offset"].(map[string]any)["type"], ShouldEqual, "integer")
+		So(schema["required"], ShouldResemble, []any{"samples", "total", "next_offset"})
+		So(containsRef(schema), ShouldBeFalse)
+	})
+}
+
 // containsRef reports whether the marshaled JSON of v contains an unresolved
 // "$ref" key, which mcp.AddTool would reject.
 func containsRef(v any) bool {
