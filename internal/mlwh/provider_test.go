@@ -140,6 +140,64 @@ func TestProviderNew(t *testing.T) {
 	})
 }
 
+func TestWAAPI17Contract(t *testing.T) {
+	Convey("Given the updated module, provider construction targets wa API 1.7.0", t, func() {
+		So(wa.APIVersion, ShouldEqual, "1.7.0")
+
+		provider, err := New(wa.RemoteConfig{BaseURL: "http://stub.example"})
+		So(err, ShouldBeNil)
+		So(provider.APIVersion(), ShouldEqual, "1.7.0")
+	})
+
+	Convey("Given wa.Registry, the A1 methods expose upstream endpoint documentation", t, func() {
+		studyOverview, ok := registryEntryByMethod("StudyOverview")
+		So(ok, ShouldBeTrue)
+		So(studyOverview.Path, ShouldEqual, "/study/:id/overview")
+		So(strings.TrimSpace(studyOverview.Summary), ShouldNotBeBlank)
+		So(strings.TrimSpace(studyOverview.Description), ShouldNotBeBlank)
+
+		resolvePerson, ok := registryEntryByMethod("ResolvePerson")
+		So(ok, ShouldBeTrue)
+		So(resolvePerson.Path, ShouldEqual, "/resolve-person/:term")
+		So(strings.TrimSpace(resolvePerson.Summary), ShouldNotBeBlank)
+		So(strings.TrimSpace(resolvePerson.Description), ShouldNotBeBlank)
+	})
+
+	Convey("Given wa.OpenAPIDocument, outputSchemaFor keeps upstream json names and field descriptions", t, func() {
+		studyOverview, err := outputSchemaFor("StudyOverview")
+		So(err, ShouldBeNil)
+
+		studyProperties, ok := studyOverview["properties"].(map[string]any)
+		So(ok, ShouldBeTrue)
+		_, hasGoName := studyProperties["SamplesTotal"]
+		So(hasGoName, ShouldBeFalse)
+
+		samplesTotal, ok := studyProperties["samples_total"].(map[string]any)
+		So(ok, ShouldBeTrue)
+		So(samplesTotal["description"], ShouldEqual, "distinct samples linked via library_samples")
+
+		cacheSyncedAt, ok := studyProperties["cache_synced_at"].(map[string]any)
+		So(ok, ShouldBeTrue)
+		So(cacheSyncedAt["description"], ShouldEqual, "oldest last_run across feeding tables (UTC RFC3339)")
+
+		personCandidate, err := outputSchemaFor("PersonCandidate")
+		So(err, ShouldBeNil)
+
+		personProperties, ok := personCandidate["properties"].(map[string]any)
+		So(ok, ShouldBeTrue)
+		_, hasPersonGoName := personProperties["StudyCount"]
+		So(hasPersonGoName, ShouldBeFalse)
+
+		source, ok := personProperties["source"].(map[string]any)
+		So(ok, ShouldBeTrue)
+		So(source["description"], ShouldEqual, "faculty_sponsor or study_users")
+
+		studyCount, ok := personProperties["study_count"].(map[string]any)
+		So(ok, ShouldBeTrue)
+		So(studyCount["description"], ShouldEqual, "distinct studies for this candidate")
+	})
+}
+
 // TestProviderFullSurface exercises Story I1: with only the MLWH provider
 // configured (pointed at a hermetic stub), a connected in-memory MCP client sees
 // every tool from stories A-E and both the mlwh://workflow and

@@ -5,7 +5,7 @@ go 1.25.5
 require (
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/smartystreets/goconvey v1.8.1
-	github.com/wtsi-hgi/wa v0.6.1
+	github.com/wtsi-hgi/wa v0.7.1
 )
 
 require (

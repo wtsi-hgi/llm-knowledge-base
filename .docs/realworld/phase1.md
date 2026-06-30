@@ -19,5 +19,5 @@ schema tests around `wa.APIVersion`, `mlwh.New(...).APIVersion()`,
 `registryEntryByMethod`, and `outputSchemaFor`, covering all 3
 acceptance tests from A1.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
