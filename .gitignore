@@ -221,8 +221,8 @@ webui/frontend/build/
 webui/logs/
 
 # Go
-# Built binaries (e.g. ./mcp-server from `go build ./cmd/mcp-server`).
-/mcp-server
+# Built binaries (e.g. ./mlwh-mcp-server from `make build`).
+/mlwh-mcp-server
 # Test binaries and coverage profiles.
 *.test
 *.out
