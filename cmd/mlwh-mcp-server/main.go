@@ -27,11 +27,10 @@
 //
 // It is the composition root: it parses flags, builds the MLWH provider from its
 // configuration, wraps it in the service-agnostic core, and serves over the
-// stdio transport so a local agent CLI (Claude Code, Codex) can launch it. A
-// --version flag prints this server's build version and the targeted MLWH API
-// version without opening any transport or requiring configuration. Only the
-// stdio transport is wired (Story H1); there is no HTTP transport, config, or
-// listener.
+// stdio transport by default so a local agent CLI (Claude Code, Codex) can
+// launch it. A --version flag prints this server's build version and the
+// targeted MLWH API version without opening any transport or requiring
+// configuration.
 package main
 
 import (
@@ -50,6 +49,57 @@ import (
 	"github.com/wtsi-hgi/llm-knowledge-base/internal/mlwh"
 )
 
+type signalNotifyContextFunc func(context.Context, ...os.Signal) (context.Context, context.CancelFunc)
+
+var signalNotifyContext signalNotifyContextFunc = signal.NotifyContext
+
+type transportMode string
+
+const (
+	envHTTPAddr                      = "MLWH_HTTP_ADDR"
+	transportModeHTTP  transportMode = "http"
+	transportModeStdio transportMode = "stdio"
+)
+
+type coreServerFactory func(core.Options) (coreServer, error)
+
+var newCoreServer coreServerFactory = func(opts core.Options) (coreServer, error) {
+	return core.New(opts)
+}
+
+type stdioCoreServer interface {
+	Run(context.Context, mcp.Transport) error
+}
+
+func serveStdio(srv stdioCoreServer) error {
+	ctx, stop := signalNotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	return srv.Run(ctx, &mcp.StdioTransport{})
+}
+
+type httpCoreServer interface {
+	RunHTTP(context.Context, core.HTTPOptions) error
+}
+
+func serveHTTP(srv httpCoreServer, opts core.HTTPOptions) error {
+	ctx, stop := signalNotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	return srv.RunHTTP(ctx, opts)
+}
+
+type coreServer interface {
+	stdioCoreServer
+	httpCoreServer
+}
+
+type commandConfig struct {
+	MLWH      mlwh.Config
+	HTTPAddr  string
+	Transport transportMode
+}
+
 func main() {
 	if err := run(os.Args[1:], os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, "mlwh-mcp-server:", err)
@@ -58,9 +108,10 @@ func main() {
 }
 
 // run parses args, then either prints version information (--version) or builds
-// and serves the MCP server over stdio. stdout receives the --version output;
-// operational logs go to the core's logger (stderr by default). It is factored
-// out of main so a test can drive --version without a subprocess or real stdio.
+// and serves the MCP server over the configured transport. stdout receives the
+// --version output; operational logs go to the core's logger (stderr by
+// default). It is factored out of main so a test can drive --version without a
+// subprocess or real stdio.
 //
 // The --version path is handled before any configuration is resolved or any
 // transport is opened, so `mlwh-mcp-server --version` works with no MLWH_BASE_URL set
@@ -78,16 +129,30 @@ func run(args []string, stdout io.Writer) error {
 	return serve(cfg)
 }
 
-func parseArgs(args []string) (mlwh.Config, bool, error) {
+func parseArgs(args []string) (commandConfig, bool, error) {
 	fs := flag.NewFlagSet("mlwh-mcp-server", flag.ContinueOnError)
 
 	showVersion := fs.Bool("version", false, "print the server version and the targeted MLWH API version, then exit")
+	httpAddr := fs.String("http", "", "serve streamable HTTP on this address (env MLWH_HTTP_ADDR)")
 
-	var cfg mlwh.Config
-	cfg.BindFlags(fs)
+	cfg := commandConfig{
+		Transport: transportModeStdio,
+	}
+	cfg.MLWH.BindFlags(fs)
 
 	if err := fs.Parse(args); err != nil {
-		return mlwh.Config{}, false, err
+		return commandConfig{}, false, err
+	}
+
+	cfg.HTTPAddr = os.Getenv(envHTTPAddr)
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "http" {
+			cfg.HTTPAddr = *httpAddr
+		}
+	})
+
+	if cfg.HTTPAddr != "" {
+		cfg.Transport = transportModeHTTP
 	}
 
 	return cfg, *showVersion, nil
@@ -104,18 +169,17 @@ func printVersion(w io.Writer) error {
 }
 
 // serve resolves the MLWH provider configuration, builds the provider and the
-// core server, and serves over the stdio transport until the process is
-// signalled or the peer disconnects. Run accepts any mcp.Transport (Story H1);
-// the binary supplies &mcp.StdioTransport{}, the only transport this round.
-// Operational output (including the startup version line) goes to the core's
-// logger, not stdout, so it does not corrupt the stdio MCP stream.
-func serve(cfg mlwh.Config) error {
-	remoteCfg, err := cfg.Resolve(nil)
+// core server, and serves over the configured transport until the process is
+// signalled or the peer disconnects. Operational output (including the startup
+// version line) goes to the core's logger, not stdout, so it does not corrupt
+// the stdio MCP stream.
+func serve(cfg commandConfig) error {
+	remoteCfg, err := cfg.MLWH.Resolve(nil)
 	if err != nil {
 		return err
 	}
 
-	maxToolResultBytes, err := cfg.ResolveMaxToolResultBytes(nil)
+	maxToolResultBytes, err := cfg.MLWH.ResolveMaxToolResultBytes(nil)
 	if err != nil {
 		return err
 	}
@@ -125,15 +189,21 @@ func serve(cfg mlwh.Config) error {
 		return err
 	}
 
-	srv, err := core.New(coreOptions(provider, maxToolResultBytes))
+	srv, err := newCoreServer(coreOptions(provider, maxToolResultBytes))
 	if err != nil {
 		return err
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	if cfg.Transport == transportModeHTTP {
+		return serveHTTP(srv, core.HTTPOptions{
+			Addr:       cfg.HTTPAddr,
+			MCPPath:    "/mcp",
+			HealthPath: "/health",
+			LogWriter:  os.Stderr,
+		})
+	}
 
-	return srv.Run(ctx, &mcp.StdioTransport{})
+	return serveStdio(srv)
 }
 
 func coreOptions(provider core.Provider, maxToolResultBytes int) core.Options {

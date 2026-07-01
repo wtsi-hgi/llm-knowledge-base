@@ -28,9 +28,12 @@ package core_test
 import (
 	"bytes"
 	"context"
+	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	wa "github.com/wtsi-hgi/wa/mlwh"
@@ -116,4 +119,88 @@ func TestStartupLogVersionLine(t *testing.T) {
 			<-runErr
 		})
 	})
+}
+
+func TestHTTPStartupLogVersionLine(t *testing.T) {
+	Convey("Given HTTP mode with ServerVersion 0.1.0, the MLWH provider, and a "+
+		"buffer-backed logger", t, func() {
+		provider := newMLWHProvider(t)
+
+		buf := &syncBuffer{}
+		logger := slog.New(slog.NewTextHandler(buf, nil))
+
+		srv, err := core.New(core.Options{
+			ServerVersion: "0.1.0",
+			Logger:        logger,
+			Providers:     []core.Provider{provider},
+		})
+		So(err, ShouldBeNil)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		runErr := make(chan error, 1)
+		runSettled := false
+
+		go func() {
+			runErr <- srv.RunHTTP(ctx, core.HTTPOptions{
+				Addr:      "127.0.0.1:0",
+				LogWriter: io.Discard,
+			})
+		}()
+
+		Reset(func() {
+			cancel()
+			if !runSettled {
+				_, _ = waitForRunHTTPResult(t, runErr, 5*time.Second)
+			}
+		})
+
+		logged := waitForStartupLog(t, buf, "health_path=/health", 5*time.Second)
+		cancel()
+		err, settled := waitForRunHTTPResult(t, runErr, 5*time.Second)
+		runSettled = true
+
+		So(settled, ShouldBeTrue)
+		So(err, ShouldBeNil)
+
+		Convey("C2.4: the buffer contains the HTTP startup fields and version fields", func() {
+			So(logged, ShouldContainSubstring, "server_version=0.1.0")
+			So(logged, ShouldContainSubstring, "api_versions.mlwh")
+			So(logged, ShouldContainSubstring, wa.APIVersion)
+			So(logged, ShouldContainSubstring, "transport=http")
+			So(logged, ShouldContainSubstring, "addr=127.0.0.1:0")
+			So(logged, ShouldContainSubstring, "mcp_path=/mcp")
+			So(logged, ShouldContainSubstring, "health_path=/health")
+		})
+	})
+}
+
+func waitForRunHTTPResult(t *testing.T, results <-chan error, timeout time.Duration) (error, bool) {
+	t.Helper()
+
+	select {
+	case err := <-results:
+		return err, true
+	case <-time.After(timeout):
+		t.Errorf("RunHTTP did not return after context cancellation")
+
+		return nil, false
+	}
+}
+
+func waitForStartupLog(t *testing.T, buf *syncBuffer, substring string, timeout time.Duration) string {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		logged := buf.String()
+		if strings.Contains(logged, substring) {
+			return logged
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	t.Fatalf("timed out waiting for startup log containing %q", substring)
+
+	return ""
 }

@@ -142,7 +142,7 @@ func (s *Server) VersionInfo() VersionInfo {
 // a configured logger always receives the line. The per-provider versions are
 // attached as one structured attribute so the line carries each as
 // "<name>=<version>".
-func (s *Server) logStartupVersion() {
+func (s *Server) logStartupVersion(attrs ...slog.Attr) {
 	logger := s.logger
 	if logger == nil {
 		logger = slog.Default()
@@ -153,10 +153,15 @@ func (s *Server) logStartupVersion() {
 		apiVersions = append(apiVersions, name, s.version.APIVersions[name])
 	}
 
-	logger.Info("starting MLWH MCP server",
+	logAttrs := []any{
 		slog.String("server_version", s.version.ServerVersion),
 		slog.Group("api_versions", apiVersions...),
-	)
+	}
+	for _, attr := range attrs {
+		logAttrs = append(logAttrs, attr)
+	}
+
+	logger.Info("starting MLWH MCP server", logAttrs...)
 }
 
 // registrar adapts a *mcp.Server to the Registrar seam exposed to providers.

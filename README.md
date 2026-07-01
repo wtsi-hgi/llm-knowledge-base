@@ -16,11 +16,10 @@ ergonomic and correctly usable by an LLM, not re-implementing them: it imports
 registry, and OpenAPI document directly, so there is no type drift and the server
 is compile-time-locked to the upstream API version (currently MLWH API 1.7.0).
 
-The MLWH provider currently ships over the **stdio** transport only, so it runs
-as a local subprocess launched per user by an agent CLI. Streamable HTTP, which
-would let an admin run one shared instance everyone connects to over the network,
-is deliberately deferred, but the transport is a clean seam so it can be added
-later without any core change.
+The MLWH provider serves over the **stdio** transport by default, so it can run
+as a local subprocess launched per user by an agent CLI. It can also run in
+opt-in streamable HTTP mode for admins who want to operate one shared service on
+an internal network.
 
 ## Requirements
 
@@ -60,6 +59,7 @@ variables, or the equivalent command-line flags (a flag overrides its env var):
 | `MLWH_CA_CERT`               | `--mlwh-ca-cert`              | no       | Path to a PEM CA-certificate file, if the API is served over TLS with a private CA. |
 | `MLWH_TIMEOUT`               | `--mlwh-timeout`              | no       | Per-request HTTP timeout as a Go duration (e.g. `15s`, `1m`).                     |
 | `MLWH_MAX_TOOL_RESULT_BYTES` | `--mlwh-max-tool-result-bytes` | no       | Maximum marshaled MCP tool-result size before a structured size error is returned; defaults to `1048576`, and values `<=0` disable the guard. |
+| `MLWH_HTTP_ADDR`             | `--http`                      | no       | Address for opt-in streamable HTTP mode. Leave unset for the default stdio transport. |
 
 The MLWH API is internal and unauthenticated, so there is no token to set. A
 missing base URL is a clear startup error. `mlwh-mcp-server --version` needs no
@@ -80,6 +80,77 @@ make start         # loads .env and serves over stdio (Ctrl-C to stop)
 writes it on stdout, with operational logs on stderr. On its own it just waits for
 a client, so it is mainly a smoke test — in real use an agent CLI launches it for
 you, as described next.
+
+## Run a shared HTTP service
+
+Stdio remains the default. To run one admin-managed shared instance, start
+streamable HTTP mode with either `--http` or `MLWH_HTTP_ADDR`.
+
+```bash
+MLWH_BASE_URL=http://mlwh.internal:8080 mlwh-mcp-server --http 127.0.0.1:8081
+```
+
+In HTTP mode, MCP is served at `/mcp` and health checks are served at `/health`.
+The listener is unauthenticated plain HTTP for internal-network deployment, so
+bind it to an internal interface or place it behind your existing trusted
+network controls.
+
+A minimal systemd unit can set both the upstream MLWH API and the listener
+address:
+
+```ini
+[Unit]
+Description=MLWH MCP Server
+After=network-online.target
+
+[Service]
+Environment=MLWH_BASE_URL=http://mlwh.internal:8080
+Environment=MLWH_HTTP_ADDR=127.0.0.1:8081
+ExecStart=/usr/local/bin/mlwh-mcp-server
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+```
+
+## Use the shared HTTP service from agent CLIs
+
+When an admin operates the shared HTTP service, point each MCP client at the
+`/mcp` URL they provide. Users do not install or run a local
+`mlwh-mcp-server` binary for shared HTTP client setup. Claude Code and Codex
+connect directly to the shared HTTP endpoint.
+
+Claude Code can register the shared service by URL:
+
+```bash
+claude mcp add --transport http mlwh http://mlwh-mcp.internal:8080/mcp
+```
+
+The equivalent Claude Code JSON config is a `mcpServers.mlwh` HTTP entry:
+
+```json
+{
+  "mcpServers": {
+    "mlwh": {
+      "type": "http",
+      "url": "http://mlwh-mcp.internal:8080/mcp"
+    }
+  }
+}
+```
+
+Codex can register the same shared service by URL:
+
+```bash
+codex mcp add mlwh --url http://mlwh-mcp.internal:8080/mcp
+```
+
+The equivalent Codex TOML is:
+
+```toml
+[mcp_servers.mlwh]
+url = "http://mlwh-mcp.internal:8080/mcp"
+```
 
 ## Use it with Claude Code
 

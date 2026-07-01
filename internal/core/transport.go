@@ -42,6 +42,18 @@ import (
 // core; supplying one is the caller's concern via this single mcp.Transport
 // argument.
 func (s *Server) Run(ctx context.Context, t mcp.Transport) error {
+	if err := s.registerProviders(ctx); err != nil {
+		return err
+	}
+
+	// Emit the startup version line (Story G5) once, as serving begins, so the
+	// running server's versions are visible in the logs.
+	s.logStartupVersion()
+
+	return s.mcpServer.Run(ctx, t)
+}
+
+func (s *Server) registerProviders(ctx context.Context) error {
 	r := &registrar{server: s.mcpServer}
 
 	for _, p := range s.providers {
@@ -50,9 +62,5 @@ func (s *Server) Run(ctx context.Context, t mcp.Transport) error {
 		}
 	}
 
-	// Emit the startup version line (Story G5) once, as serving begins, so the
-	// running server's versions are visible in the logs.
-	s.logStartupVersion()
-
-	return s.mcpServer.Run(ctx, t)
+	return nil
 }

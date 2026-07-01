@@ -8,6 +8,10 @@ and **many users connect to it over the network** from their agent CLIs (Claude
 Code, Codex) by pointing at its URL — **with no copy of the binary on any user's
 machine and nothing on their PATH**.
 
+The spec-writer workflow should use this file as the feature-description source
+of truth and write the resulting specification to `.docs/mcp-http/spec.md`, with
+phase documents in `.docs/mcp-http/`.
+
 Today the server (this repo's `mlwh-mcp-server`, specified in
 [`../mcp/spec.md`](../mcp/spec.md)) ships the **stdio** transport only: each user
 runs their own copy as a local subprocess that their agent CLI launches, so the
@@ -131,8 +135,10 @@ local binary** — pointing their agent CLI at the URL:
 - **Claude Code:** the HTTP transport form, e.g.
   `claude mcp add --transport http mlwh http://mlwh-mcp.internal:8080/<mcp-path>`
   (and the equivalent `.mcp.json` entry with the URL/transport).
-- **Codex CLI:** the HTTP MCP server entry in `~/.codex/config.toml` (a URL-based
-  server, not a launched command).
+- **Codex CLI:** the current documented HTTP MCP server form in
+  `~/.codex/config.toml`; verify the exact syntax against the installed CLI or
+  official docs during spec authoring. The important requirement is that it is a
+  URL-based server, not a launched command.
 
 The admin-run instructions (how to start the one shared instance, suitable
 systemd/container invocation) also belong in the README.
@@ -240,3 +246,19 @@ over — any looser phrasing above:
 - **Reuse the SDK's streamable-HTTP handler**; do not hand-roll MCP-over-HTTP.
 - **Tests stay hermetic** (stub MLWH + the SDK's streamable client transport over a
   local listener); never a live warehouse.
+- **HTTP mode is enabled by `--http <addr>` / `MLWH_HTTP_ADDR`.** An absent or
+  empty value keeps the current stdio mode; a non-empty value enables HTTP and the
+  command-line flag takes precedence over the environment.
+- **Serve MCP at `/mcp` and health at `/health` on the same listener.** The health
+  route is separate from MCP and requires no MCP handshake.
+- **Use stateless streamable HTTP.** Configure the SDK handler with
+  `Stateless: true`; the server exposes independent tool/resource requests and
+  needs no server-side session store.
+- **Add a shared core HTTP run path.** The core should expose a `RunHTTP`-style API
+  that registers providers through the same path as stdio, constructs the
+  `go-authserver`, mounts MCP and health routes, logs transport/address metadata,
+  and serves without importing MLWH-specific code.
+- **Use a fixed 5-second graceful drain and a static health response.** On
+  shutdown, stop accepting new HTTP connections and allow up to five seconds for
+  in-flight requests to finish. `GET /health` returns HTTP 200 with
+  `{"status":"ok"}` and does not call MLWH.
