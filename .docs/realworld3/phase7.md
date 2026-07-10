@@ -32,5 +32,5 @@ Resolve any failures within the owning story's specified files and tests, then
 rerun both commands cleanly. This verifies all 95 acceptance tests across
 A1-F3 and introduces no additional feature behavior.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed

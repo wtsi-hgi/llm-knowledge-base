@@ -74,8 +74,8 @@ func (p *provider) registerCallTool(r core.Registrar) error {
 	client := p.client
 
 	mcp.AddTool(r.Server(), &mcp.Tool{
-		Name:         "mlwh_call_endpoint",
-		Description:  callEndpointDescription,
+		Name:        "mlwh_call_endpoint",
+		Description: callEndpointDescription,
 		InputSchema: callEndpointInputSchema(),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in CallInput) (*mcp.CallToolResult, any, error) {
 		return callEndpoint(ctx, client, in)
