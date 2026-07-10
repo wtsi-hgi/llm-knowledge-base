@@ -426,6 +426,7 @@ func outputSchemaFor(componentName string) (map[string]any, error) {
 func applyComponentSchemaOverrides(schemas map[string]any) {
 	if schema, ok := schemas["IRODSPath"].(map[string]any); ok {
 		allowNullProperty(schema, "deliverable")
+		requireProperty(schema, "deliverable")
 	}
 	if schema, ok := schemas["SequencingAggregateRow"].(map[string]any); ok {
 		allowMapProperty(schema, "group", map[string]any{"type": "string"})
@@ -461,6 +462,19 @@ func allowNullProperty(schema map[string]any, propertyName string) {
 	}
 
 	property["type"] = []any{"boolean", "null"}
+}
+
+// requireProperty amends an OpenAPI-derived required list for a field that is
+// always serialized, preserving the generator's existing required fields.
+func requireProperty(schema map[string]any, propertyName string) {
+	required, _ := schema["required"].([]any)
+	for _, name := range required {
+		if name == propertyName {
+			return
+		}
+	}
+
+	schema["required"] = append(required, propertyName)
 }
 
 // allowMapProperty corrects an OpenAPI generator limitation for map fields,

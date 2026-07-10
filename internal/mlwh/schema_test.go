@@ -146,6 +146,46 @@ func TestIdentifierKindEnum(t *testing.T) {
 	})
 }
 
+func TestIRODSPathOutputSchemaContract(t *testing.T) {
+	Convey("IRODSPath output schemas require the always-serialized nullable deliverable field", t, func() {
+		schemas, err := componentSchemas()
+		So(err, ShouldBeNil)
+		source := schemas["IRODSPath"].(map[string]any)
+		sourceRequired := source["required"].([]any)
+		assertRequired := func(raw any) {
+			counts := map[string]int{}
+			for _, field := range raw.([]any) {
+				counts[field.(string)]++
+			}
+
+			missing := 0
+			for _, field := range sourceRequired {
+				if counts[field.(string)] == 0 {
+					missing++
+				}
+			}
+
+			So(missing, ShouldEqual, 0)
+			So(counts["deliverable"], ShouldEqual, 1)
+		}
+
+		resolved, err := outputSchemaFor("IRODSPath")
+		So(err, ShouldBeNil)
+		assertRequired(resolved["required"])
+
+		properties := resolved["properties"].(map[string]any)
+		deliverable := properties["deliverable"].(map[string]any)
+		So(deliverable["type"], ShouldResemble, []any{"boolean", "null"})
+
+		paged, err := outputSchemaForPagedSlice("irods_paths", "IRODSPath")
+		So(err, ShouldBeNil)
+		pagedProperties := paged["properties"].(map[string]any)
+		paths := pagedProperties["irods_paths"].(map[string]any)
+		items := paths["items"].(map[string]any)
+		assertRequired(items["required"])
+	})
+}
+
 func TestOutputSchemaFor(t *testing.T) {
 	Convey("outputSchemaFor sources MCP output schemas from wa.OpenAPIDocument()", t, func() {
 		Convey("F1.1: the Sample schema preserves the supplier_name doc-tag description", func() {
