@@ -56,7 +56,9 @@ const DefaultMaxToolResultBytes = 1048576
 
 // ToolResultSizeGuidance is included in core.ToolResultSizeError for MLWH
 // calls, so agents know to switch to cheaper aggregate/count/page workflows.
-const ToolResultSizeGuidance = "Use MLWH overview, status, or count tools first; for list/detail endpoints request a smaller page with limit and offset."
+const ToolResultSizeGuidance = "Request a smaller limit. For bounded mlwh_export results, use Total to size the export; " +
+	"continue products and unsorted iRODS with NextCursor, or offset-backed relationships with offset plus the number of returned Rows. " +
+	"For other list/detail endpoints, use MLWH overview, status, or count tools first and request a smaller page with limit and offset."
 
 // ErrBaseURLRequired is returned by New when no MLWH base URL was configured
 // through any source. The MLWH API is reached only by its base URL, so the
@@ -200,7 +202,8 @@ func (p *provider) APIVersion() string {
 
 // Register adds the provider's MCP tools and resources through the Registrar. It
 // is modularised by tool group so each phase's batch wires its own tools without
-// conflict: the sample/study search and count tools via registerSearchTools, the
+// conflict: generic relationship export via registerExportTool, the sample/study
+// search and count tools via registerSearchTools, the
 // resolve/classify, unified find-samples, and expand tools via
 // registerResolveTools, aggregate overview/status tools via
 // registerOverviewTools, the detail and fan-out enumeration tools via
@@ -210,6 +213,10 @@ func (p *provider) APIVersion() string {
 // added by registerPeopleTools. The workflow / endpoint-catalogue resource
 // (Story G1) is added by registerWorkflowResource.
 func (p *provider) Register(_ context.Context, r core.Registrar) error {
+	if err := p.registerExportTool(r); err != nil {
+		return err
+	}
+
 	if err := p.registerSearchTools(r); err != nil {
 		return err
 	}

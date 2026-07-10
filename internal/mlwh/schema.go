@@ -49,6 +49,151 @@ const (
 	pagedMaxLimit      = 1000
 )
 
+// exportInputSchema describes the generic relationship export input. Its three
+// vocabulary-bearing properties are generated from wa's runtime sources of
+// truth so aliases, parent kinds, defaults, and selectable columns move with
+// the upstream API instead of being copied into this provider.
+func exportInputSchema() map[string]any {
+	childrenEnum, parentEnum, childrenDescription, parentDescription := exportRelationshipSchema()
+	columnEnum, columnsDescription := exportColumnSchema()
+
+	return map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"properties": map[string]any{
+			"children": map[string]any{
+				"type": "string", "description": childrenDescription, "enum": childrenEnum,
+			},
+			"parent_kind": map[string]any{
+				"type": "string", "description": parentDescription, "enum": parentEnum,
+			},
+			"parent_id": map[string]any{
+				"type": "string", "description": "identifier of the selected parent; resolution is performed upstream",
+			},
+			"columns": map[string]any{
+				"type": "array", "description": columnsDescription,
+				"items": map[string]any{"type": "string", "enum": columnEnum},
+			},
+			"file_type": map[string]any{
+				"type": "string", "description": "optional file suffix for file exports or product iRODS attachments",
+			},
+			"deliverables_only": map[string]any{
+				"type": "boolean", "description": "optional tri-state deliverability filter; omit to use the relationship default",
+			},
+			"role": map[string]any{
+				"type": "string", "description": "optional comma-separated study_users role filter",
+			},
+			"qc": map[string]any{
+				"type": "string", "description": "optional product-backed QC filter", "enum": []any{"pass", "fail", "pending"},
+			},
+			"library_type": map[string]any{
+				"type": "string", "description": "optional exact library type filter for sample-backed exports",
+			},
+			"organism": map[string]any{
+				"type": "string", "description": "optional organism or common-name filter for sample-backed exports",
+			},
+			"sort": map[string]any{
+				"type": "string", "description": "optional iRODS created-time sort mode", "enum": []any{"created-desc", "created_desc"},
+			},
+			"since": map[string]any{
+				"type": "string", "description": "optional RFC3339 inclusive lower bound for iRODS created time",
+			},
+			"until": map[string]any{
+				"type": "string", "description": "optional RFC3339 exclusive upper bound for iRODS created time; requires since",
+			},
+			"limit": map[string]any{
+				"type": "integer", "description": "optional bounded page size; upstream defaults to 1000",
+			},
+			"offset": map[string]any{
+				"type": "integer", "description": "optional offset for offset-backed relationships",
+			},
+			"all": map[string]any{
+				"type": "boolean", "description": "return the complete matching set through the upstream iterator",
+			},
+			"cursor": map[string]any{
+				"type": "string", "description": "opaque continuation cursor returned by iRODS or products exports",
+			},
+			"format": map[string]any{
+				"type": "string", "description": "output format metadata; defaults upstream to tsv", "enum": []any{"tsv", "csv", "json"},
+			},
+		},
+		"required": []any{"children", "parent_kind", "parent_id"},
+	}
+}
+
+func exportRelationshipSchema() (childrenEnum, parentEnum []any, childrenDescription, parentDescription string) {
+	relationships := wa.ExportRelationshipDescriptions()
+	seenParents := map[string]bool{}
+	childrenParts := make([]string, len(relationships))
+	parentParts := make([]string, len(relationships))
+
+	for index, relationship := range relationships {
+		label := exportVocabularyLabel(relationship.Children, relationship.Aliases)
+		childrenParts[index] = label + " (" + relationship.Description + ")"
+		parentParts[index] = label + ": " + strings.Join(relationship.ParentKinds, ",")
+		childrenEnum = append(childrenEnum, relationship.Children)
+		for _, alias := range relationship.Aliases {
+			childrenEnum = append(childrenEnum, alias)
+		}
+		for _, parent := range relationship.ParentKinds {
+			if !seenParents[parent] {
+				parentEnum = append(parentEnum, parent)
+				seenParents[parent] = true
+			}
+		}
+	}
+
+	childrenDescription = "child relationship to export. Supported children and aliases: " + strings.Join(childrenParts, "; ")
+	parentDescription = "kind of parent identified by parent_id. Allowed parent kinds by child: " + strings.Join(parentParts, "; ")
+
+	return childrenEnum, parentEnum, childrenDescription, parentDescription
+}
+
+func exportColumnSchema() ([]any, string) {
+	vocabularies := wa.ExportColumnVocabularies()
+	seen := map[string]bool{}
+	enum := []any{}
+	descriptionParts := make([]string, len(vocabularies))
+
+	for index, vocabulary := range vocabularies {
+		columns := make([]string, len(vocabulary.Columns))
+		for columnIndex, column := range vocabulary.Columns {
+			columns[columnIndex] = exportColumnLabel(column)
+			for _, value := range append([]string{column.Name}, column.Aliases...) {
+				if !seen[value] {
+					enum = append(enum, value)
+					seen[value] = true
+				}
+			}
+		}
+
+		descriptionParts[index] = exportVocabularyLabel(vocabulary.Children, vocabulary.Aliases) +
+			" default " + strings.Join(vocabulary.Default, ",") +
+			"; available " + strings.Join(columns, ",")
+	}
+
+	description := "ordered columns to return; omit to use the relationship default. Columns by child: " +
+		strings.Join(descriptionParts, "; ")
+
+	return enum, description
+}
+
+func exportVocabularyLabel(children string, aliases []string) string {
+	if len(aliases) == 0 {
+		return children
+	}
+
+	return children + "/" + strings.Join(aliases, "/")
+}
+
+func exportColumnLabel(column wa.ExportColumnDescription) string {
+	if len(column.Aliases) == 0 {
+		return column.Name
+	}
+
+	return column.Name + " (aliases: " + strings.Join(column.Aliases, ",") + ")"
+}
+
 // callEndpointInputSchema describes the generic call tool input and advertises
 // every Registry Method as the method enum. The enum is rebuilt from the live
 // Registry when the provider registers, so adding an upstream endpoint makes

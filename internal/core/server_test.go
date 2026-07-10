@@ -28,6 +28,7 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -52,6 +53,36 @@ func (payloadProvider) Register(_ context.Context, r Registrar) error {
 		Description: "returns a fixed payload for result-size guard tests",
 	}, func(_ context.Context, _ *mcp.CallToolRequest, _ payloadInput) (*mcp.CallToolResult, payloadOutput, error) {
 		return nil, payloadOutput{Payload: "1234567890"}, nil
+	})
+
+	return nil
+}
+
+type exportMatrixProvider struct{}
+
+func (exportMatrixProvider) Name() string { return "export-matrix" }
+
+func (exportMatrixProvider) APIVersion() string { return "export-matrix 1.0.0" }
+
+func (exportMatrixProvider) Register(_ context.Context, r Registrar) error {
+	type matrixInput struct{}
+	type matrixOutput struct {
+		Columns    []string   `json:"Columns"`
+		Rows       [][]string `json:"Rows"`
+		Total      int        `json:"Total"`
+		NextCursor string     `json:"NextCursor"`
+		Complete   bool       `json:"Complete"`
+		Format     string     `json:"Format"`
+	}
+
+	mcp.AddTool(r.Server(), &mcp.Tool{
+		Name:        "test_export_matrix",
+		Description: "returns a materialized export matrix for result-size guard tests",
+	}, func(_ context.Context, _ *mcp.CallToolRequest, _ matrixInput) (*mcp.CallToolResult, matrixOutput, error) {
+		return nil, matrixOutput{
+			Columns: []string{"name"}, Rows: [][]string{{strings.Repeat("x", 1024)}},
+			Total: 2000, NextCursor: "opaque", Complete: false, Format: "tsv",
+		}, nil
 	})
 
 	return nil
@@ -236,6 +267,29 @@ func TestResultSizeGuard(t *testing.T) {
 			So(ok, ShouldBeTrue)
 			So(obj["payload"], ShouldEqual, "1234567890")
 		})
+	})
+
+	Convey("B2.8: Given an oversized materialized export matrix, the core guard returns the configured continuation guidance", t, func() {
+		guidance := "Request a smaller limit; use Total and continue with NextCursor or offset plus returned Rows."
+		clientSession, cleanup := runServerWithClient(t, Options{
+			ServerVersion:          "0.1.0",
+			Providers:              []Provider{exportMatrixProvider{}},
+			MaxToolResultBytes:     250,
+			ToolResultSizeGuidance: guidance,
+		})
+		defer cleanup()
+
+		res, err := clientSession.CallTool(context.Background(), &mcp.CallToolParams{
+			Name:      "test_export_matrix",
+			Arguments: map[string]any{},
+		})
+		So(err, ShouldBeNil)
+
+		obj := sizeErrorObject(res)
+		So(obj["code"], ShouldEqual, "tool_result_too_large")
+		So(obj["guidance"], ShouldEqual, guidance)
+		So(strings.ToLower(obj["guidance"].(string)), ShouldNotContainSubstring, "count_export")
+		So(strings.ToLower(obj["guidance"].(string)), ShouldNotContainSubstring, "count export")
 	})
 }
 

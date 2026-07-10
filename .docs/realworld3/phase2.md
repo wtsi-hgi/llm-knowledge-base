@@ -33,8 +33,8 @@ its MCP schema from `wa.ExportRelationshipDescriptions()` and
 `wa.ExportRelationship` and `wa.ExportOptions`, covering all 5 acceptance
 tests from B1.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 ### Item 2.2: B2 - Return bounded matrices and materialize streams
 
@@ -46,8 +46,8 @@ cancellation, relationship-specific continuation, and integration with the
 core result-size guard. Extend export and core server tests to cover all 8
 acceptance tests from B2. This item depends on item 2.1 being reviewed.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 ### Item 2.3: B3 - Preserve product and shared-filter semantics
 
@@ -59,5 +59,5 @@ and relationship-specific shared filters remain entirely upstream-defined.
 Cover all 7 acceptance tests from B3. This item depends on item 2.2 being
 reviewed.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed

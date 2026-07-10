@@ -68,6 +68,7 @@ const workflowGuidance = "# MLWH workflows\n\n" +
 	"- People routing: send sponsor questions to faculty-sponsor tools, " +
 	"login/email/membership questions to user tools, and ambiguous names through " +
 	"`mlwh_resolve_person`.\n" +
+	"- Export pagination: " + exportContinuationGuidance + "\n" +
 	"- Freshness: use response `cache_synced_at` when present; use `mlwh_freshness` for " +
 	"bare lists, counts, `mlwh_run_status`, and `mlwh_call_endpoint` responses without " +
 	"cache_synced_at.\n\n" +

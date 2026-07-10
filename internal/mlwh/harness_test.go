@@ -72,6 +72,7 @@ type stubResponse struct {
 	status  int
 	body    any
 	headers http.Header
+	handler http.HandlerFunc
 	isErr   bool
 	code    string
 	msg     string
@@ -127,6 +128,16 @@ func (s *stubMLWH) respondJSONWithHeaders(path string, status int, body any, hea
 	s.routes[path] = stubResponse{status: status, body: body, headers: headers.Clone()}
 }
 
+// respondHandler lets a focused test control an exact route dynamically. It is
+// useful for cancellation tests whose later request must remain in flight until
+// its context ends; normal tests should prefer the canned JSON helpers above.
+func (s *stubMLWH) respondHandler(path string, handler http.HandlerFunc) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.routes[path] = stubResponse{handler: handler}
+}
+
 // respondError makes the stub reply with the given non-2xx status and wa error
 // envelope ({"code","message"}) for requests to exactly this path, so the
 // remote client maps the documented code (e.g. "not_found"->404->ErrNotFound)
@@ -155,6 +166,11 @@ func (s *stubMLWH) handle(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
 		_ = json.NewEncoder(w).Encode(httpErrorBody{Code: "not_found", Message: "stub: no route for " + r.URL.Path})
+
+		return
+	}
+	if resp.handler != nil {
+		resp.handler(w, r)
 
 		return
 	}
