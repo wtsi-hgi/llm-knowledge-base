@@ -258,9 +258,9 @@ func TestLiteralPrefixSampleSearchOptionsC1(t *testing.T) {
 		stub.respondJSON("/search/sample/abc", 200, []wa.Sample{{IDSampleTmp: 1, Name: "abc"}})
 		stub.respondJSON("/search/sample/abc/count", 200, wa.Count{Count: 1})
 		cases := []map[string]any{
-			{"organism": "Homo sapiens"},
-			{"library_type": "Standard"},
-			{"qc": "fail"},
+			{"organism": " Homo sapiens "},
+			{"library_type": "\tStandard"},
+			{"qc": "fail "},
 			{"deliverables_only": true},
 			{
 				"organism":          "Homo sapiens",
@@ -331,6 +331,34 @@ func TestLiteralPrefixSampleSearchOptionsC1(t *testing.T) {
 		So(firstTextContent(listRes), ShouldContainSubstring, "3")
 		So(countRes.IsError, ShouldBeTrue)
 		So(firstTextContent(countRes), ShouldContainSubstring, "3")
+		So(stub.requestCount(), ShouldEqual, 0)
+	})
+
+	Convey("C1.5: whitespace-only exact filters do not exempt a two-character term", t, func() {
+		stub := newStubMLWH(t)
+		cs, cleanup := runMLWHServerWithClient(t, stub)
+		defer cleanup()
+
+		filters := []map[string]any{
+			{"organism": " \t"},
+			{"library_type": "\n "},
+			{"qc": "  "},
+		}
+		for _, filter := range filters {
+			input := map[string]any{"term": "ab"}
+			for name, value := range filter {
+				input[name] = value
+			}
+
+			listRes := callTool(t, cs, "mlwh_search_samples", input)
+			countRes := callTool(t, cs, "mlwh_count_samples", input)
+
+			So(listRes.IsError, ShouldBeTrue)
+			So(firstTextContent(listRes), ShouldContainSubstring, "3")
+			So(countRes.IsError, ShouldBeTrue)
+			So(firstTextContent(countRes), ShouldContainSubstring, "3")
+		}
+
 		So(stub.requestCount(), ShouldEqual, 0)
 	})
 

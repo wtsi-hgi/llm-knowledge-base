@@ -30,6 +30,7 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	wa "github.com/wtsi-hgi/wa/mlwh"
@@ -112,13 +113,13 @@ func addSampleSearchOptions(query url.Values, opts wa.SampleSearchOptions) {
 	if opts.Words {
 		query.Set("words", "true")
 	}
-	if opts.Organism != "" {
+	if hasSampleSearchTextOption(opts.Organism) {
 		query.Set("organism", opts.Organism)
 	}
-	if opts.LibraryType != "" {
+	if hasSampleSearchTextOption(opts.LibraryType) {
 		query.Set("library_type", opts.LibraryType)
 	}
-	if opts.QC != "" {
+	if hasSampleSearchTextOption(opts.QC) {
 		query.Set("qc", opts.QC)
 	}
 	if opts.DeliverablesOnly {
@@ -134,11 +135,20 @@ func (in sampleSearchInput) options() wa.SampleSearchOptions {
 }
 
 func (in sampleSearchInput) hasOptions() bool {
-	return in.Words || in.hasExactFilter()
+	return hasSampleSearchOptions(in.options())
+}
+
+func hasSampleSearchOptions(opts wa.SampleSearchOptions) bool {
+	return opts.Words || hasSampleExactFilter(opts)
 }
 
 func (in sampleSearchInput) hasExactFilter() bool {
-	return in.Organism != "" || in.LibraryType != "" || in.QC != "" || in.DeliverablesOnly
+	return hasSampleExactFilter(in.options())
+}
+
+func hasSampleExactFilter(opts wa.SampleSearchOptions) bool {
+	return hasSampleSearchTextOption(opts.Organism) || hasSampleSearchTextOption(opts.LibraryType) ||
+		hasSampleSearchTextOption(opts.QC) || opts.DeliverablesOnly
 }
 
 // addSearchSamples registers mlwh_search_samples. Free-text-only calls retain
@@ -225,6 +235,21 @@ type sampleSearchCountInput struct {
 	DeliverablesOnly bool   `json:"deliverables_only,omitempty" jsonschema:"filter with the upstream deliverable discriminator, not is_spiked; PacBio and ONT pass through"`
 }
 
+func (in sampleSearchCountInput) options() wa.SampleSearchOptions {
+	return wa.SampleSearchOptions{
+		Words: in.Words, Organism: in.Organism, LibraryType: in.LibraryType,
+		QC: in.QC, DeliverablesOnly: in.DeliverablesOnly,
+	}
+}
+
+func (in sampleSearchCountInput) hasOptions() bool {
+	return hasSampleSearchOptions(in.options())
+}
+
+func (in sampleSearchCountInput) hasExactFilter() bool {
+	return hasSampleExactFilter(in.options())
+}
+
 // addCountSamples registers mlwh_count_samples with the same modes, exact
 // filters, and conditional short-term guard as mlwh_search_samples.
 func (p *provider) addCountSamples(r core.Registrar, outputSchema map[string]any) {
@@ -249,7 +274,7 @@ func (p *provider) addCountSamples(r core.Registrar, outputSchema map[string]any
 }
 
 func guardSampleSearchCount(in sampleSearchCountInput) error {
-	if in.Organism != "" || in.LibraryType != "" || in.QC != "" || in.DeliverablesOnly {
+	if in.hasExactFilter() {
 		return nil
 	}
 
@@ -257,11 +282,8 @@ func guardSampleSearchCount(in sampleSearchCountInput) error {
 }
 
 func countSampleSearch(ctx context.Context, client *wa.RemoteClient, in sampleSearchCountInput) (wa.Count, error) {
-	opts := wa.SampleSearchOptions{
-		Words: in.Words, Organism: in.Organism, LibraryType: in.LibraryType,
-		QC: in.QC, DeliverablesOnly: in.DeliverablesOnly,
-	}
-	if in.Words || in.Organism != "" || in.LibraryType != "" || in.QC != "" || in.DeliverablesOnly {
+	opts := in.options()
+	if in.hasOptions() {
 		return client.CountSampleSearchWithOptions(ctx, in.Term, opts)
 	}
 
@@ -318,6 +340,10 @@ func guardSearch(in searchInput) (limit, offset int, err error) {
 	}
 
 	return boundedPagination(in.Limit, in.Offset)
+}
+
+func hasSampleSearchTextOption(value string) bool {
+	return strings.TrimSpace(value) != ""
 }
 
 // registerSearchTools adds the sample/study search and count tools (Stories A1,
