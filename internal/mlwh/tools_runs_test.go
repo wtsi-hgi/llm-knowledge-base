@@ -291,11 +291,11 @@ func TestRunAggregateToolsD3(t *testing.T) {
 
 		Convey("D3.4: invalid group_by or unit is delegated to the upstream error path", func() {
 			cases := []struct {
-				name      string
-				args      map[string]any
-				message   string
-				groupBy   []string
-				unit      string
+				name    string
+				args    map[string]any
+				message string
+				groupBy []string
+				unit    string
 			}{
 				{
 					name: "empty group_by", args: map[string]any{"group_by": []any{}, "unit": "runs"},
