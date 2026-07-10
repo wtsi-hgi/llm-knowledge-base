@@ -405,6 +405,7 @@ func outputSchemaFor(componentName string) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	applyComponentSchemaOverrides(schemas)
 
 	component, ok := schemas[componentName].(map[string]any)
 	if !ok {
@@ -415,14 +416,20 @@ func outputSchemaFor(componentName string) (map[string]any, error) {
 	if !ok {
 		return nil, fmt.Errorf("mlwh: component schema %q did not resolve to an object", componentName)
 	}
-	if componentName == "IRODSPath" {
-		allowNullProperty(resolved, "deliverable")
-	}
-	if componentName == "SequencingAggregateRow" {
-		allowStringMapProperty(resolved, "group")
-	}
 
 	return resolved, nil
+}
+
+// applyComponentSchemaOverrides corrects known OpenAPI generator limitations
+// before references are resolved, so both root components and every nested
+// reference to them receive the same JSON contract.
+func applyComponentSchemaOverrides(schemas map[string]any) {
+	if schema, ok := schemas["IRODSPath"].(map[string]any); ok {
+		allowNullProperty(schema, "deliverable")
+	}
+	if schema, ok := schemas["SequencingAggregateRow"].(map[string]any); ok {
+		allowStringMapProperty(schema, "group")
+	}
 }
 
 // allowNullProperty amends an OpenAPI-derived property for a Go pointer field.

@@ -495,6 +495,26 @@ func TestDetailTools(t *testing.T) {
 			So(req.Path, ShouldEqual, "/sample/S1/detail")
 		})
 
+		Convey("C2.5: mlwh_sample_detail accepts null deliverable in a nested iRODS path", func() {
+			detail := sampleDetailS1()
+			detail.IRODSPaths = []wa.IRODSPath{{
+				IDProduct:   "pacbio-product",
+				IRODSPath:   "/seq/pacbio-product.bam",
+				Platform:    "pacbio",
+				Deliverable: nil,
+			}}
+			stub.respondJSON("/sample/S1/detail", http.StatusOK, detail)
+
+			res := callTool(t, cs, "mlwh_sample_detail", map[string]any{"sanger_name": "S1"})
+			paths, ok := structuredObject(res)["irods_paths"].([]any)
+			So(ok, ShouldBeTrue)
+			So(len(paths), ShouldEqual, 1)
+
+			path, ok := paths[0].(map[string]any)
+			So(ok, ShouldBeTrue)
+			So(path["deliverable"], ShouldBeNil)
+		})
+
 		Convey("C1.2: mlwh_library_detail routes to /library/P1/study/5901/detail", func() {
 			stub.respondJSON("/library/P1/study/5901/detail", 200, libraryDetailP1())
 
