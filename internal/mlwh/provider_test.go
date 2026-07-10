@@ -303,7 +303,6 @@ func TestF3ProviderGuardGuidanceAndHermeticHarness(t *testing.T) {
 
 		result := callTool(t, cs, "mlwh_programmes", map[string]any{})
 		So(result.IsError, ShouldBeFalse)
-		So(stub.server, ShouldNotBeNil)
 		So(stub.server.URL, ShouldStartWith, "http://127.0.0.1:")
 		So(stub.requestCount(), ShouldEqual, 1)
 	})
