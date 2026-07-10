@@ -305,8 +305,9 @@ func runMLWHHTTPServer(t *testing.T, stub *stubMLWH) (string, func()) {
 
 	go func() {
 		runErr <- srv.RunHTTP(ctx, core.HTTPOptions{
-			Addr:      addr,
-			LogWriter: io.Discard,
+			Addr:            addr,
+			ShutdownTimeout: time.Second,
+			LogWriter:       io.Discard,
 		})
 	}()
 
@@ -317,7 +318,9 @@ func runMLWHHTTPServer(t *testing.T, stub *stubMLWH) (string, func()) {
 
 		select {
 		case err := <-runErr:
-			if err != nil {
+			// Dedicated core tests own graceful-drain success and timeout semantics;
+			// this HTTP surface harness only guarantees bounded teardown.
+			if err != nil && !errors.Is(err, context.DeadlineExceeded) {
 				t.Errorf("RunHTTP returned error after cancellation: %v", err)
 			}
 		case <-time.After(5 * time.Second):
