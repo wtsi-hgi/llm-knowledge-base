@@ -44,9 +44,10 @@ const findSamplesMethodPrefix = "FindSamplesBy"
 // one bounded page; values above pagedMaxLimit are rejected before any HTTP
 // request reaches MLWH.
 const (
-	pagedDefaultLimit  = 100
-	pagedDefaultOffset = 0
-	pagedMaxLimit      = 1000
+	latestDataDefaultLimit = 10
+	pagedDefaultLimit      = 100
+	pagedDefaultOffset     = 0
+	pagedMaxLimit          = 1000
 )
 
 // exportInputSchema describes the generic relationship export input. Its three
@@ -324,6 +325,14 @@ type pagedIRODSPathsResult struct {
 	NextOffset int            `json:"next_offset"`
 }
 
+// pagedLatestDataResult wraps a header-aware latest-data page as
+// {"latest_data":[...],"total":N,"next_offset":M}.
+type pagedLatestDataResult struct {
+	LatestData []wa.RecentDataRow `json:"latest_data"`
+	Total      int                `json:"total"`
+	NextOffset int                `json:"next_offset"`
+}
+
 // pagedLibrariesResult wraps a header-aware library page as
 // {"libraries":[...],"total":N,"next_offset":M}.
 type pagedLibrariesResult struct {
@@ -355,8 +364,28 @@ func outputSchemaFor(componentName string) (map[string]any, error) {
 	if !ok {
 		return nil, fmt.Errorf("mlwh: component schema %q did not resolve to an object", componentName)
 	}
+	if componentName == "IRODSPath" {
+		allowNullProperty(resolved, "deliverable")
+	}
 
 	return resolved, nil
+}
+
+// allowNullProperty amends an OpenAPI-derived property for a Go pointer field.
+// The upstream IRODSPath schema currently describes *bool Deliverable as only a
+// boolean even though its exact JSON contract is tri-state true/false/null.
+func allowNullProperty(schema map[string]any, propertyName string) {
+	properties, ok := schema["properties"].(map[string]any)
+	if !ok {
+		return
+	}
+
+	property, ok := properties[propertyName].(map[string]any)
+	if !ok {
+		return
+	}
+
+	property["type"] = []any{"boolean", "null"}
 }
 
 // outputSchemaForSlice returns the object-typed output schema for a list tool

@@ -689,7 +689,7 @@ func (p *provider) addIRODSPathsForSample(r core.Registrar, outputSchema map[str
 
 	mcp.AddTool(r.Server(), &mcp.Tool{
 		Name:         "mlwh_irods_paths_for_sample",
-		Description:  description,
+		Description:  description + irodsSemanticsNote,
 		OutputSchema: outputSchema,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in irodsSamplePageInput) (*mcp.CallToolResult, pagedIRODSPathsResult, error) {
 		limit, offset, err := boundedPagination(in.Limit, in.Offset)
@@ -697,16 +697,14 @@ func (p *provider) addIRODSPathsForSample(r core.Registrar, outputSchema map[str
 			return core.ToolError[pagedIRODSPathsResult](err)
 		}
 
-		page, err := client.IRODSPathsForSampleByFileTypePage(ctx, in.SangerName, in.FileType, limit, offset)
+		page, err := irodsPathsPage(ctx, client, "IRODSPathsForSample", in.SangerName, irodsPathOptions(
+			in.FileType, in.DeliverablesOnly, in.OrderBy, in.Since, in.Until,
+		), limit, offset)
 		if err != nil {
 			return core.ToolError[pagedIRODSPathsResult](mapToolError(err))
 		}
 
-		return nil, pagedIRODSPathsResult{
-			IRODSPaths: page.Items,
-			Total:      page.Total,
-			NextOffset: page.NextOffset,
-		}, nil
+		return nil, page, nil
 	})
 
 	return nil
@@ -726,7 +724,7 @@ func (p *provider) addIRODSPathsForStudy(r core.Registrar, outputSchema map[stri
 
 	mcp.AddTool(r.Server(), &mcp.Tool{
 		Name:         "mlwh_irods_paths_for_study",
-		Description:  description,
+		Description:  description + irodsSemanticsNote,
 		OutputSchema: outputSchema,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in irodsStudyPageInput) (*mcp.CallToolResult, pagedIRODSPathsResult, error) {
 		limit, offset, err := boundedPagination(in.Limit, in.Offset)
@@ -734,16 +732,14 @@ func (p *provider) addIRODSPathsForStudy(r core.Registrar, outputSchema map[stri
 			return core.ToolError[pagedIRODSPathsResult](err)
 		}
 
-		page, err := client.IRODSPathsForStudyByFileTypePage(ctx, in.StudyLimsID, in.FileType, limit, offset)
+		page, err := irodsPathsPage(ctx, client, "IRODSPathsForStudy", in.StudyLimsID, irodsPathOptions(
+			in.FileType, in.DeliverablesOnly, in.OrderBy, in.Since, in.Until,
+		), limit, offset)
 		if err != nil {
 			return core.ToolError[pagedIRODSPathsResult](mapToolError(err))
 		}
 
-		return nil, pagedIRODSPathsResult{
-			IRODSPaths: page.Items,
-			Total:      page.Total,
-			NextOffset: page.NextOffset,
-		}, nil
+		return nil, page, nil
 	})
 
 	return nil

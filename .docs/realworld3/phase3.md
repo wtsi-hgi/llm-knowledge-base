@@ -33,8 +33,8 @@ filter, deliverability, and paging inputs. Use one option-preserving
 `CallWithHeaders("SearchSamples", ...)` request for optioned lists and retain
 the exact-count floor guidance, covering all 7 acceptance tests from C1.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 #### Item 3.2: C2 - Preserve optioned iRODS pages and fields [parallel with C1]
 
@@ -45,8 +45,8 @@ Update the sample, study, and run iRODS list/count tools in
 header-aware list pages, direct optioned counts, exact `wa.IRODSPath` rows,
 and upstream error behavior, covering all 7 acceptance tests from C2.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 For parallel batch items, use separate subagents per item.
 Launch review subagents using the `go-reviewer` skill
@@ -61,5 +61,5 @@ After batch 1 is reviewed, add the four latest-data list/count tools to
 the upstream study and faculty-sponsor page/count methods directly with the
 10-row list default, covering all 5 acceptance tests from C3.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed

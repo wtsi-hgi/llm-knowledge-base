@@ -174,6 +174,215 @@ func twoSamples() []wa.Sample {
 	}
 }
 
+// TestLiteralPrefixSampleSearchOptionsC1 covers every acceptance test in C1.
+// Each block drives the public MCP tools through the real remote client so the
+// assertions pin both the tool contract and the exact upstream query.
+func TestLiteralPrefixSampleSearchOptionsC1(t *testing.T) {
+	Convey("C1.1: default sample search preserves literal-prefix rows and page headers", t, func() {
+		stub := newStubMLWH(t)
+		cs, cleanup := runMLWHServerWithClient(t, stub)
+		defer cleanup()
+
+		rows := []wa.Sample{
+			{IDSampleTmp: 1, Name: "hek_r1"},
+			{IDSampleTmp: 2, Name: "hek_r2"},
+			{IDSampleTmp: 3, Name: "hek_r3"},
+			{IDSampleTmp: 4, Name: "hek_r4"},
+		}
+		stub.respondJSONWithHeaders("/search/sample/hek_r", 200, rows, http.Header{
+			"X-Total-Count": {"4"},
+			"X-Next-Offset": {"-1"},
+		})
+
+		res := callTool(t, cs, "mlwh_search_samples", map[string]any{"term": "hek_r"})
+		obj := structuredObject(res)
+		samples, ok := obj["samples"].([]any)
+
+		So(ok, ShouldBeTrue)
+		So(len(samples), ShouldEqual, 4)
+		So(obj["total"], ShouldEqual, 4)
+		So(obj["next_offset"], ShouldEqual, -1)
+		req, ok := stub.lastRequest()
+		So(ok, ShouldBeTrue)
+		So(req.Query.Get("words"), ShouldBeBlank)
+	})
+
+	Convey("C1.2: words=true opts into the broader word-prefix search", t, func() {
+		stub := newStubMLWH(t)
+		cs, cleanup := runMLWHServerWithClient(t, stub)
+		defer cleanup()
+
+		rows := []wa.Sample{
+			{IDSampleTmp: 1, Name: "hek_r1"},
+			{IDSampleTmp: 2, Name: "hek_r2"},
+			{IDSampleTmp: 3, Name: "hek_r3"},
+			{IDSampleTmp: 4, Name: "hek_r4"},
+			{IDSampleTmp: 5, Name: "sample-hek-r5"},
+		}
+		stub.respondJSONWithHeaders("/search/sample/hek_r", 200, rows, http.Header{
+			"X-Total-Count": {"5"},
+			"X-Next-Offset": {"-1"},
+		})
+		stub.respondJSON("/search/sample/hek_r/count", 200, wa.Count{Count: 5})
+
+		res := callTool(t, cs, "mlwh_search_samples", map[string]any{"term": "hek_r", "words": true})
+		obj := structuredObject(res)
+		samples, ok := obj["samples"].([]any)
+
+		So(ok, ShouldBeTrue)
+		So(len(samples), ShouldEqual, 5)
+		req, ok := stub.lastRequest()
+		So(ok, ShouldBeTrue)
+		So(req.Query.Get("words"), ShouldEqual, "true")
+
+		countRes := callTool(t, cs, "mlwh_count_samples", map[string]any{"term": "hek_r", "words": true})
+		So(structuredObject(countRes)["count"], ShouldEqual, 5)
+		countReq, ok := stub.lastRequest()
+		So(ok, ShouldBeTrue)
+		So(countReq.Query.Get("words"), ShouldEqual, "true")
+	})
+
+	Convey("C1.3: every exact filter and their conjunction are identical for list and count", t, func() {
+		stub := newStubMLWH(t)
+		cs, cleanup := runMLWHServerWithClient(t, stub)
+		defer cleanup()
+
+		stub.respondJSON("/search/sample/abc", 200, []wa.Sample{{IDSampleTmp: 1, Name: "abc"}})
+		stub.respondJSON("/search/sample/abc/count", 200, wa.Count{Count: 1})
+		cases := []map[string]any{
+			{"organism": "Homo sapiens"},
+			{"library_type": "Standard"},
+			{"qc": "fail"},
+			{"deliverables_only": true},
+			{
+				"organism":          "Homo sapiens",
+				"library_type":      "Standard",
+				"qc":                "fail",
+				"deliverables_only": true,
+			},
+		}
+
+		for _, exactFilters := range cases {
+			listInput := map[string]any{"term": "abc"}
+			countInput := map[string]any{"term": "abc"}
+			for key, value := range exactFilters {
+				listInput[key] = value
+				countInput[key] = value
+			}
+
+			callTool(t, cs, "mlwh_search_samples", listInput)
+			listReq, ok := stub.lastRequest()
+			So(ok, ShouldBeTrue)
+			callTool(t, cs, "mlwh_count_samples", countInput)
+			countReq, ok := stub.lastRequest()
+			So(ok, ShouldBeTrue)
+
+			for _, key := range []string{"organism", "library_type", "qc", "deliverables_only"} {
+				So(listReq.Query.Get(key), ShouldEqual, countReq.Query.Get(key))
+			}
+			for key, value := range exactFilters {
+				expected := "true"
+				if text, isString := value.(string); isString {
+					expected = text
+				}
+				So(listReq.Query.Get(key), ShouldEqual, expected)
+				So(countReq.Query.Get(key), ShouldEqual, expected)
+			}
+			So(listReq.Query.Get("limit"), ShouldEqual, "100")
+			So(listReq.Query.Get("offset"), ShouldEqual, "0")
+		}
+
+		So(stub.requestCount(), ShouldEqual, 10)
+	})
+
+	Convey("C1.4: a two-character term with an exact filter makes one upstream request", t, func() {
+		stub := newStubMLWH(t)
+		cs, cleanup := runMLWHServerWithClient(t, stub)
+		defer cleanup()
+
+		stub.respondJSON("/search/sample/ab", 200, []wa.Sample{{IDSampleTmp: 1, Name: "filtered"}})
+
+		res := callTool(t, cs, "mlwh_search_samples", map[string]any{"term": "ab", "organism": "mouse"})
+		obj := structuredObject(res)
+		samples, ok := obj["samples"].([]any)
+
+		So(ok, ShouldBeTrue)
+		So(len(samples), ShouldEqual, 1)
+		So(stub.requestCount(), ShouldEqual, 1)
+	})
+
+	Convey("C1.5: a two-character term without an exact filter is rejected before HTTP", t, func() {
+		stub := newStubMLWH(t)
+		cs, cleanup := runMLWHServerWithClient(t, stub)
+		defer cleanup()
+
+		listRes := callTool(t, cs, "mlwh_search_samples", map[string]any{"term": "ab"})
+		countRes := callTool(t, cs, "mlwh_count_samples", map[string]any{"term": "ab"})
+
+		So(listRes.IsError, ShouldBeTrue)
+		So(firstTextContent(listRes), ShouldContainSubstring, "3")
+		So(countRes.IsError, ShouldBeTrue)
+		So(firstTextContent(countRes), ShouldContainSubstring, "3")
+		So(stub.requestCount(), ShouldEqual, 0)
+	})
+
+	Convey("C1.6: an optioned page wraps headers after exactly one HTTP request", t, func() {
+		stub := newStubMLWH(t)
+		cs, cleanup := runMLWHServerWithClient(t, stub)
+		defer cleanup()
+
+		stub.respondJSONWithHeaders("/search/sample/abc", 200, []wa.Sample{{IDSampleTmp: 1, Name: "abc"}}, http.Header{
+			"X-Total-Count": {"17"},
+			"X-Next-Offset": {"10"},
+		})
+
+		res := callTool(t, cs, "mlwh_search_samples", map[string]any{
+			"term": "abc", "library_type": "Standard", "limit": 10,
+		})
+		obj := structuredObject(res)
+
+		So(len(obj["samples"].([]any)), ShouldEqual, 1)
+		So(obj["total"], ShouldEqual, 17)
+		So(obj["next_offset"], ShouldEqual, 10)
+		So(stub.requestCount(), ShouldEqual, 1)
+	})
+
+	Convey("C1.7: schemas and descriptions explain the complete sample-search contract", t, func() {
+		stub := newStubMLWH(t)
+		cs, cleanup := runMLWHServerWithClient(t, stub)
+		defer cleanup()
+
+		listTool, ok := toolByName(t, cs, "mlwh_search_samples")
+		So(ok, ShouldBeTrue)
+		countTool, ok := toolByName(t, cs, "mlwh_count_samples")
+		So(ok, ShouldBeTrue)
+
+		description := strings.ToLower(listTool.Description + " " + countTool.Description)
+		So(description, ShouldContainSubstring, "literal")
+		So(description, ShouldContainSubstring, "prefix")
+		So(description, ShouldContainSubstring, "words=true")
+		So(description, ShouldContainSubstring, "opt-in")
+		So(description, ShouldContainSubstring, "mid-word substring")
+		So(description, ShouldContainSubstring, "whole-word")
+		So(description, ShouldContainSubstring, "library type")
+		So(description, ShouldContainSubstring, "exact")
+		So(description, ShouldContainSubstring, "sample-level")
+		So(description, ShouldContainSubstring, "fail>pending>pass")
+		So(description, ShouldContainSubstring, "floor")
+
+		listSchema := listTool.InputSchema.(map[string]any)["properties"].(map[string]any)
+		countSchema := countTool.InputSchema.(map[string]any)["properties"].(map[string]any)
+		for _, name := range []string{"term", "words", "organism", "library_type", "qc", "deliverables_only"} {
+			_, listHasProperty := listSchema[name]
+			_, countHasProperty := countSchema[name]
+			So(listHasProperty, ShouldBeTrue)
+			So(countHasProperty, ShouldBeTrue)
+		}
+		_, hasMode := listSchema["mode"]
+		So(hasMode, ShouldBeFalse)
+	})
+}
+
 // TestCountSamplesTool covers Story A2 (mlwh_count_samples).
 func TestCountSamplesTool(t *testing.T) {
 	Convey("Given the MLWH server (stub-backed) with mlwh_count_samples", t, func() {
