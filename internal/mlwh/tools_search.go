@@ -235,6 +235,23 @@ type sampleSearchCountInput struct {
 	DeliverablesOnly bool   `json:"deliverables_only,omitempty" jsonschema:"filter with the upstream deliverable discriminator, not is_spiked; PacBio and ONT pass through"`
 }
 
+func (in sampleSearchCountInput) guard() error {
+	if in.hasExactFilter() {
+		return nil
+	}
+
+	return guardTerm(in.Term)
+}
+
+func (in sampleSearchCountInput) count(ctx context.Context, client *wa.RemoteClient) (wa.Count, error) {
+	opts := in.options()
+	if in.hasOptions() {
+		return client.CountSampleSearchWithOptions(ctx, in.Term, opts)
+	}
+
+	return client.CountSampleSearch(ctx, in.Term)
+}
+
 func (in sampleSearchCountInput) options() wa.SampleSearchOptions {
 	return wa.SampleSearchOptions{
 		Words: in.Words, Organism: in.Organism, LibraryType: in.LibraryType,
@@ -260,34 +277,17 @@ func (p *provider) addCountSamples(r core.Registrar, outputSchema map[string]any
 		Description:  countSamplesDescription + countFreshnessNote,
 		OutputSchema: outputSchema,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in sampleSearchCountInput) (*mcp.CallToolResult, wa.Count, error) {
-		if err := guardSampleSearchCount(in); err != nil {
+		if err := in.guard(); err != nil {
 			return core.ToolError[wa.Count](err)
 		}
 
-		count, err := countSampleSearch(ctx, client, in)
+		count, err := in.count(ctx, client)
 		if err != nil {
 			return core.ToolError[wa.Count](mapToolError(err))
 		}
 
 		return nil, count, nil
 	})
-}
-
-func guardSampleSearchCount(in sampleSearchCountInput) error {
-	if in.hasExactFilter() {
-		return nil
-	}
-
-	return guardTerm(in.Term)
-}
-
-func countSampleSearch(ctx context.Context, client *wa.RemoteClient, in sampleSearchCountInput) (wa.Count, error) {
-	opts := in.options()
-	if in.hasOptions() {
-		return client.CountSampleSearchWithOptions(ctx, in.Term, opts)
-	}
-
-	return client.CountSampleSearch(ctx, in.Term)
 }
 
 // searchInput is the input for the paginated study substring search. An omitted
