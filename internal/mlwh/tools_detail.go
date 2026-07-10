@@ -208,6 +208,15 @@ func (p *provider) addSampleDetail(r core.Registrar, outputSchema map[string]any
 	return nil
 }
 
+// samplePageInput is the input for sample-keyed paged fan-out tools such as
+// mlwh_runs_for_sample and mlwh_lanes_for_sample: a Sanger sample name plus
+// bounded pagination.
+type samplePageInput struct {
+	SangerName string `json:"sanger_name" jsonschema:"the Sanger sample name to enumerate"`
+	Limit      int    `json:"limit,omitempty" jsonschema:"maximum rows to return; defaults to 100, maximum 1000 (a larger limit is rejected, not clamped)"`
+	Offset     int    `json:"offset,omitempty" jsonschema:"number of leading rows to skip before returning results; defaults to 0"`
+}
+
 // addRunsForSample registers mlwh_runs_for_sample (D1): it lists the distinct
 // sequencing runs associated with a sample, with the normal bounded semantic
 // page wrapper {"runs":[...],"total":N,"next_offset":M}.
@@ -262,31 +271,6 @@ type studyDetailInput struct {
 	Lean        bool   `json:"lean,omitempty" jsonschema:"return the smaller lean detail shape with flat ids instead of heavy nested objects"`
 }
 
-// pagedRunDetailResult flattens wa.PagedRunDetail for MCP: the upstream
-// RunDetail fields stay at top level and the page metadata is added beside
-// them, with no run_detail wrapper.
-type pagedRunDetailResult struct {
-	wa.RunDetail
-	Total      int `json:"total"`
-	NextOffset int `json:"next_offset"`
-}
-
-// runDetailInput is the input for mlwh_run_detail: a run id, bounded page
-// controls for nested rows, and optional lean output.
-type runDetailInput struct {
-	IDRun  string `json:"id_run" jsonschema:"the sequencing run identifier to look up"`
-	Limit  int    `json:"limit,omitempty" jsonschema:"maximum nested detail rows to return; defaults to 100, maximum 1000 (a larger limit is rejected, not clamped)"`
-	Offset int    `json:"offset,omitempty" jsonschema:"number of leading nested detail rows to skip before returning results; defaults to 0"`
-	Lean   bool   `json:"lean,omitempty" jsonschema:"return the smaller lean detail shape with flat ids instead of heavy nested objects"`
-}
-
-// studyIDInput is the input for study-keyed count tools that take only a LIMS
-// study id and no pagination (mlwh_count_samples_for_study,
-// mlwh_count_runs_for_study, mlwh_count_libraries_for_study).
-type studyIDInput struct {
-	StudyLimsID string `json:"study_lims_id" jsonschema:"the LIMS identifier of the study to look up"`
-}
-
 // addStudyDetail registers mlwh_study_detail (Story C1/E1): it returns the
 // given study with a bounded page of nested detail rows, plus header-derived
 // total and next_offset metadata.
@@ -327,10 +311,22 @@ func (p *provider) addStudyDetail(r core.Registrar, outputSchema map[string]any)
 	return nil
 }
 
-// runIDInput is the input for run-keyed count tools that take only a run id and
-// no pagination (mlwh_count_samples_for_run).
-type runIDInput struct {
-	IDRun string `json:"id_run" jsonschema:"the sequencing run identifier to look up"`
+// pagedRunDetailResult flattens wa.PagedRunDetail for MCP: the upstream
+// RunDetail fields stay at top level and the page metadata is added beside
+// them, with no run_detail wrapper.
+type pagedRunDetailResult struct {
+	wa.RunDetail
+	Total      int `json:"total"`
+	NextOffset int `json:"next_offset"`
+}
+
+// runDetailInput is the input for mlwh_run_detail: a run id, bounded page
+// controls for nested rows, and optional lean output.
+type runDetailInput struct {
+	IDRun  string `json:"id_run" jsonschema:"the sequencing run identifier to look up"`
+	Limit  int    `json:"limit,omitempty" jsonschema:"maximum nested detail rows to return; defaults to 100, maximum 1000 (a larger limit is rejected, not clamped)"`
+	Offset int    `json:"offset,omitempty" jsonschema:"number of leading nested detail rows to skip before returning results; defaults to 0"`
+	Lean   bool   `json:"lean,omitempty" jsonschema:"return the smaller lean detail shape with flat ids instead of heavy nested objects"`
 }
 
 // addRunDetail registers mlwh_run_detail (Story C1/E1): it returns the given
@@ -671,15 +667,6 @@ func (p *provider) addRunsForStudy(r core.Registrar, outputSchema map[string]any
 	return nil
 }
 
-// samplePageInput is the input for sample-keyed paged fan-out tools such as
-// mlwh_runs_for_sample and mlwh_lanes_for_sample: a Sanger sample name plus
-// bounded pagination.
-type samplePageInput struct {
-	SangerName string `json:"sanger_name" jsonschema:"the Sanger sample name to enumerate"`
-	Limit      int    `json:"limit,omitempty" jsonschema:"maximum rows to return; defaults to 100, maximum 1000 (a larger limit is rejected, not clamped)"`
-	Offset     int    `json:"offset,omitempty" jsonschema:"number of leading rows to skip before returning results; defaults to 0"`
-}
-
 // addLanesForSample registers mlwh_lanes_for_sample (Story C2): it lists the
 // run/lane/tag combinations on which a sample was sequenced, with the bounded
 // page default, wrapping the result under {"lanes":[...],"total":N,"next_offset":M}.
@@ -876,6 +863,13 @@ func (p *provider) addStudiesForSample(r core.Registrar) error {
 	return nil
 }
 
+// studyIDInput is the input for study-keyed count tools that take only a LIMS
+// study id and no pagination (mlwh_count_samples_for_study,
+// mlwh_count_runs_for_study, mlwh_count_libraries_for_study).
+type studyIDInput struct {
+	StudyLimsID string `json:"study_lims_id" jsonschema:"the LIMS identifier of the study to look up"`
+}
+
 // addCountSamplesForStudy registers mlwh_count_samples_for_study (Story C2): a
 // non-paginated tool returning the number of distinct samples linked to a study
 // as the typed Count ({"count":N}), the count counterpart of
@@ -887,6 +881,12 @@ func (p *provider) addCountSamplesForStudy(r core.Registrar, outputSchema map[st
 		func(ctx context.Context, in studyIDInput) (wa.Count, error) {
 			return client.CountSamplesForStudy(ctx, in.StudyLimsID)
 		})
+}
+
+// runIDInput is the input for run-keyed count tools that take only a run id and
+// no pagination (mlwh_count_samples_for_run).
+type runIDInput struct {
+	IDRun string `json:"id_run" jsonschema:"the sequencing run identifier to look up"`
 }
 
 // addCountSamplesForRun registers mlwh_count_samples_for_run, the Count

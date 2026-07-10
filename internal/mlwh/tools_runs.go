@@ -39,6 +39,10 @@ const globalRunsPaginationNote = " Defaults to a page of 100 rows, maximum 1000 
 	"(a larger limit is rejected, not clamped). To continue, pass the last row's id as the next cursor; " +
 	"no total or next_offset is returned."
 
+func runAggregationOptions(since, until string, platforms []string) wa.RunAggregationOptions {
+	return wa.RunAggregationOptions{Since: since, Until: until, Platforms: platforms}
+}
+
 // sequencingAggregateInput requires explicit dimensions and count unit, plus
 // the date/platform filters shared with the run aggregate endpoints.
 type sequencingAggregateInput struct {
@@ -73,10 +77,6 @@ func (p *provider) addSequencingAggregate(r core.Registrar, outputSchema map[str
 	})
 
 	return nil
-}
-
-func runAggregationOptions(since, until string, platforms []string) wa.RunAggregationOptions {
-	return wa.RunAggregationOptions{Since: since, Until: until, Platforms: platforms}
 }
 
 // registerRunTools adds the global run list, count, and server-side aggregate

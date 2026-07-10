@@ -228,183 +228,6 @@ func TestSampleRunAndStudyCountTools(t *testing.T) {
 	})
 }
 
-// TestDetailTools covers Story C1: the four grouped detail tools
-// (mlwh_sample_detail, mlwh_study_detail, mlwh_run_detail, mlwh_library_detail).
-// Every assertion drives the tool over the real in-memory MCP client against the
-// hermetic stub, so registration, the upstream path, output shape, and error
-// mapping are exercised end-to-end.
-func TestDetailTools(t *testing.T) {
-	Convey("Given the MLWH server (stub-backed) with the detail tools", t, func() {
-		stub := newStubMLWH(t)
-		cs, cleanup := runMLWHServerWithClient(t, stub)
-		defer cleanup()
-
-		Convey("C1.1: mlwh_sample_detail returns the SampleDetail aggregate for /sample/S1/detail", func() {
-			stub.respondJSON("/sample/S1/detail", 200, sampleDetailS1())
-
-			res := callTool(t, cs, "mlwh_sample_detail", map[string]any{"sanger_name": "S1"})
-
-			obj := structuredObject(res)
-
-			sample, ok := obj["sample"].(map[string]any)
-			So(ok, ShouldBeTrue)
-			So(sample["name"], ShouldEqual, "Mus musculus A")
-
-			lanes, ok := obj["lanes"].([]any)
-			So(ok, ShouldBeTrue)
-			So(len(lanes), ShouldEqual, 2)
-
-			libraries, ok := obj["libraries"].([]any)
-			So(ok, ShouldBeTrue)
-			So(len(libraries), ShouldEqual, 1)
-
-			req, ok := stub.lastRequest()
-			So(ok, ShouldBeTrue)
-			So(req.Path, ShouldEqual, "/sample/S1/detail")
-		})
-
-		Convey("C1.2: mlwh_library_detail routes to /library/P1/study/5901/detail", func() {
-			stub.respondJSON("/library/P1/study/5901/detail", 200, libraryDetailP1())
-
-			res := callTool(t, cs, "mlwh_library_detail", map[string]any{
-				"pipeline_id_lims": "P1",
-				"study_lims_id":    "5901",
-			})
-
-			So(res.IsError, ShouldBeFalse)
-
-			req, ok := stub.lastRequest()
-			So(ok, ShouldBeTrue)
-			So(req.Path, ShouldEqual, "/library/P1/study/5901/detail")
-		})
-
-		Convey("C1.3: mlwh_study_detail on a 503 cache_never_synced is a tool error about the cache not being synced", func() {
-			stub.respondError("/study/X/detail", 503, "cache_never_synced", "cache not synced")
-
-			res := callTool(t, cs, "mlwh_study_detail", map[string]any{"study_lims_id": "X"})
-
-			So(res.IsError, ShouldBeTrue)
-			So(strings.ToLower(firstTextContent(res)), ShouldContainSubstring, "synced")
-		})
-
-		Convey("E1.1: mlwh_study_detail sends default pagination with lean=true and returns flattened page metadata", func() {
-			stub.respondJSONWithHeaders("/study/S1/detail", 200, studyDetailS1Lean(), http.Header{
-				"X-Total-Count": {"200"},
-				"X-Next-Offset": {"100"},
-			})
-
-			res := callTool(t, cs, "mlwh_study_detail", map[string]any{
-				"study_lims_id": "S1",
-				"lean":          true,
-			})
-
-			obj := structuredObject(res)
-			study, ok := obj["study"].(map[string]any)
-			So(ok, ShouldBeTrue)
-			So(study["id_study_lims"], ShouldEqual, "S1")
-
-			sampleIDs, ok := obj["sample_ids"].([]any)
-			So(ok, ShouldBeTrue)
-			So(sampleIDs, ShouldResemble, []any{"SAM1", "SAM2"})
-			So(obj["lean"], ShouldBeTrue)
-			So(obj["total"], ShouldEqual, 200)
-			So(obj["next_offset"], ShouldEqual, 100)
-
-			req, ok := stub.lastRequest()
-			So(ok, ShouldBeTrue)
-			So(req.Path, ShouldEqual, "/study/S1/detail")
-			So(req.Query.Get("limit"), ShouldEqual, "100")
-			So(req.Query.Get("offset"), ShouldEqual, "0")
-			So(req.Query.Get("lean"), ShouldEqual, "true")
-		})
-
-		Convey("E1.2: mlwh_run_detail passes explicit pagination and returns flattened page metadata", func() {
-			stub.respondJSONWithHeaders("/run/52553/detail", 200, runDetail52553(), http.Header{
-				"X-Total-Count": {"120"},
-				"X-Next-Offset": {"100"},
-			})
-
-			res := callTool(t, cs, "mlwh_run_detail", map[string]any{
-				"id_run": "52553",
-				"limit":  50,
-				"offset": 50,
-			})
-
-			obj := structuredObject(res)
-			run, ok := obj["run"].(map[string]any)
-			So(ok, ShouldBeTrue)
-			So(run["id_run"], ShouldEqual, float64(52553))
-
-			samples, ok := obj["samples"].([]any)
-			So(ok, ShouldBeTrue)
-			So(len(samples), ShouldEqual, 1)
-			So(obj["total"], ShouldEqual, 120)
-			So(obj["next_offset"], ShouldEqual, 100)
-
-			req, ok := stub.lastRequest()
-			So(ok, ShouldBeTrue)
-			So(req.Path, ShouldEqual, "/run/52553/detail")
-			So(req.Query.Get("limit"), ShouldEqual, "50")
-			So(req.Query.Get("offset"), ShouldEqual, "50")
-			So(req.Query.Get("lean"), ShouldEqual, "")
-		})
-
-		Convey("E1.3: mlwh_sample_detail input schema has no lean, limit, or offset properties", func() {
-			tool, ok := toolByName(t, cs, "mlwh_sample_detail")
-			So(ok, ShouldBeTrue)
-
-			schema, ok := tool.InputSchema.(map[string]any)
-			So(ok, ShouldBeTrue)
-			properties, ok := schema["properties"].(map[string]any)
-			So(ok, ShouldBeTrue)
-
-			for _, field := range []string{"lean", "limit", "offset"} {
-				_, found := properties[field]
-				So(found, ShouldBeFalse)
-			}
-		})
-
-		Convey("C1.4: the four detail tools are registered with the listed names", func() {
-			for _, name := range []string{
-				"mlwh_sample_detail",
-				"mlwh_study_detail",
-				"mlwh_run_detail",
-				"mlwh_library_detail",
-			} {
-				_, ok := toolByName(t, cs, name)
-				So(ok, ShouldBeTrue)
-			}
-		})
-	})
-}
-
-// sampleDetailS1 is a canned SampleDetail returned by the stub for
-// /sample/S1/detail. It carries a sample plus two lanes and one library so the
-// C1.1 assertion can prove the assembled aggregate (sample + lanes + libraries)
-// round-trips through wa's typed client and reaches StructuredContent intact.
-func sampleDetailS1() wa.SampleDetail {
-	return wa.SampleDetail{
-		Sample: wa.Sample{IDSampleTmp: 1, Name: "Mus musculus A", SupplierName: "supA"},
-		Lanes: []wa.Lane{
-			{IDRun: 100, Position: 1, TagIndex: 1},
-			{IDRun: 100, Position: 2, TagIndex: 2},
-		},
-		Libraries: []wa.Library{
-			{PipelineIDLims: "P1", IDStudyLims: "5901"},
-		},
-	}
-}
-
-// libraryDetailP1 is a canned LibraryDetail returned by the stub for
-// /library/P1/study/5901/detail, used by C1.2 to prove the two path params land
-// in the right order in the upstream request path.
-func libraryDetailP1() wa.LibraryDetail {
-	return wa.LibraryDetail{
-		Library: wa.Library{PipelineIDLims: "P1", IDStudyLims: "5901"},
-		Samples: []wa.Sample{{IDSampleTmp: 1, Name: "Mus musculus A"}},
-	}
-}
-
 // TestFanOutTools covers the fan-out enumeration tools, including the A3
 // bounded-page behaviour for paged tools and the unchanged non-paged/count
 // tools.
@@ -635,6 +458,183 @@ func TestFanOutToolDescriptions(t *testing.T) {
 			}
 		})
 	})
+}
+
+// TestDetailTools covers Story C1: the four grouped detail tools
+// (mlwh_sample_detail, mlwh_study_detail, mlwh_run_detail, mlwh_library_detail).
+// Every assertion drives the tool over the real in-memory MCP client against the
+// hermetic stub, so registration, the upstream path, output shape, and error
+// mapping are exercised end-to-end.
+func TestDetailTools(t *testing.T) {
+	Convey("Given the MLWH server (stub-backed) with the detail tools", t, func() {
+		stub := newStubMLWH(t)
+		cs, cleanup := runMLWHServerWithClient(t, stub)
+		defer cleanup()
+
+		Convey("C1.1: mlwh_sample_detail returns the SampleDetail aggregate for /sample/S1/detail", func() {
+			stub.respondJSON("/sample/S1/detail", 200, sampleDetailS1())
+
+			res := callTool(t, cs, "mlwh_sample_detail", map[string]any{"sanger_name": "S1"})
+
+			obj := structuredObject(res)
+
+			sample, ok := obj["sample"].(map[string]any)
+			So(ok, ShouldBeTrue)
+			So(sample["name"], ShouldEqual, "Mus musculus A")
+
+			lanes, ok := obj["lanes"].([]any)
+			So(ok, ShouldBeTrue)
+			So(len(lanes), ShouldEqual, 2)
+
+			libraries, ok := obj["libraries"].([]any)
+			So(ok, ShouldBeTrue)
+			So(len(libraries), ShouldEqual, 1)
+
+			req, ok := stub.lastRequest()
+			So(ok, ShouldBeTrue)
+			So(req.Path, ShouldEqual, "/sample/S1/detail")
+		})
+
+		Convey("C1.2: mlwh_library_detail routes to /library/P1/study/5901/detail", func() {
+			stub.respondJSON("/library/P1/study/5901/detail", 200, libraryDetailP1())
+
+			res := callTool(t, cs, "mlwh_library_detail", map[string]any{
+				"pipeline_id_lims": "P1",
+				"study_lims_id":    "5901",
+			})
+
+			So(res.IsError, ShouldBeFalse)
+
+			req, ok := stub.lastRequest()
+			So(ok, ShouldBeTrue)
+			So(req.Path, ShouldEqual, "/library/P1/study/5901/detail")
+		})
+
+		Convey("C1.3: mlwh_study_detail on a 503 cache_never_synced is a tool error about the cache not being synced", func() {
+			stub.respondError("/study/X/detail", 503, "cache_never_synced", "cache not synced")
+
+			res := callTool(t, cs, "mlwh_study_detail", map[string]any{"study_lims_id": "X"})
+
+			So(res.IsError, ShouldBeTrue)
+			So(strings.ToLower(firstTextContent(res)), ShouldContainSubstring, "synced")
+		})
+
+		Convey("E1.1: mlwh_study_detail sends default pagination with lean=true and returns flattened page metadata", func() {
+			stub.respondJSONWithHeaders("/study/S1/detail", 200, studyDetailS1Lean(), http.Header{
+				"X-Total-Count": {"200"},
+				"X-Next-Offset": {"100"},
+			})
+
+			res := callTool(t, cs, "mlwh_study_detail", map[string]any{
+				"study_lims_id": "S1",
+				"lean":          true,
+			})
+
+			obj := structuredObject(res)
+			study, ok := obj["study"].(map[string]any)
+			So(ok, ShouldBeTrue)
+			So(study["id_study_lims"], ShouldEqual, "S1")
+
+			sampleIDs, ok := obj["sample_ids"].([]any)
+			So(ok, ShouldBeTrue)
+			So(sampleIDs, ShouldResemble, []any{"SAM1", "SAM2"})
+			So(obj["lean"], ShouldBeTrue)
+			So(obj["total"], ShouldEqual, 200)
+			So(obj["next_offset"], ShouldEqual, 100)
+
+			req, ok := stub.lastRequest()
+			So(ok, ShouldBeTrue)
+			So(req.Path, ShouldEqual, "/study/S1/detail")
+			So(req.Query.Get("limit"), ShouldEqual, "100")
+			So(req.Query.Get("offset"), ShouldEqual, "0")
+			So(req.Query.Get("lean"), ShouldEqual, "true")
+		})
+
+		Convey("E1.2: mlwh_run_detail passes explicit pagination and returns flattened page metadata", func() {
+			stub.respondJSONWithHeaders("/run/52553/detail", 200, runDetail52553(), http.Header{
+				"X-Total-Count": {"120"},
+				"X-Next-Offset": {"100"},
+			})
+
+			res := callTool(t, cs, "mlwh_run_detail", map[string]any{
+				"id_run": "52553",
+				"limit":  50,
+				"offset": 50,
+			})
+
+			obj := structuredObject(res)
+			run, ok := obj["run"].(map[string]any)
+			So(ok, ShouldBeTrue)
+			So(run["id_run"], ShouldEqual, float64(52553))
+
+			samples, ok := obj["samples"].([]any)
+			So(ok, ShouldBeTrue)
+			So(len(samples), ShouldEqual, 1)
+			So(obj["total"], ShouldEqual, 120)
+			So(obj["next_offset"], ShouldEqual, 100)
+
+			req, ok := stub.lastRequest()
+			So(ok, ShouldBeTrue)
+			So(req.Path, ShouldEqual, "/run/52553/detail")
+			So(req.Query.Get("limit"), ShouldEqual, "50")
+			So(req.Query.Get("offset"), ShouldEqual, "50")
+			So(req.Query.Get("lean"), ShouldEqual, "")
+		})
+
+		Convey("E1.3: mlwh_sample_detail input schema has no lean, limit, or offset properties", func() {
+			tool, ok := toolByName(t, cs, "mlwh_sample_detail")
+			So(ok, ShouldBeTrue)
+
+			schema, ok := tool.InputSchema.(map[string]any)
+			So(ok, ShouldBeTrue)
+			properties, ok := schema["properties"].(map[string]any)
+			So(ok, ShouldBeTrue)
+
+			for _, field := range []string{"lean", "limit", "offset"} {
+				_, found := properties[field]
+				So(found, ShouldBeFalse)
+			}
+		})
+
+		Convey("C1.4: the four detail tools are registered with the listed names", func() {
+			for _, name := range []string{
+				"mlwh_sample_detail",
+				"mlwh_study_detail",
+				"mlwh_run_detail",
+				"mlwh_library_detail",
+			} {
+				_, ok := toolByName(t, cs, name)
+				So(ok, ShouldBeTrue)
+			}
+		})
+	})
+}
+
+// sampleDetailS1 is a canned SampleDetail returned by the stub for
+// /sample/S1/detail. It carries a sample plus two lanes and one library so the
+// C1.1 assertion can prove the assembled aggregate (sample + lanes + libraries)
+// round-trips through wa's typed client and reaches StructuredContent intact.
+func sampleDetailS1() wa.SampleDetail {
+	return wa.SampleDetail{
+		Sample: wa.Sample{IDSampleTmp: 1, Name: "Mus musculus A", SupplierName: "supA"},
+		Lanes: []wa.Lane{
+			{IDRun: 100, Position: 1, TagIndex: 1},
+			{IDRun: 100, Position: 2, TagIndex: 2},
+		},
+		Libraries: []wa.Library{
+			{PipelineIDLims: "P1", IDStudyLims: "5901"},
+		},
+	}
+}
+
+// libraryDetailP1 is a canned LibraryDetail returned by the stub for
+// /library/P1/study/5901/detail, used by C1.2 to prove the two path params land
+// in the right order in the upstream request path.
+func libraryDetailP1() wa.LibraryDetail {
+	return wa.LibraryDetail{
+		Library: wa.Library{PipelineIDLims: "P1", IDStudyLims: "5901"},
+		Samples: []wa.Sample{{IDSampleTmp: 1, Name: "Mus musculus A"}},
+	}
 }
 
 // studyDetailS1Lean is the lean StudyDetail body returned by wa for

@@ -58,6 +58,122 @@ func (payloadProvider) Register(_ context.Context, r Registrar) error {
 	return nil
 }
 
+// TestResultSizeGuard exercises A2's public core behaviour through a real MCP
+// client: oversized typed tool results are replaced with a structured tool
+// error, while a disabled guard leaves the original result untouched.
+func TestResultSizeGuard(t *testing.T) {
+	Convey("Given a fake provider tool returning a ten-byte payload and a 20-byte guard", t, func() {
+		clientSession, cleanup := runServerWithClient(t, Options{
+			ServerVersion:          "0.1.0",
+			Providers:              []Provider{payloadProvider{}},
+			MaxToolResultBytes:     20,
+			ToolResultSizeGuidance: "use an overview, count, or smaller page",
+		})
+		defer cleanup()
+
+		res, err := clientSession.CallTool(context.Background(), &mcp.CallToolParams{
+			Name:      "test_payload",
+			Arguments: map[string]any{},
+		})
+		So(err, ShouldBeNil)
+
+		Convey("A2.1: the result is replaced with the structured size error", func() {
+			obj := sizeErrorObject(res)
+			So(obj["code"], ShouldEqual, "tool_result_too_large")
+			So(jsonNumber(obj["limit_bytes"]), ShouldEqual, float64(20))
+			So(jsonNumber(obj["actual_bytes"]), ShouldBeGreaterThan, float64(20))
+			So(obj["guidance"], ShouldEqual, "use an overview, count, or smaller page")
+		})
+
+		Convey("the text content contains the same JSON error object", func() {
+			So(len(res.Content), ShouldEqual, 1)
+
+			text, ok := res.Content[0].(*mcp.TextContent)
+			So(ok, ShouldBeTrue)
+
+			var textObj map[string]any
+			So(json.Unmarshal([]byte(text.Text), &textObj), ShouldBeNil)
+			So(textObj["code"], ShouldEqual, "tool_result_too_large")
+			So(jsonNumber(textObj["limit_bytes"]), ShouldEqual, float64(20))
+			So(textObj["guidance"], ShouldEqual, "use an overview, count, or smaller page")
+		})
+	})
+
+	Convey("Given the same fake provider tool and a disabled guard", t, func() {
+		clientSession, cleanup := runServerWithClient(t, Options{
+			ServerVersion:      "0.1.0",
+			Providers:          []Provider{payloadProvider{}},
+			MaxToolResultBytes: 0,
+		})
+		defer cleanup()
+
+		res, err := clientSession.CallTool(context.Background(), &mcp.CallToolParams{
+			Name:      "test_payload",
+			Arguments: map[string]any{},
+		})
+		So(err, ShouldBeNil)
+
+		Convey("A2.2: the original payload is returned successfully", func() {
+			So(res.IsError, ShouldBeFalse)
+
+			obj, ok := res.StructuredContent.(map[string]any)
+			So(ok, ShouldBeTrue)
+			So(obj["payload"], ShouldEqual, "1234567890")
+		})
+	})
+
+	Convey("B2.8/F3.4: Given an oversized typed result, the core guard preserves accurate configured continuation guidance", t, func() {
+		guidance := "Request a smaller limit; use Total and continue exports with NextCursor or offset plus returned Rows; " +
+			"continue semantic pages with next_offset and global runs with the last row id as the cursor."
+		clientSession, cleanup := runServerWithClient(t, Options{
+			ServerVersion:          "0.1.0",
+			Providers:              []Provider{exportMatrixProvider{}},
+			MaxToolResultBytes:     250,
+			ToolResultSizeGuidance: guidance,
+		})
+		defer cleanup()
+
+		res, err := clientSession.CallTool(context.Background(), &mcp.CallToolParams{
+			Name:      "test_export_matrix",
+			Arguments: map[string]any{},
+		})
+		So(err, ShouldBeNil)
+
+		obj := sizeErrorObject(res)
+		So(obj["code"], ShouldEqual, "tool_result_too_large")
+		So(obj["guidance"], ShouldEqual, guidance)
+		So(obj["guidance"], ShouldContainSubstring, "NextCursor")
+		So(obj["guidance"], ShouldContainSubstring, "next_offset")
+		So(obj["guidance"], ShouldContainSubstring, "last row id")
+		So(strings.ToLower(obj["guidance"].(string)), ShouldNotContainSubstring, "count_export")
+		So(strings.ToLower(obj["guidance"].(string)), ShouldNotContainSubstring, "count export")
+	})
+}
+
+func sizeErrorObject(res *mcp.CallToolResult) map[string]any {
+	So(res.IsError, ShouldBeTrue)
+
+	obj, ok := res.StructuredContent.(map[string]any)
+	So(ok, ShouldBeTrue)
+
+	return obj
+}
+
+func jsonNumber(value any) float64 {
+	switch n := value.(type) {
+	case float64:
+		return n
+	case int:
+		return float64(n)
+	case json.Number:
+		number, _ := n.Float64()
+
+		return number
+	default:
+		return -1
+	}
+}
+
 type exportMatrixProvider struct{}
 
 func (exportMatrixProvider) Name() string { return "export-matrix" }
@@ -203,120 +319,4 @@ func TestServerImplementationAndInstructions(t *testing.T) {
 			So(init.Instructions, ShouldContainSubstring, second.APIVersion())
 		})
 	})
-}
-
-// TestResultSizeGuard exercises A2's public core behaviour through a real MCP
-// client: oversized typed tool results are replaced with a structured tool
-// error, while a disabled guard leaves the original result untouched.
-func TestResultSizeGuard(t *testing.T) {
-	Convey("Given a fake provider tool returning a ten-byte payload and a 20-byte guard", t, func() {
-		clientSession, cleanup := runServerWithClient(t, Options{
-			ServerVersion:          "0.1.0",
-			Providers:              []Provider{payloadProvider{}},
-			MaxToolResultBytes:     20,
-			ToolResultSizeGuidance: "use an overview, count, or smaller page",
-		})
-		defer cleanup()
-
-		res, err := clientSession.CallTool(context.Background(), &mcp.CallToolParams{
-			Name:      "test_payload",
-			Arguments: map[string]any{},
-		})
-		So(err, ShouldBeNil)
-
-		Convey("A2.1: the result is replaced with the structured size error", func() {
-			obj := sizeErrorObject(res)
-			So(obj["code"], ShouldEqual, "tool_result_too_large")
-			So(jsonNumber(obj["limit_bytes"]), ShouldEqual, float64(20))
-			So(jsonNumber(obj["actual_bytes"]), ShouldBeGreaterThan, float64(20))
-			So(obj["guidance"], ShouldEqual, "use an overview, count, or smaller page")
-		})
-
-		Convey("the text content contains the same JSON error object", func() {
-			So(len(res.Content), ShouldEqual, 1)
-
-			text, ok := res.Content[0].(*mcp.TextContent)
-			So(ok, ShouldBeTrue)
-
-			var textObj map[string]any
-			So(json.Unmarshal([]byte(text.Text), &textObj), ShouldBeNil)
-			So(textObj["code"], ShouldEqual, "tool_result_too_large")
-			So(jsonNumber(textObj["limit_bytes"]), ShouldEqual, float64(20))
-			So(textObj["guidance"], ShouldEqual, "use an overview, count, or smaller page")
-		})
-	})
-
-	Convey("Given the same fake provider tool and a disabled guard", t, func() {
-		clientSession, cleanup := runServerWithClient(t, Options{
-			ServerVersion:      "0.1.0",
-			Providers:          []Provider{payloadProvider{}},
-			MaxToolResultBytes: 0,
-		})
-		defer cleanup()
-
-		res, err := clientSession.CallTool(context.Background(), &mcp.CallToolParams{
-			Name:      "test_payload",
-			Arguments: map[string]any{},
-		})
-		So(err, ShouldBeNil)
-
-		Convey("A2.2: the original payload is returned successfully", func() {
-			So(res.IsError, ShouldBeFalse)
-
-			obj, ok := res.StructuredContent.(map[string]any)
-			So(ok, ShouldBeTrue)
-			So(obj["payload"], ShouldEqual, "1234567890")
-		})
-	})
-
-	Convey("B2.8/F3.4: Given an oversized typed result, the core guard preserves accurate configured continuation guidance", t, func() {
-		guidance := "Request a smaller limit; use Total and continue exports with NextCursor or offset plus returned Rows; " +
-			"continue semantic pages with next_offset and global runs with the last row id as the cursor."
-		clientSession, cleanup := runServerWithClient(t, Options{
-			ServerVersion:          "0.1.0",
-			Providers:              []Provider{exportMatrixProvider{}},
-			MaxToolResultBytes:     250,
-			ToolResultSizeGuidance: guidance,
-		})
-		defer cleanup()
-
-		res, err := clientSession.CallTool(context.Background(), &mcp.CallToolParams{
-			Name:      "test_export_matrix",
-			Arguments: map[string]any{},
-		})
-		So(err, ShouldBeNil)
-
-		obj := sizeErrorObject(res)
-		So(obj["code"], ShouldEqual, "tool_result_too_large")
-		So(obj["guidance"], ShouldEqual, guidance)
-		So(obj["guidance"], ShouldContainSubstring, "NextCursor")
-		So(obj["guidance"], ShouldContainSubstring, "next_offset")
-		So(obj["guidance"], ShouldContainSubstring, "last row id")
-		So(strings.ToLower(obj["guidance"].(string)), ShouldNotContainSubstring, "count_export")
-		So(strings.ToLower(obj["guidance"].(string)), ShouldNotContainSubstring, "count export")
-	})
-}
-
-func sizeErrorObject(res *mcp.CallToolResult) map[string]any {
-	So(res.IsError, ShouldBeTrue)
-
-	obj, ok := res.StructuredContent.(map[string]any)
-	So(ok, ShouldBeTrue)
-
-	return obj
-}
-
-func jsonNumber(value any) float64 {
-	switch n := value.(type) {
-	case float64:
-		return n
-	case int:
-		return float64(n)
-	case json.Number:
-		number, _ := n.Float64()
-
-		return number
-	default:
-		return -1
-	}
 }

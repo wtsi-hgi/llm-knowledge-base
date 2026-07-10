@@ -55,6 +55,14 @@ func TestSearchToolsErrorMapping(t *testing.T) {
 	})
 }
 
+func threeStudies() []wa.Study {
+	return []wa.Study{
+		{IDStudyTmp: 10, Name: "Cancer One", StudyTitle: "A cancer study"},
+		{IDStudyTmp: 11, Name: "Cancer Two", StudyTitle: "Another cancer study"},
+		{IDStudyTmp: 12, Name: "Cancer Three", StudyTitle: "Yet another cancer study"},
+	}
+}
+
 // TestSearchSamplesTool covers Story A1 (mlwh_search_samples) and the
 // end-to-end half of Story F2 (F2.1). Every assertion drives the tool over the
 // real in-memory MCP client against the hermetic stub.
@@ -513,14 +521,6 @@ func TestSearchStudiesTool(t *testing.T) {
 			So(tool.Description, ShouldContainSubstring, "1000")
 		})
 	})
-}
-
-func threeStudies() []wa.Study {
-	return []wa.Study{
-		{IDStudyTmp: 10, Name: "Cancer One", StudyTitle: "A cancer study"},
-		{IDStudyTmp: 11, Name: "Cancer Two", StudyTitle: "Another cancer study"},
-		{IDStudyTmp: 12, Name: "Cancer Three", StudyTitle: "Yet another cancer study"},
-	}
 }
 
 func twoCancerStudies() []wa.Study {

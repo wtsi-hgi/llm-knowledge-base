@@ -141,6 +141,31 @@ func (in sampleSearchInput) hasExactFilter() bool {
 	return in.Organism != "" || in.LibraryType != "" || in.QC != "" || in.DeliverablesOnly
 }
 
+// addSearchSamples registers mlwh_search_samples. Free-text-only calls retain
+// the three-character guard and page helper. Optioned calls preserve the exact
+// query and page headers in one CallWithHeaders request.
+func (p *provider) addSearchSamples(r core.Registrar, outputSchema map[string]any) {
+	client := p.client
+
+	mcp.AddTool(r.Server(), &mcp.Tool{
+		Name:         "mlwh_search_samples",
+		Description:  searchSamplesDescription,
+		OutputSchema: outputSchema,
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in sampleSearchInput) (*mcp.CallToolResult, pagedSamplesResult, error) {
+		limit, offset, err := guardSampleSearch(in)
+		if err != nil {
+			return core.ToolError[pagedSamplesResult](err)
+		}
+
+		page, err := sampleSearchPage(ctx, client, in, limit, offset)
+		if err != nil {
+			return core.ToolError[pagedSamplesResult](mapToolError(err))
+		}
+
+		return nil, page, nil
+	})
+}
+
 func guardSampleSearch(in sampleSearchInput) (limit, offset int, err error) {
 	if !in.hasExactFilter() {
 		if err = guardTerm(in.Term); err != nil {
@@ -149,6 +174,16 @@ func guardSampleSearch(in sampleSearchInput) (limit, offset int, err error) {
 	}
 
 	return boundedPagination(in.Limit, in.Offset)
+}
+
+// guardTerm rejects a free-text-only search term shorter than the minimum
+// length before HTTP, with a message that names the minimum.
+func guardTerm(term string) error {
+	if len(term) < searchTermMinLength {
+		return fmt.Errorf("the search term %q is too short: a minimum of %d characters is required", term, searchTermMinLength)
+	}
+
+	return nil
 }
 
 func sampleSearchPage(
@@ -190,6 +225,29 @@ type sampleSearchCountInput struct {
 	DeliverablesOnly bool   `json:"deliverables_only,omitempty" jsonschema:"filter with the upstream deliverable discriminator, not is_spiked; PacBio and ONT pass through"`
 }
 
+// addCountSamples registers mlwh_count_samples with the same modes, exact
+// filters, and conditional short-term guard as mlwh_search_samples.
+func (p *provider) addCountSamples(r core.Registrar, outputSchema map[string]any) {
+	client := p.client
+
+	mcp.AddTool(r.Server(), &mcp.Tool{
+		Name:         "mlwh_count_samples",
+		Description:  countSamplesDescription + countFreshnessNote,
+		OutputSchema: outputSchema,
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in sampleSearchCountInput) (*mcp.CallToolResult, wa.Count, error) {
+		if err := guardSampleSearchCount(in); err != nil {
+			return core.ToolError[wa.Count](err)
+		}
+
+		count, err := countSampleSearch(ctx, client, in)
+		if err != nil {
+			return core.ToolError[wa.Count](mapToolError(err))
+		}
+
+		return nil, count, nil
+	})
+}
+
 func guardSampleSearchCount(in sampleSearchCountInput) error {
 	if in.Organism != "" || in.LibraryType != "" || in.QC != "" || in.DeliverablesOnly {
 		return nil
@@ -216,31 +274,6 @@ type searchInput struct {
 	Term   string `json:"term" jsonschema:"the search term; minimum 3 characters"`
 	Limit  int    `json:"limit,omitempty" jsonschema:"maximum rows to return; defaults to 100, maximum 1000 (a larger limit is rejected, not clamped)"`
 	Offset int    `json:"offset,omitempty" jsonschema:"number of leading rows to skip before returning results; defaults to 0"`
-}
-
-// addSearchSamples registers mlwh_search_samples. Free-text-only calls retain
-// the three-character guard and page helper. Optioned calls preserve the exact
-// query and page headers in one CallWithHeaders request.
-func (p *provider) addSearchSamples(r core.Registrar, outputSchema map[string]any) {
-	client := p.client
-
-	mcp.AddTool(r.Server(), &mcp.Tool{
-		Name:         "mlwh_search_samples",
-		Description:  searchSamplesDescription,
-		OutputSchema: outputSchema,
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in sampleSearchInput) (*mcp.CallToolResult, pagedSamplesResult, error) {
-		limit, offset, err := guardSampleSearch(in)
-		if err != nil {
-			return core.ToolError[pagedSamplesResult](err)
-		}
-
-		page, err := sampleSearchPage(ctx, client, in, limit, offset)
-		if err != nil {
-			return core.ToolError[pagedSamplesResult](mapToolError(err))
-		}
-
-		return nil, page, nil
-	})
 }
 
 // addSearchStudies registers mlwh_search_studies (Story A3/D1), mirroring
@@ -287,16 +320,6 @@ func guardSearch(in searchInput) (limit, offset int, err error) {
 	return boundedPagination(in.Limit, in.Offset)
 }
 
-// guardTerm rejects a free-text-only search term shorter than the minimum
-// length before HTTP, with a message that names the minimum.
-func guardTerm(term string) error {
-	if len(term) < searchTermMinLength {
-		return fmt.Errorf("the search term %q is too short: a minimum of %d characters is required", term, searchTermMinLength)
-	}
-
-	return nil
-}
-
 // registerSearchTools adds the sample/study search and count tools (Stories A1,
 // A2, A3, A4) to the server through the Registrar. Each tool's handler closes
 // over the provider's remote client; the typed slice tools pre-set their
@@ -334,29 +357,6 @@ func (p *provider) registerSearchTools(r core.Registrar) error {
 // termInput is the input for the term-only study search count.
 type termInput struct {
 	Term string `json:"term" jsonschema:"the search term; minimum 3 characters"`
-}
-
-// addCountSamples registers mlwh_count_samples with the same modes, exact
-// filters, and conditional short-term guard as mlwh_search_samples.
-func (p *provider) addCountSamples(r core.Registrar, outputSchema map[string]any) {
-	client := p.client
-
-	mcp.AddTool(r.Server(), &mcp.Tool{
-		Name:         "mlwh_count_samples",
-		Description:  countSamplesDescription + countFreshnessNote,
-		OutputSchema: outputSchema,
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in sampleSearchCountInput) (*mcp.CallToolResult, wa.Count, error) {
-		if err := guardSampleSearchCount(in); err != nil {
-			return core.ToolError[wa.Count](err)
-		}
-
-		count, err := countSampleSearch(ctx, client, in)
-		if err != nil {
-			return core.ToolError[wa.Count](mapToolError(err))
-		}
-
-		return nil, count, nil
-	})
 }
 
 // addCountStudiesSearch registers mlwh_count_studies_search (Story A4): it

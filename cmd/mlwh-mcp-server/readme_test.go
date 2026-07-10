@@ -204,6 +204,10 @@ func TestREADMEAPIEighteenDocs(t *testing.T) {
 	})
 }
 
+func singleSpaced(text string) string {
+	return strings.Join(strings.Fields(text), " ")
+}
+
 func readmeSection(readme, startHeading, endHeading string) string {
 	start := strings.Index(readme, startHeading)
 	if start == -1 {
@@ -216,10 +220,6 @@ func readmeSection(readme, startHeading, endHeading string) string {
 	}
 
 	return section
-}
-
-func singleSpaced(text string) string {
-	return strings.Join(strings.Fields(text), " ")
 }
 
 func missingREADMETerms(readme string, terms []string) []string {
