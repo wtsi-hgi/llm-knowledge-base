@@ -1,399 +1,623 @@
-# Feature: MLWH MCP tools for a fast generic column-selectable export, iRODS recency, correct default search, run + programme aggregation, a study→users inverse, and merged-CRAM attribution
+# Feature: complete MLWH MCP support for `wa` v0.8.0 / API 1.8.0
 
 ## Summary
 
-Wrap the third wave of upstream `wa` MLWH endpoints (API 1.8.0) as MCP tools, and fix
-the MCP surface so a set of common real-world questions become **one cheap, correct
-call** instead of a long manual fan-out that ends in a caveated guess or a silently
-incomplete answer. The target questions (from real agent transcripts that currently
-fail or answer wrongly):
+Set the dependency to `github.com/wtsi-hgi/wa` **v0.8.0** and expose its complete
+MLWH read surface through the MCP server. The package release and MLWH API use
+different version lines: `wa` v0.8.0 exports
+`mlwh.APIVersion == "1.8.0"`. Provider version metadata must therefore report
+MLWH API 1.8.0.
 
-- "Write a TSV of the cram iRODS files for study X with columns
-  `[supplier_sample_name, study_accession_number, sanger_sample_id, manual_qc,
-  irods_path]`, primary/target deliverables only." (today: no tool exposes
-  `manual_qc`, a deliverable filter, or column selection; the manifest is ~3 s for a big
-  study and silently drops merged CRAMs)
-- "Give me all samples that start with `hek_r`." (today: 55 results, not the 4 wanted)
-- "The Mus musculus samples." (today: no clean way to constrain a search to an organism)
-- "The most recently sequenced sample / latest iRODS data for study (or lab) X."
-  (today: `IRODSPath` has no `created`; recency is unanswerable from a listing)
-- "Runs per month by manufacturer and platform for the last 3 years." (today: no
-  global run tool at all)
-- "Break down PacBio sequencing by programme for the last year; which 5 studies? Then a
-  per-study table with programme, faculty sponsor, and the study owners/managers/
-  followers." (today: no platform/date-scoped grouped aggregate, `programme` is not a
-  grouping dimension and is absent from `mlwh_study_overview`, and the study↔person graph
-  runs person→studies only — there is no study→users tool)
-- "List every sample in study 7568 with sample name, EGA id, and an iRODS CRAM path."
-  (today: `mlwh_study_manifest --with-irods` silently returns an empty `irods_path` for
-  the 48 samples whose CRAM is a merged multi-lane composite object)
+The required API shape is:
 
-The upstream `wa` code is authoritative and already exposes the needed endpoints and
-header-aware client methods (API 1.8.0). This feature is the **downstream MCP work
-only**: wrap them, expose the new fields/params, add the generic export tool, fix the
-search tools' semantics, add run/programme aggregation, recency, the study→users
-inverse, and merged-CRAM attribution, and rewrite the workflow guidance so agents pick
-the cheap correct tool first and stop reaching for the generic escape hatch.
+- no manifest methods, types, endpoints, or MCP tools;
+- `GET /export/:children/:parent_kind/:parent_id` as the generic relationship
+  projection endpoint, including `products` of `study`;
+- no `/export/count` endpoint or `CountExport` method; a bounded
+  `ExportResult` carries `Total`, `Complete`, and, for keyset-backed relationships,
+  `NextCursor` in its body;
+- Export output as an ordered matrix, not a slice of arbitrary named objects:
+  `ExportResult{Columns, Rows, Total, NextCursor, Complete, Format}` where each row
+  is `[]string` aligned with `Columns`;
+- products exports bounded to 1000 rows by default, including products without
+  iRODS objects, and support keyset continuation. `file_type` changes only an
+  attached product `irods_path`; it does not remove product rows or change
+  `Total`;
+- literal-prefix sample search, optioned iRODS listings/counts, latest-data
+  pages/counts, global run listing/count and aggregates, programme enumeration,
+  study→users, per-study sample CRAMs, and runs-for-sample.
 
-Everything in this prompt is in scope to build. The `wa` code is the contract.
+The result must make the common real-world questions one cheap, correct MCP call:
 
-## Authority
+- export a chosen-column TSV/CSV/JSON-shaped table of a study's products or files,
+  including `manual_qc`, deliverability, iRODS paths, and merged-CRAM caveats;
+- list every selected CRAM for a study without silently losing merged multi-lane
+  objects;
+- search literal prefixes such as `hek_r` correctly, with optional organism,
+  library type, QC, and deliverability filters;
+- find the newest data added to iRODS for a study or faculty sponsor;
+- report runs per month and grouped sequencing by programme/platform/manufacturer;
+- list runs for a sample, studies in a programme, or users and roles for a study.
 
-Use the current `wa` Go code as the only contract for endpoint paths, query params,
-field names, descriptions, and semantics:
+Everything in this prompt is downstream MCP work. The `wa` v0.8.0 code is the
+contract; do not add or change upstream MLWH behavior.
 
-- `~/wa/mlwh/registry.go`: endpoint `Method`, `Path`, `Query`, `Summary`,
-  `Description`, `QueryParams`.
-- `~/wa/mlwh/types.go` (and `~/wa/mlwh/mlwh.go` for `Run`/`Library`): exact `json:`
-  field tags and output shapes.
-- `~/wa/mlwh/manifest.go`, `hierarchy.go`, `search.go`, `availability.go`,
-  `people.go`, `count.go`, `remote.go`, `server.go`: behaviour and typed client methods.
-- `~/wa/.docs/mcp/api-reference.md` and `wa.OpenAPIDocument()`: generated mirrors.
+## Authority And Version Baseline
 
-Do not use `~/wa/.docs/realworld*` prompt/spec/phase files as a contract; they can
-drift. Re-verify every field/param/description against `~/wa` before implementing.
-The MCP layer must source descriptions and output schemas from the upstream
-`Registry`/OpenAPI wherever the existing pattern supports it. Update the
-`github.com/wtsi-hgi/wa` dependency to the tag/commit that contains the API 1.8.0
-surface (the new generic export, recency, search default, run + programme aggregation,
-study→users, and merged-CRAM-aware methods and their header-aware client variants)
-before wrapping it.
+Use the checked-out `~/wa` code at tag `v0.8.0` as the only contract.
 
-## Upstream Surface (new/changed in this wave — verify names against `~/wa`)
+Authoritative files:
 
-All endpoints are `GET`. Bare list endpoints return a JSON array plus `X-Total-Count`
-and `X-Next-Offset`; typed client page variants expose those as `Page[T]`. Envelope
-tools (manifest/detail-style) keep their body shape and add top-level `total` /
-`next_offset`. **The exact paths/method names below are indicative — bind to whatever
-`~/wa/mlwh/registry.go` actually ships; do not invent names it does not have.**
+- `~/wa/mlwh/openapi.go`: `APIVersion == "1.8.0"` and generated schemas.
+- `~/wa/mlwh/registry.go`: exact endpoint `Method`, `Path`, path/query params,
+  descriptions, defaults, and response types.
+- `~/wa/mlwh/queryer.go`: complete typed query surface.
+- `~/wa/mlwh/remote.go`: exact `RemoteClient` methods, header-aware page helpers,
+  option propagation, and export streaming behavior.
+- `~/wa/mlwh/export.go`: export relationships, column vocabularies, defaults,
+  validation, filters, pagination, and rendering methods.
+- `~/wa/mlwh/types.go`, `count.go`, `runs_agg.go`: exact output shapes and option
+  types.
+- `~/wa/mlwh/server.go`: HTTP query parsing and export materialization.
+- `~/wa/mlwh/search.go`, `hierarchy.go`, `availability.go`, `people.go`: exact
+  behavior.
+- `~/wa/mlwh/*_test.go`: executable edge-case and parity contract.
+- `~/wa/.docs/mcp/api-reference.md`: generated human mirror of the Registry; useful
+  for review, but code remains authoritative.
 
-| Concern | Upstream (indicative) | Returns | Notes |
+Do not treat `~/wa/.docs/realworld*`, `~/wa/.docs/nomanifest`, or phase/spec prompt
+files as a contract. Implementation and tests must not query, sync, migrate, or
+write either real database.
+
+Update `go.mod`/`go.sum` to `github.com/wtsi-hgi/wa v0.8.0`. Provider version
+reporting must use the compiled `wa.APIVersion`, and therefore report
+MLWH API `1.8.0`.
+
+## Definition Of Complete MCP Support
+
+Complete support has two layers:
+
+1. **Registry parity:** every entry in `wa.Registry` remains callable through
+   `mlwh_call_endpoint`, and the endpoint catalogue/schema resources are generated
+   from the v0.8.0 Registry/OpenAPI. This covers lower-frequency endpoints that
+   do not need another curated tool.
+2. **Curated workflows:** every capability in the table below has a dedicated
+   typed tool, correct output schema, useful description, safe pagination, and
+   workflow routing. Agents must not need
+   `mlwh_call_endpoint` for the target questions in this prompt.
+
+Do not add one MCP tool per Registry entry merely to duplicate the generic escape
+hatch. Keep the existing consolidated tools (`mlwh_find_samples`, resolver tools,
+detail tools, etc.) where they already cover a family correctly.
+
+## Manifest Removal
+
+`wa` v0.8.0 has no manifest API. Remove all downstream manifest code:
+
+- remove `mlwh_study_manifest`;
+- remove `mlwh_count_study_manifest`;
+- remove `pagedStudyManifestResult`, manifest input types, schemas, registration,
+  tests, and workflow guidance;
+- remove references to `StudyManifest`, `PagedStudyManifest`, `ManifestRow`,
+  `StudyManifestPage`, and `CountStudyManifest` so the v0.8.0 dependency compiles;
+- ensure `mlwh_call_endpoint` and the endpoint catalogue do not advertise
+  manifest Registry methods.
+
+Use the product export for product-grained study rows:
+
+```text
+mlwh_export(
+  children="products",
+  parent_kind="study",
+  parent_id=<study>,
+  columns=[...],
+  file_type=<optional attachment suffix>,
+  deliverables_only=<optional product-row filter>,
+  limit=<bounded page>,
+  cursor=<continuation>
+)
+```
+
+Do not add `mlwh_count_export`. Read `Total` from the bounded export response. Use
+`mlwh_study_overview` or `mlwh_study_detail` for study metadata and
+`mlwh_freshness` for cache as-of state.
+
+## Curated Tool Matrix
+
+Names below are firm unless an existing repository convention makes a narrowly
+different name materially clearer. Registry method names and HTTP paths are firm.
+
+| Concern | `wa` Registry methods | MCP work |
+| --- | --- | --- |
+| Generic projection | `Export` → `/export/:children/:parent_kind/:parent_id` | add `mlwh_export`; no count tool |
+| Sample search | `SearchSamples`, `CountSampleSearch` | update `mlwh_search_samples` and `mlwh_count_samples` with `words`, `organism`, `library_type`, `qc`, `deliverables_only` |
+| iRODS lists/counts | `IRODSPathsFor{Sample,Study,Run}`, `CountIRODSPathsFor{Sample,Study,Run}` | update all six existing tools with the v0.8.0 options and fields |
+| Latest data | `LatestDataForStudy`, `CountLatestDataForStudy`, `LatestDataForFacultySponsor`, `CountLatestDataForFacultySponsor` | add four matching latest-data tools |
+| Sample→runs | `RunsForSample`, `CountRunsForSample` | add `mlwh_runs_for_sample`, `mlwh_count_runs_for_sample` |
+| Sample→studies count | `StudiesForSample`, `CountStudiesForSample` | retain `mlwh_studies_for_sample`; add `mlwh_count_studies_for_sample` |
+| Global runs | `RunListing`, `CountRunListing` | add `mlwh_runs`, `mlwh_count_runs` |
+| Monthly runs | `MonthlyRunCounts` | add `mlwh_monthly_run_counts` |
+| Grouped sequencing | `SequencingAggregate` | add `mlwh_sequencing_aggregate` |
+| Programme | `StudiesForProgramme`, `CountStudiesForProgramme`, `Programmes` | add `mlwh_studies_for_programme`, `mlwh_count_studies_for_programme`, `mlwh_programmes` |
+| Study→users | `StudyUsers`, `CountStudyUsers` | add `mlwh_study_users`, `mlwh_count_study_users` |
+| Per-sample CRAM | `SampleCRAMsForStudy`, `CountSampleCRAMsForStudy` | add `mlwh_sample_crams_for_study`, `mlwh_count_sample_crams_for_study` |
+| Study aggregate | `StudyOverview` | update `mlwh_study_overview` for `programme` |
+| Empty study status | `StatusBreakdown` | ensure `per_platform` is always `[]`, never `null` |
+| Added-data windows | `SamplesWithData`, `CountSamplesWithData` | retain `since`/`until` behavior and verify it against v0.8.0 |
+
+Every list with an upstream `Page[T]` helper keeps the repository's semantic
+wrapper (`samples`, `studies`, `irods_paths`, `users`, etc.) plus `total` and
+`next_offset`. Counts remain separate `{"count": N}` tools except for Export,
+whose total is in the response body.
+
+## `mlwh_export` Exact Contract
+
+### Input
+
+Map directly to `wa.ExportRelationship` and `wa.ExportOptions`:
+
+- `children` (required string);
+- `parent_kind` (required string);
+- `parent_id` (required string);
+- `columns` (optional ordered string array);
+- `file_type` (optional string);
+- `deliverables_only` (**optional pointer boolean**, not a plain boolean: omitted,
+  explicit `false`, and explicit `true` have different semantics);
+- `role` (optional comma-separated string);
+- `qc` (optional `pass|fail|pending`);
+- `library_type` (optional string);
+- `organism` (optional string);
+- `sort` (optional; `created-desc`/`created_desc`, iRODS only);
+- `since`, `until` (optional RFC3339 iRODS-created window; `until` requires
+  `since`);
+- `limit`, `offset` (optional non-negative integers);
+- `all` (optional boolean);
+- `cursor` (optional opaque string);
+- `format` (optional `tsv|csv|json`, default `tsv`).
+
+Use `wa.ExportRelationshipDescriptions()` and `wa.ExportColumnVocabularies()` to
+build descriptions/enums and keep the MCP input contract aligned with upstream.
+Do not maintain a second hand-written validation implementation.
+
+### Relationship Grammar And Columns
+
+The complete export grammar is:
+
+| `children` | allowed `parent_kind` | default columns | available columns |
 | --- | --- | --- | --- |
-| Generic column-selectable export | `Export`/extended list methods | rows w/ chosen columns | any parent→children relationship; `columns`, filters; keyset-paged; `/count` |
-| iRODS paths (+recency, +merged) | `IRODSPathsFor{Study,Sample,Run}` | `[]IRODSPath` (now incl. `created`, merged attribution) | `file_type`, `order_by=created_desc`, `since`/`until`; merged/composite CRAMs attributed to their sample |
-| Latest iRODS for study/sponsor | `LatestIRODSForStudy` / `…ForFacultySponsor` | rows sorted `created DESC` | one call for "most recent sample/data" |
-| Per-sample study CRAMs | `StudySampleCrams` | one row per sample: name, ega_id, irods_cram_path | merged-aware, de-duplicated (Q7) |
-| Search — default literal-prefix | `SearchSamples` (default) + `--words` mode | list + `total`/`next_offset` | literal whole-value prefix default; opt-in word-prefix; shared exact filters |
-| Runs per month / grouped | `RunsMonthlyCounts` / grouped aggregate | `[]{month, manufacturer, platform, count, date_basis, cache_synced_at}` | `since`/`until`; group by platform AND study attribute (programme/faculty_sponsor); `unit` |
-| Global run listing | `Runs` | `[]Run` | one row per run; paged; `/count` |
-| Studies by programme + enumeration | `StudiesForProgramme` / `Programmes` | `[]Study` / `[]{programme, count}` | exact indexed programme filter; vocabulary |
-| Study → users (inverse) | `UsersForStudy` | `[]{role, name, login, email}` | one indexed `id_study_tmp` lookup; role filter |
-| Study QC/status (fixed) | `StatusBreakdown` | `StatusBreakdown` | `per_platform` now always `[]`, never null; big studies now <1 s |
+| `products` | `study` | `name,supplier_name,accession_number,sanger_sample_id,id_run,lane,tag_index,manual_qc` | `name,supplier_name,accession_number,sanger_sample_id,id_run,lane,tag_index,manual_qc,irods_path,irods_unmatched,reason,id_study_lims,study_accession_number` |
+| `sample-crams` | `study` | `name,accession_number,irods_path,merged` | all file columns below |
+| `irods` (alias `files`) | `study`, `sample`, `run` | `supplier_name,sanger_sample_id,manual_qc,irods_path` | `supplier_name,sanger_sample_id,name,accession_number,study_accession_number,id_study_lims,manual_qc,id_run,lane,tag_index,platform,created,merged,deliverable,irods_path,id_product,id_sample_tmp,collection,data_object` |
+| `samples` | `study`, `run`, `library` | `name,sanger_sample_id,supplier_name,accession_number` | `id_sample_tmp,id_lims,id_sample_lims,uuid_sample_lims,name,sanger_sample_id,supplier_name,accession_number,donor_id,taxon_id,common_name,description` |
+| `runs` | `study`, `sample` | `id_run` | `id,native_id,id_run,platform,manufacturer,run_date,date_basis` |
+| `libraries` | `study` | `pipeline_id_lims,library_id,id_library_lims` | `pipeline_id_lims,id_study_lims,library_id,id_library_lims` |
+| `lanes` | `sample` | `id_run,lane,tag_index` | `id_run,lane,tag_index` |
+| `studies` | `sample`, `faculty-sponsor`, `user`, `programme` | `id_study_lims,name,accession_number` | `id_study_lims,name,accession_number,study_title,faculty_sponsor,programme,role` |
+| `users` | `study` | `role,name,login,email` | `role,name,login,email` |
 
-Also surface any new `/count` counterparts (export count, runs count,
-studies-for-programme count) as count tools, following the existing count-tool pattern.
+Column aliases accepted upstream: `supplier_sample_name` → `supplier_name` and
+`position` → `lane`. Do not add other aliases. Sample-CRAM columns use the
+canonical names `name`, `accession_number`, and `irods_path`.
 
-## Output Shapes (additions — confirm against `~/wa/mlwh/types.go`)
+Parent resolution is upstream behavior: study, sample, run, and library parents
+use their `wa` resolvers; faculty sponsor, user, and programme parent values use
+the corresponding upstream matching semantics. Pass the caller's identifier to
+`RemoteClient.Export`; do not resolve and fan out MCP-side.
 
-- **`IRODSPath`** gains **`created`** (RFC3339 UTC, omitempty when the source value is
-  null) and honest merged-object attribution: for a merged/composite CRAM, `name` /
-  `id_sample_tmp` are populated (sourced from the iRODS mirror's own denormalised
-  `id_sample_tmp`, not the single-lane product join), and the object is marked as merged
-  (e.g. a `merged` flag / the contributing run set) rather than reporting a single
-  misleading `id_run=0`. Existing fields otherwise unchanged (`id_product`, `collection`,
-  `data_object`, `irods_path`, `platform`).
-- **Export / manifest row** gains **`manual_qc`** (the upstream pass/fail/pending
-  roll-up, resolved for composite products too) and whatever target/deliverable
-  indicator `wa` exposes. The export tool returns the caller-selected columns as named
-  fields.
-- **`StudyManifest`** gains an envelope **`products_without_irods`** counter and per-row
-  **`irods_unmatched`**/`reason` (`merged_multilane`) when the product-grained join
-  cannot reach a product's merged CRAM (Q7), unless upstream instead resolves the merged
-  path directly.
-- **Per-sample study CRAMs row**: `sample_name`, `ega_id`, `irods_cram_path` — one per
-  sample, merged-aware.
-- **`StudyOverview`** gains **`programme`** (alongside `name`, `accession_number`,
-  `faculty_sponsor`, `data_access_group`).
-- **Study→users row**: `role`, `name`, `login`, `email`.
-- **Grouped run/sequencing count row**: `{month?, programme?, faculty_sponsor?,
-  manufacturer, platform, count, unit, date_basis, cache_synced_at}`.
-- **Run row / monthly count** per the upstream `Run` / monthly-count types.
-- **`StatusBreakdown.per_platform`** is always an array (`[]` for empty studies), never
-  null — the tool's output schema and the wrapper must accept and assert `[]`.
+### Output And Rendering
 
-## MCP Tools To Add Or Update
+Return the `wa.ExportResult` shape and OpenAPI schema:
 
-### Generic export (the flagship)
+- `Columns []string`: canonical selected columns in output order;
+- `Rows [][]string`: string values aligned positionally with `Columns`;
+- `Total int`: total matching rows for bounded calls; `-1` for a complete
+  streaming (`all=true`) result;
+- `NextCursor string`: continuation for an incomplete iRODS/products page;
+- `Complete bool`;
+- `Format string`.
 
-- **`mlwh_export`**: the default tool for "give me a table/TSV of the `<children>` of
-  `<entity>` with these columns". Params: `entity`/`children` selecting the relationship
-  (at least: iRODS/files of study|sample|run; samples of study|run|library; runs of
-  study|sample; libraries of study; lanes of sample; studies of sample|faculty-sponsor|
-  user|programme; users of study; sample-crams of study), the parent id, `columns`
-  (ordered selection over the relationship's documented vocabulary), the applicable
-  filters (`file_type` default `cram` on file listings, `deliverables_only` default true
-  on cram, `qc`, `organism`, `library_type`), recency (`order_by=created_desc`,
-  `since`/`until` on iRODS), and paging. It returns the selected columns as structured
-  rows; optionally accept a `format` to return pre-rendered TSV/CSV text for direct
-  saving. It MUST expose `manual_qc` and the deliverable filter and include merged CRAMs
-  (see below) — the whole point is that the agent does not reconstruct target/QC/merge
-  semantics itself. Bounded-by-default with `total`/`next_offset` and a
-  **`mlwh_count_export`** counterpart; document that the full set is retrieved by paging
-  the cursor, that assembling a file is the agent's job, and that the MCP result is
-  bounded by the size guard (see Hardening). This supersedes `mlwh_study_manifest` for
-  "table of a study's files with chosen columns"; the fixed-shape list tools
-  (`mlwh_irods_paths_for_*`, `mlwh_samples_for_study`, `mlwh_runs_for_study`, …) remain
-  for quick lookups without column selection.
+Do not represent rows as arbitrary named JSON objects. `format` is format metadata
+on the HTTP response;
+if MCP rendering is needed, use `ExportResult.RenderAs` rather than implementing
+CSV/TSV escaping locally. Do not duplicate both a large row matrix and rendered
+text in the default result.
 
-### iRODS recency and "latest data"
+`RemoteClient.Export(..., All: true)` returns a streaming result (`Rows == nil`,
+unexported row iterator). An MCP handler cannot serialize that iterator. Drain it
+through `ForEachRow`/`RenderAs` into an explicit MCP result before returning,
+honor context cancellation, and let the global MCP result-size guard reject an
+oversized result. Default workflows must page rather than set `all=true` for a
+large study.
 
-- Update **`mlwh_irods_paths_for_{study,sample,run}`** to expose the new `created`
-  field, accept `order_by=created_desc`, `since`, `until`, and carry the merged-object
-  attribution (see below). Descriptions must state `created` = "data added to iRODS" and
-  that recency ordering is available.
-- Add **`mlwh_latest_irods_for_study`** and **`mlwh_latest_irods_for_faculty_sponsor`**
-  (bind to the upstream latest endpoints): return the newest iRODS rows with `created`,
-  `irods_path`, sample `name`, `supplier_name`, study id/name, `id_run`, lane/tag,
-  platform — sorted newest-first, all ties at the max returned. These make "the most
-  recently sequenced sample for study/lab X" one call.
+### Pagination
 
-### Merged multi-lane CRAM attribution (Q7)
+- Default bounded export limit is **1000**, not the MCP list default of 100.
+- iRODS and products exports support opaque keyset `cursor` continuation and put
+  the next cursor in `NextCursor` when incomplete.
+- A created-desc iRODS export cannot use `cursor`; it uses bounded
+  `limit`/`offset` pages.
+- Samples, runs, libraries, lanes, studies, users, and sample-CRAM exports are
+  offset-backed. They reject `cursor`; when `Complete == false`, continue with
+  `offset + len(Rows)`.
+- `offset` without an explicit `limit` is rejected unless `all=true`.
+- `all=true` streams the complete set internally and reports `Total == -1`.
+- There is no export count method or count endpoint. Never route agents to a
+  nonexistent `mlwh_count_export`.
 
-- **`mlwh_irods_paths_for_{study,sample}`** and **`mlwh_export`** must attribute
-  merged/composite CRAMs to their sample: `name`/`id_sample_tmp` populated, never
-  `""`/`0`, and the merged nature surfaced honestly. State in the description that a
-  sample sequenced across several lanes has ONE merged CRAM (its own composite product
-  id) and that it is attributed via the sample↔iRODS linkage.
-- Add **`mlwh_study_sample_crams`**: one row per sample (`sample_name`, `ega_id`,
-  `irods_cram_path`), merged-aware and de-duplicated — the clean single call for
-  "every sample of study X with its iRODS CRAM path". For study 7568 it returns all 732
-  samples with a path, not 684.
-- Update **`mlwh_study_manifest`**: surface `products_without_irods` and per-row
-  `irods_unmatched`/`reason` (or the resolved merged path), and its description must name
-  merged multi-lane CRAMs as the common cause of an empty `irods_path`. The tool must not
-  present an empty `irods_path` as a plain data gap.
+### Product Export
 
-### Search — literal-prefix default, opt-in word-prefix, shared exact filters
+`children=products,parent_kind=study` has this contract:
 
-Align the sample search tools with the upstream (corrected) semantics — do NOT expose a
-"contains"/substring mode; it does not exist upstream:
+- row grain is one distinct `(id_run, position/lane, tag_index)` product;
+- products with no iRODS object remain in `Rows` and in `Total`;
+- requesting no iRODS-derived column avoids the iRODS attachment join;
+- requesting `irods_path`, `irods_unmatched`, or `reason` attaches at most one
+  matching object per product;
+- `file_type` filters only that attached path and never removes a product row or
+  changes `Total`;
+- `deliverables_only=true` filters product rows independently of attached iRODS,
+  using Illumina `iseq_flowcell.entity_type IN ('library','library_indexed')`;
+- `manual_qc` is the upstream product QC roll-up;
+- a known direct-product gap caused by a merged multi-lane CRAM is represented as
+  empty `irods_path`, `irods_unmatched=true`, `reason=merged_multilane`;
+- products pagination is keyset-backed and default-bounded to 1000 rows.
 
-- **Default = literal whole-value prefix.** `mlwh_search_samples("hek_r")` with no mode
-  returns **exactly** the 4 samples whose `name`/`supplier_name`/`common_name`/`donor_id`
-  literally starts with the term (`Hek_R1..4`), NOT the 55 the old word-prefix returned.
-- **Opt-in `mode=words`** preserves the separator-agnostic word-prefix behaviour (e.g.
-  `10X Automation HEK` matching `10X_Automation_HEK`); it is no longer the default and its
-  cross-field AND behaviour is not what a bare search does.
-- **No `contains`/substring/n-gram mode** — mid-word fragments like `usculus` match
-  **nothing** (say so in the description); do not offer or imply substring search.
-- **Shared exact filters** on `mlwh_search_samples` (and `mlwh_export`), each exempt from
-  the 3-char minimum, AND-combined: `organism` (WORD-MEMBERSHIP over the low-cardinality
-  `common_name` vocabulary — `organism="musculus"` matches every `common_name` containing
-  the whole word `musculus`, INCLUDING subspecies like `Mus musculus castaneus`;
-  `usculus` matches nothing; NOT exact-whole-value), `library_type` (exact
-  `pipeline_id_lims`), `qc pass|fail|pending` (per-sample roll-up on search, per-product
-  on the export — state the grain), `deliverables_only` (pass-through for PacBio/ONT).
-- Keep **`mlwh_find_samples`** / **`mlwh_count_find_samples`** as the exact-match path
-  for the `find/sample/*` fields, and route short controlled tokens (`gt`) there rather
-  than dead-ending on the 3-char free-text minimum. Exact single-identifier lookups stay
-  the resolve/`info` path — do not add an `exact` search mode.
+Export does not repeat study name/sponsor and does not carry
+`products_without_irods` or `cache_synced_at`. Do not add those fields. Use
+row-level `irods_unmatched`/`reason`, `Total`, `mlwh_study_overview`, and
+`mlwh_freshness` for those concerns.
 
-### Run and programme aggregation (Q5, Q6)
+### Shared Export Filters
 
-- **`mlwh_runs_monthly`**: wrap the monthly grouped-count endpoint; params
-  `since`/`until` and optional platform filter; returns `{month, manufacturer,
-  platform, count, date_basis, cache_synced_at}` rows. Default for "runs per month".
-- **`mlwh_runs`** (+ **`mlwh_count_runs`**): the global run listing for drill-down
-  (one row per run: composite `<platform>:<native_id>` id, native id, platform,
-  manufacturer, run date + `date_basis`), bounded and paged.
-- **`mlwh_sequencing_counts`** (the generalised grouped aggregate): params `group_by`
-  (combinable over `programme`, `faculty_sponsor`, `platform`, `manufacturer`, `month`),
-  optional `platform` filter, `since`/`until`, and `unit` (`runs` | `samples`/`products`).
-  Returns per-group counts, each row stating `unit` and `date_basis`. This answers
-  "PacBio sequencing by programme for the last year" in one call. Describe the
-  multi-study run-attribution rule verbatim from upstream.
+The `qc`, `library_type`, `organism`, and `deliverables_only` family is backed only
+for iRODS/files, samples, sample-CRAMs, and products. Passing one to runs,
+libraries, lanes, studies, or users must preserve upstream's actionable
+unsupported error; do not silently ignore it.
 
-### Programme as a dimension (Q6)
+- `file_type`: filename suffix, case-insensitive, one leading dot stripped;
+  empty/whitespace or `%`, `_`, `/` is a 400; valid unmatched suffix is an empty
+  file result. For file/sample-CRAM exports omission defaults to CRAM. For
+  products omission means any attached file type.
+- `deliverables_only`: nil uses the relationship default. CRAM iRODS/files and
+  sample-CRAM exports default true. Explicit false includes controls/sub-products.
+  Product exports default unfiltered; explicit true changes the product row set.
+  The discriminator approximates iRODS `target=1`, is not `is_spiked`, and is
+  pass-through where PacBio/ONT have no discriminator.
+- `qc`: `pass|fail|pending`; export is product-grained/raw product QC. This is
+  intentionally different from sample search's per-sample roll-up.
+- `library_type`: exact `library_samples.pipeline_id_lims` match.
+- `organism`: whole-word membership resolved over `common_name`; it includes
+  matching subspecies and never becomes a mid-word substring.
+- `sort`, `since`, `until`: iRODS exports only, over iRODS `created` (data added),
+  with `[since, until)` semantics and `until` requiring `since`.
+- `role`: users-of-study omits to all roles; studies-of-user omits to the default
+  `owner,manager,data_access_contact` set. Preserve that directional difference.
 
-- Add **`mlwh_studies_for_programme`** (+ **`mlwh_count_studies_for_programme`**): the
-  exact, indexed "studies in programme X" list (NOT the `mlwh_search_studies` conflation
-  of name/title/programme/sponsor) — answers "which 5 studies".
-- Add **`mlwh_programmes`**: the distinct `programme` vocabulary with study counts.
-- Update **`mlwh_study_overview`** to carry **`programme`**, so a per-study pass can group
-  by programme without a second `mlwh_resolve_study`/`mlwh_study_detail` call.
+## Search Contract
 
-### Study → users inverse (Q6)
+Update `mlwh_search_samples` and `mlwh_count_samples` to accept the exact upstream
+`wa.SampleSearchOptions` fields. Use `words` as the public boolean; do not expose
+a `mode` parameter.
 
-- Add **`mlwh_study_users`** (bind to `/study/:id/users`): given a study, list its role
-  members — `role`, `name`, `login`, `email` — with an optional `role` filter over the
-  stored vocabulary (`owner`, `manager`, `data_access_contact`, `follower`, `slf_manager`,
-  `lab_manager`, `administrator`). This is the inverse of `mlwh_studies_for_user` and
-  closes the direction gap (owners/managers/followers per study in one call). The
-  description must keep the distinction that `faculty_sponsor` is a `Study` field, NOT a
-  `study_users` role.
+- Default free-text behavior is a case-insensitive literal whole-value prefix
+  over `name`, `supplier_name`, `common_name`, and `donor_id`.
+- `words=true` opts into separator-agnostic word-prefix behavior over those same
+  fields. It is not the default.
+- There is no contains/substring/n-gram mode. A mid-word fragment such as
+  `usculus` must not be described as supported.
+- `organism`, `library_type`, `qc`, and `deliverables_only` AND-combine with the
+  term. The exact filters are exempt from the free-text three-character minimum;
+  the MCP guard must not reject a short term when a valid exact filter makes the
+  upstream request legal.
+- `organism` is whole-word common-name membership, including subspecies;
+  `library_type` is exact; `qc` uses the authoritative per-sample
+  fail>pending>pass roll-up; deliverability uses the upstream discriminator and
+  PacBio/ONT pass-through.
+- The matching count tool must forward the same options. Preserve the upstream
+  caveat that very common sample-search counts are exact up to the configured
+  bound and become a floor at the bound.
+- Keep `mlwh_find_samples` / `mlwh_count_find_samples` for exact controlled-field
+  matches and resolver tools for exact identifiers.
 
-## Query Semantics
+For an optioned page, `RemoteClient` provides `SearchSamplesWithOptions` but no
+`SearchSamplesWithOptionsPage`. Use
+`CallWithHeaders("SearchSamples", ...)` (or an equivalently single-request,
+Registry-driven helper) to preserve `X-Total-Count` and `X-Next-Offset`; do not
+drop page metadata or issue a per-row fan-out.
 
-- `file_type`: unchanged filename-suffix filter (case-insensitive, one leading dot
-  stripped); empty/`%`/`_`/`/` are upstream 400s → actionable MCP errors; a valid but
-  unmatched suffix is an empty result / count 0.
-- `deliverables_only`: boolean, default true on the cram export; when true, controls/
-  spikes and non-primary sub-products are excluded per the upstream `entity_type`
-  definition; **pass-through for PacBio/ONT** (no discriminator → their samples are never
-  dropped). State in the description that this approximates the iRODS `target=1` AVU and
-  what it excludes — do not describe it as a plain column.
-- `qc` filter and the `manual_qc` column: `manual_qc` is `iseq_product_metrics.qc`
-  rolled up to pass/fail/pending (fail > pending > pass; not-tracked when no product),
-  resolved for composite products too. The column and the filter are independent, and
-  the filter grain differs (per-sample roll-up on search, per-product on the export).
-- `organism`/`library_type`: exact filters over low-cardinality vocabularies; `organism`
-  is whole-word membership over `common_name` (incl. subspecies), never mid-word substring.
-- `order_by=created_desc`, `since`, `until`: recency over iRODS `created`, half-open
-  `[since, until)`; `until` without `since` and malformed timestamps map to actionable
-  errors.
-- search: default literal whole-value prefix; `mode=words` is the opt-in word-prefix;
-  no contains/substring; the 3-char minimum applies only to the free-text prefix/`words`
-  paths, not the exact filters.
-- run/sequencing aggregation `since`/`until` window, per-platform `date_basis`, `unit`,
-  and the multi-study run-attribution rule are surfaced from upstream verbatim; present
-  `date_basis`, `unit`, and `cache_synced_at` as caveats.
-- study→users `role`: optional filter over the stored role vocabulary; default returns
-  all roles present (state the default).
+Acceptance example: a default search for `hek_r` returns the four literal-prefix
+samples, while `words=true` retains the broader word-prefix behavior.
 
-## Time And Freshness
+## iRODS And Latest-Data Contract
 
-Never conflate: (1) **data added to iRODS** = `created` — the only basis for "latest",
-recency ordering, `since`/`until`, `newest_data_added`; (2) **`last_changed`** = the
-warehouse row-change / sync key — never presented as "new data"; (3) **`cache_synced_at`
-/ freshness** = completeness caveat. `cache_synced_at` is present on aggregate/manifest
-responses; it is absent on bare lists and counts — use `mlwh_freshness` for the as-of
-caveat there, including for the new export, recency, run/programme aggregation,
-study→users, and sample-crams tools where the response has no `cache_synced_at`.
-Run/sequencing counts carry a per-platform `date_basis` (Illumina/Element `run complete`,
-Ultima `run archived`, PacBio `run_complete`, ONT the labelled warehouse-load fallback);
-never present the ONT bucket's month as a true sequencing month.
+### iRODS Lists And Counts
+
+All three iRODS list tools and all three count tools accept:
+
+- `file_type`;
+- `deliverables_only`;
+- `since` and `until` over `created`;
+- list tools additionally accept `order_by=created_desc`;
+- list tools keep bounded `limit`/`offset` and return page metadata.
+
+The exact `IRODSPath` fields are:
+
+`id_product`, `collection`, `data_object`, `irods_path`, `id_sample_tmp`, `name`,
+`supplier_name`, `sanger_sample_id`, `accession_number`, `id_study_lims`,
+`study_accession_number`, `created`, `id_run`, `lane`, `tag_index`, `platform`,
+`merged`, `manual_qc`, and nullable `deliverable`.
+
+`created` means data added to iRODS, UTC RFC3339. `merged=true` marks a composite
+object; public `id_run`, `lane`, and `tag_index` are all zero because there is no
+single product coordinate, while sample/study attribution remains populated.
+`deliverable` is tri-state: true/false where a discriminator exists and null for
+PacBio/ONT/no discriminator.
+
+`RemoteClient` has optioned list methods but no optioned `Page` variants. Use
+`CallWithHeaders` for optioned list tools so the exact filtered
+request still returns `total` and `next_offset`. Count tools use the corresponding
+`CountIRODSPathsFor*WithOptions` methods. Do not call a file-type-only Page helper
+and accidentally drop deliverability, order, or date-window options.
+
+### Latest Data
+
+Add list and count tools for both latest-data families:
+
+- study: `LatestDataForStudy` / `CountLatestDataForStudy`;
+- faculty sponsor: `LatestDataForFacultySponsor` /
+  `CountLatestDataForFacultySponsor`.
+
+Lists return `RecentDataRow` pages newest-first with `created`, `irods_path`,
+`id_study_lims`, `study_name`, sample `name`, `supplier_name`, `id_run`, `lane`,
+`tag_index`, `platform`, and `merged`. They accept `file_type`, default to 10
+rows, allow at most 1000, and use offset pagination with upstream header totals.
+They are bounded pages, **not** "all ties at MAX(created)". Faculty sponsor is a
+substring match on the `Study.faculty_sponsor` field, not a study-users role.
+
+## Runs And Sequencing Aggregates
+
+### Runs For Sample
+
+Wrap `RunsForSamplePage` and `CountRunsForSample` with the normal semantic list
+wrapper and `total`/`next_offset`.
+
+Also add `mlwh_count_studies_for_sample` as the `CountStudiesForSample`
+counterpart to `mlwh_studies_for_sample`.
+
+### Global Run Listing
+
+`mlwh_runs` wraps `RunListing` with `since`, `until`, repeatable/array `platform`,
+`limit`, and `cursor`. A `RunListingRow` contains `id`, `platform`, `native_id`,
+`manufacturer`, `run_date`, `date_basis`, and `cache_synced_at`.
+
+The stable `id` is `<platform>:<native_id>` and is the keyset cursor. The HTTP
+response is a bare list and has no `Page[T]` headers; do not invent
+`next_offset`. Document that the next request uses the last returned row's `id`
+as `cursor`. `mlwh_count_runs` wraps `CountRunListing` with the same date/platform
+filters.
+
+### Monthly Counts
+
+`mlwh_monthly_run_counts` wraps `MonthlyRunCounts` with optional `since`, `until`,
+and platform array. Rows are `{month, manufacturer, platform, count, date_basis,
+cache_synced_at}`.
+
+Run grain is one native run identifier: Illumina/Elembio/Ultimagen distinct
+`id_run`, PacBio distinct `pac_bio_run_name`, ONT distinct `experiment_name`.
+Date basis must remain visible: Illumina/Elembio run complete, Ultimagen run
+archived, PacBio `run_complete`, ONT warehouse load time (not a true sequencing
+date).
+
+### General Aggregate
+
+`mlwh_sequencing_aggregate` wraps `SequencingAggregate`. Inputs:
+
+- required `group_by` array over `month`, `platform`, `manufacturer`, `programme`,
+  `faculty_sponsor`;
+- required `unit` = `runs|samples|products`;
+- optional `since`, `until`, and platform array.
+
+Rows are `SequencingAggregateRow{group, unit, count, date_basis,
+cache_synced_at}`. `group` contains only requested keys. For `unit=runs`, dates
+use the per-platform run basis and a run spanning multiple requested study groups
+counts once in each group it touches. For samples/products, dates use iRODS
+`created`, and each data row is attributed through its one study programme/sponsor.
+Do not reconstruct this aggregate from lists in MCP.
+
+## Programme, Study Users, And Sample CRAMs
+
+- `mlwh_studies_for_programme`: exact programme match, bounded page of `Study`;
+  `mlwh_count_studies_for_programme` is its exact count counterpart.
+- `mlwh_programmes`: unpaged distinct non-empty programme vocabulary as
+  `{name, study_count}` rows.
+- `mlwh_study_overview`: expose the additive `programme` field.
+- `mlwh_study_users`: page of `{role,name,login,email}`. Omitted role means all
+  roles present. Optional role is a comma-separated exact case-insensitive set
+  over `owner`, `manager`, `data_access_contact`, `follower`, `slf_manager`,
+  `lab_manager`, `administrator`. `mlwh_count_study_users` must use the same
+  filter. This differs from person→studies, whose omitted role uses only owner,
+  manager, and data-access contact.
+- `mlwh_sample_crams_for_study`: one selected CRAM per sample as
+  `{name,accession_number,irods_path,merged}`, preferring a merged composite when
+  present. Add the matching count tool and use canonical upstream field names.
+  Do not infer sample-level CRAM absence from an empty product-level iRODS
+  attachment.
+
+## Time, Freshness, And Result Shapes
+
+Never conflate:
+
+1. `created` / `newest_data_added`: data added to iRODS and the basis for latest
+   data and iRODS windows;
+2. `last_changed`/`last_updated`: source row mutation, not new data;
+3. `cache_synced_at` and `/freshness`: cache completeness/as-of state.
+
+Monthly/aggregate rows carry `cache_synced_at`. Export, bare iRODS lists, latest
+data, programmes, study users, and sample-CRAM responses do not; their tool
+descriptions must direct callers to `mlwh_freshness`. Counts likewise have no
+freshness timestamp.
+
+Use upstream OpenAPI components for output schemas. Preserve semantic wrappers
+for MCP list results rather than returning a root array. Assert
+`StatusBreakdown.per_platform` is an empty array for an empty study, never null.
 
 ## MCP Hardening
 
-- Keep the generic response-size guard (`MLWH_MAX_TOOL_RESULT_BYTES`, default 1 MiB;
-  `IsError=true` with a structured actionable error over budget). The export can be very
-  large (a big study is 100k+ product×irods rows); the tool MUST be bounded-by-default
-  and paged, and its over-budget error must point the caller to `mlwh_count_export` + the
-  page cursor, not to fetch-all. Do NOT let the export tool try to return a whole study
-  inline.
-- Bounded paged fan-out defaults (`limit=100`, max `1000`) with `total`/`next_offset`
-  from upstream header-aware results for the exact filtered request; use keyset/offset
-  as upstream exposes it.
-- Do not implement aggregates or the target/QC/recency/programme/merge semantics
-  MCP-side by fetching lists and post-processing. Use the upstream endpoints; the
-  semantics live in `wa`.
-- The generic `mlwh_call_endpoint` remains a fallback only. It must NOT be the
-  recommended way to answer any of the target questions; the workflow guidance must steer
-  agents to the curated tools instead (see below).
+- Keep `MLWH_MAX_TOOL_RESULT_BYTES` / `--mlwh-max-tool-result-bytes` and the
+  default 1 MiB guard.
+- Update size-error guidance for Export to use a smaller `limit`, `Total`, and
+  `NextCursor`/offset continuation. Never mention `mlwh_count_export`.
+- Keep normal MCP page defaults at 100/max 1000 where the curated list already
+  owns pagination. Export is the exception: preserve upstream's bounded default
+  of 1000 unless a deliberate smaller MCP default is documented and tested; do
+  not turn omission into an unbounded call.
+- Preserve explicit `deliverables_only=false` on Export by using a pointer bool.
+- Never implement target/QC/organism/recency/merged/programme/run aggregation in
+  MCP by fetching and joining rows. Call the upstream endpoint.
+- Map upstream bad request, not found, ambiguity, unsupported identifier,
+  impaired upstream, and never-synced errors through the existing structured
+  tool-error path.
+- `all=true` remains opt-in and subject to the result-size guard; workflow text
+  must recommend paging for large results.
+- Keep all tests hermetic with `httptest.Server`; no real source or mirror DB and
+  no live `wa mlwh` server are needed.
 
 ## Workflow Guidance
 
-Rewrite `mlwh://workflow` so agents choose the cheap correct tool first, and add
-explicit routing for the previously-failing shapes:
+Rewrite `mlwh://workflow` so agents route as follows:
 
-- **"Table/TSV of files (or any children) with columns X":** use `mlwh_export` with the
-  requested `columns` (incl. `manual_qc`), `file_type=cram`, `deliverables_only=true`;
-  count first with `mlwh_count_export` if it may be large; page the cursor to assemble
-  the full file. Do NOT hand-write SQL via `mlwh_call_endpoint`, and do NOT page raw
-  iRODS lists and try to join in QC/target yourself.
-- **"Every sample of a study with its CRAM path":** use `mlwh_study_sample_crams` (one
-  merged-aware row per sample). Do NOT use `mlwh_study_manifest --with-irods` and treat
-  an empty `irods_path` as "no data" — that misses merged multi-lane CRAMs (48 of 732 in
-  study 7568); the manifest now flags them via `products_without_irods`.
-- **"Starts with" / short exact token:** use the default (literal-prefix) sample search,
-  or `mlwh_find_samples` for exact controlled fields. `mode=words` is a distinct opt-in;
-  do not use it for "starts with". There is no "contains"/substring search.
-- **"The <organism> samples" / narrow by organism/library-type/qc/deliverable:** pass the
-  `organism`/`library_type`/`qc`/`deliverables_only` filters on `mlwh_search_samples` or
-  `mlwh_export`. `organism` is whole-word membership over `common_name`.
-- **"Most recent sample / latest data for study or lab":** use
-  `mlwh_latest_irods_for_study` / `…_for_faculty_sponsor`, or an iRODS list with
-  `order_by=created_desc`. Do NOT infer recency from `study_overview` alone or from list
-  ordering (which is by product id).
-- **"Runs per month / by platform / by manufacturer":** use `mlwh_runs_monthly`; use
-  `mlwh_runs` for per-run drill-down. Do NOT fan out over studies.
-- **"Sequencing by programme (± platform, date)":** use `mlwh_sequencing_counts` with
-  `group_by=programme` (+ optional `platform`, `since`/`until`, `unit`). For "which
-  studies in programme X" use `mlwh_studies_for_programme`; discover the vocabulary with
-  `mlwh_programmes`; read `programme` per study from `mlwh_study_overview`. Do NOT fan out
-  two calls per study over 8,223 studies.
-- **"A study's owners / managers / followers":** use `mlwh_study_users` (study→people).
-  Do NOT try to invert `mlwh_studies_for_user` by guessing candidate people.
-- **Recency wording:** always describe `created`-based results as data "added to
-  iRODS", with the `cache_synced_at`/freshness caveat.
+- **Chosen-column table of study products, including products with no file:**
+  `mlwh_export(children=products,parent_kind=study,...)`. Use `Total` and cursor
+  pages. `file_type` only narrows an attached path.
+- **Chosen-column table of actual files:**
+  `mlwh_export(children=irods,parent_kind=study|sample|run,...)`; CRAM and
+  deliverables-only are the default for omitted file options.
+- **Every sample in a study with one CRAM:**
+  `mlwh_sample_crams_for_study`; this is merged-aware and one row per selected
+  sample CRAM.
+- **Literal "starts with":** `mlwh_search_samples` with default options.
+  Use `words=true` only for separator-agnostic word-prefix intent. There is no
+  substring mode.
+- **Organism/library/QC/deliverability constrained samples:** pass exact filters
+  to sample search or a supported export relationship.
+- **Newest data added:** latest-data study/faculty-sponsor tools or optioned iRODS
+  `order_by=created_desc`; always say "added to iRODS".
+- **Runs for a sample:** `mlwh_runs_for_sample`.
+- **Runs per month:** `mlwh_monthly_run_counts`; use `mlwh_runs` for global
+  keyset-paged drill-down and `mlwh_count_runs` for sizing.
+- **Sequencing by programme/sponsor/platform/manufacturer/month:**
+  `mlwh_sequencing_aggregate`; do not fan out over studies.
+- **Studies in a programme:** `mlwh_studies_for_programme`; discover exact values
+  with `mlwh_programmes`.
+- **Study owners/managers/followers:** `mlwh_study_users`; faculty sponsor is a
+  separate Study field.
+- **Generic fallback:** `mlwh_call_endpoint` only when no curated workflow covers
+  the question. It must advertise the v0.8.0 Registry and no manifest entry.
 
 ## Hard Requirements
 
-1. One cheap call for the target shapes: a column-selected cram export with `manual_qc` +
-   deliverable filter + merged CRAMs (bounded page, `total`, `/count`); a "starts with" /
-   organism-narrowed search that returns the right rows; a "latest data" answer; a
-   runs-per-month and a sequencing-by-programme aggregate; a studies-in-programme list; a
-   study→users listing; a per-sample cram list. No per-sample or per-study fan-out for
-   any of these.
-2. Correct semantics surfaced, not reconstructed: `manual_qc`, deliverable/target,
-   `created` recency, run `date_basis`, literal-prefix-vs-words, the exact filters,
-   `programme` grouping, study→users direction, and merged-CRAM attribution all come from
-   the upstream endpoints and their descriptions, exposed faithfully. The agent is never
-   expected to write SQL to get these right.
-3. `IRODSPath.created`, the recency params, and merged-object attribution are surfaced on
-   every iRODS list tool and the export; `manual_qc`, the deliverable filter, and
-   column selection are surfaced on the export; `programme` is surfaced on
-   `mlwh_study_overview`.
-4. Bounded-by-default lists with count counterparts and sizing hints
-   (`total`/`next_offset`), sourced from upstream header-aware `wa` client results.
-   The export never returns an unbounded payload; the size guard covers it.
-5. Correct timestamp wording ("added to iRODS" = `created`), correct `date_basis`/`unit`
-   labels on aggregates (incl. the ONT warehouse-load caveat), and clear freshness
-   caveats from `cache_synced_at` / `mlwh_freshness`.
-6. No silently dropped rows: merged/composite CRAMs are attributed and returned by the
-   study/sample iRODS tools, the export, and `mlwh_study_sample_crams`; the manifest makes
-   any shortfall explicit. Study 7568 sample-crams = 732 populated rows.
-7. `StatusBreakdown.per_platform` empty-study handling: the tool accepts and returns
-   `[]` (never null); add a regression test with an empty study stub.
-8. Consistent actionable errors for upstream 400s / not-found / ambiguity /
-   unsupported identifiers / impaired-or-never-synced cache, for all new tools.
-9. Hermetic tests only: extend `internal/mlwh/harness_test.go` with stubbed MLWH
-   responses. Assert tool registration, request path/query (incl. `columns`, relationship
-   selection, `deliverables_only`, `qc`, `organism`, `library_type`, `order_by`,
-   `since`/`until`, search default vs `mode=words`, `group_by`/`unit`, `role`), returned
-   shape (incl. `created`, `manual_qc`, `programme`, merged attribution,
-   `products_without_irods`, study→users rows), `cache_synced_at` presence/absence,
-   paging hints, error mapping, and over-budget guard behaviour for the export tool.
+1. Build against `github.com/wtsi-hgi/wa v0.8.0`; report MLWH API `1.8.0` from
+   `wa.APIVersion`.
+2. Remove both manifest MCP tools and every reference to manifest methods/types.
+3. Add one `mlwh_export` tool matching the complete relationship grammar,
+   columns, filters, tri-state deliverability, formats, `all`, and pagination.
+4. Do not add `mlwh_count_export`; bounded Export `Total` is the sizing contract.
+5. Product export preserves product grain and products without iRODS, with
+   row-level `irods_unmatched/reason` and correct file-type/deliverability
+   semantics.
+6. Every method in the curated tool matrix is directly usable via
+   a typed MCP tool with the exact upstream options and output fields.
+7. Optioned sample-search and iRODS list pages preserve upstream sizing headers in
+   one request; no missing `total`/`next_offset` and no list+per-row fan-out.
+8. Registry/OpenAPI/catalogue parity covers the complete v0.8.0 Registry, with
+   Export present and manifest absent.
+9. Correct wording and caveats for iRODS `created`, run `date_basis`, aggregate
+   `unit`, merged composites, role defaults, and cache freshness.
+10. Bounded defaults, context cancellation, size guard, and actionable errors work
+    for Export and every new list/count tool.
+11. All tests are hermetic and assert exact path/query propagation, response
+    shapes, pagination metadata, descriptions, workflow routing, errors, and size
+    behavior.
+
+## Required Acceptance Coverage
+
+Extend the shared MLWH `httptest` harness and add behavior-focused tests for:
+
+- dependency/provider version: `wa.APIVersion == "1.8.0"` and server version
+  metadata reports it;
+- manifest tools are absent; `StudyManifest`/`CountStudyManifest` are absent from
+  the endpoint catalogue;
+- `mlwh_export` registration and schema, including generated relationship/column
+  vocabularies and optional pointer `deliverables_only`;
+- table-driven request propagation for every export relationship and every export
+  option;
+- exact `ExportResult` matrix shape, canonical columns, `Total`, `Complete`,
+  `NextCursor`, and `Format`;
+- products default 1000 bounded page, cursor continuation, products without iRODS,
+  `file_type` attachment-only behavior, deliverables product filtering,
+  `manual_qc`, and merged gap reason;
+- offset-backed export continuation and rejection of cursor on unsupported
+  relationships;
+- created-desc iRODS export rejecting cursor; `all=true` materialization,
+  cancellation, and over-budget MCP error;
+- sample search default vs `words=true`, exact filters, short filtered term,
+  optioned count parity, and header-aware page metadata;
+- all iRODS list/count options and every additive `IRODSPath` field, including
+  nullable `deliverable` and merged zero coordinates;
+- latest-data study/sponsor list and count paths, default/newest-first page
+  behavior, and `file_type`;
+- runs-for-sample list/count, studies-for-sample count, global run
+  cursor/filter/count, monthly counts, and sequencing aggregate
+  `group_by`/`unit`/platform/date options;
+- programme list/count/vocabulary and `StudyOverview.programme`;
+- study-users all-role default vs explicit role set and matching count;
+- sample-CRAM canonical shape, merged preference, and matching count;
+- empty-study `StatusBreakdown.per_platform == []`;
+- Registry parity for `mlwh_call_endpoint`, endpoint catalogue, and OpenAPI-backed
+  schemas, with Export present and no stale manifest methods;
+- workflow text choosing curated tools for every target question and never naming
+  `mlwh_count_export` or a manifest tool.
 
 ## Repo Pointers
 
-- Tool registration: `internal/mlwh/provider.go` and the `register*Tools` helpers.
-- Manifest/detail + paging: `internal/mlwh/tools_detail.go`. iRODS/availability:
-  `internal/mlwh/tools_availability.go`, `tools_overview.go`. Search:
-  `internal/mlwh/tools_search.go`. People (person→studies today; add study→users):
-  `internal/mlwh/tools_people.go`. Resolve: `internal/mlwh/tools_resolve.go`.
-- Output schemas: `internal/mlwh/schema.go`, sourced from `wa.OpenAPIDocument()`.
-- Generic fallback: `internal/mlwh/tools_call.go`. Workflow resource:
-  `internal/mlwh/workflow.go`. Freshness/errors: `internal/mlwh/tools_freshness.go`,
-  `internal/mlwh/errmap.go`. Size guard: `internal/core/`. Harness:
-  `internal/mlwh/harness_test.go`. Broader conventions: `../mcp/spec.md`.
+- Dependency and provider version: `go.mod`, `go.sum`,
+  `internal/mlwh/provider.go`.
+- Tool registration: `internal/mlwh/provider.go` and `register*Tools` helpers.
+- Manifest registration to remove: `internal/mlwh/tools_availability.go`; create a
+  focused export file if that keeps registration clearer.
+- Search: `internal/mlwh/tools_search.go`.
+- Hierarchy/detail: `internal/mlwh/tools_detail.go`.
+- iRODS/availability/latest data: `internal/mlwh/tools_availability.go`.
+- Runs and aggregates: add a focused tools file rather than overloading overview.
+- Programme and study users: `internal/mlwh/tools_people.go` or focused files.
+- Output schemas: `internal/mlwh/schema.go`, sourced from
+  `wa.OpenAPIDocument()`.
+- Generic Registry fallback: `internal/mlwh/tools_call.go`.
+- Workflow: `internal/mlwh/workflow.go`.
+- Freshness/errors: `internal/mlwh/tools_freshness.go`,
+  `internal/mlwh/errmap.go`.
+- Size guard: `internal/core/`.
+- Hermetic server harness: `internal/mlwh/harness_test.go`.
+- Broader MCP conventions: `../mcp/spec.md`.
 
 ## Out Of Scope
 
-- Further upstream `wa` API work. The API 1.8.0 endpoints and header-aware client
-  surface are implemented in `~/wa`; update the dependency and wrap them.
-- HTTP transport / web UI work; client-side caching or quotas beyond the core size
-  guard.
-- Re-deriving target/QC/recency/run/programme/merge semantics MCP-side — they are
-  upstream concerns.
+- Upstream `wa` changes, new MLWH endpoints, cache schema changes, or API version
+  bumps.
+- Reintroducing a compatibility manifest endpoint/tool or a synthetic export
+  count endpoint.
+- Database sync/migration or any write to the real source/mirror databases.
+- MCP-side SQL, joins, QC roll-ups, deliverability rules, recency aggregation,
+  merged attribution, or sequencing aggregation.
+- Web UI work or changing the MLWH HTTP server.
 
-## Notes
+## Final Review Checklist
 
-- Bind tool names/params/fields to what `~/wa/mlwh/registry.go` and `types.go`/`mlwh.go`
-  actually ship for API 1.8.0; the names in this prompt are indicative. If upstream
-  extends `StudyManifest` or the list endpoints rather than adding separate export/
-  sample-crams/users endpoints, wrap the extension and keep the tool name that best
-  communicates the job to the agent.
-- The generic export tool is the primary lever for Q1 and for "table of X with columns":
-  it must clearly out-rank both `mlwh_study_manifest` and `mlwh_call_endpoint` in the
-  workflow text for column-selected/large listings, while the simple per-relationship
-  list tools stay for quick lookups.
-- All paginated typed list tools return top-level `total` and `next_offset`
-  (including the new export, recency, run, programme, and study→users tools), matching the
-  flattened envelope rule already used for manifest/detail.
-- The workflow resource text is the primary lever that stops agents defaulting to
-  `mlwh_call_endpoint` (or to a manual manifest+backfill) for these questions — make the
-  routing unambiguous and give the worked examples (hek_r → 4; organism musculus →
-  word-membership incl. subspecies; column-selected cram export; sample-crams → 732;
-  latest-for-sponsor; runs-per-month; PacBio-by-programme; study→users owners/managers/
-  followers).
+- `go.mod` targets `wa v0.8.0`; provider API version is 1.8.0.
+- Manifest tools/types/method names are gone everywhere.
+- Export is present, exact, and bounded.
+- No `mlwh_count_export` exists or is mentioned in workflow guidance.
+- All methods in the curated tool matrix have exact tools and options.
+- Generic Registry fallback/catalogue covers all v0.8.0 endpoints.
+- Workflow routes target questions to one cheap curated call.
+- Tests are hermetic and pass without touching either real database.
