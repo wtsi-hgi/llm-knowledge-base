@@ -269,8 +269,9 @@ func TestResultSizeGuard(t *testing.T) {
 		})
 	})
 
-	Convey("B2.8: Given an oversized materialized export matrix, the core guard returns the configured continuation guidance", t, func() {
-		guidance := "Request a smaller limit; use Total and continue with NextCursor or offset plus returned Rows."
+	Convey("B2.8/F3.4: Given an oversized typed result, the core guard preserves accurate configured continuation guidance", t, func() {
+		guidance := "Request a smaller limit; use Total and continue exports with NextCursor or offset plus returned Rows; " +
+			"continue semantic pages with next_offset and global runs with the last row id as the cursor."
 		clientSession, cleanup := runServerWithClient(t, Options{
 			ServerVersion:          "0.1.0",
 			Providers:              []Provider{exportMatrixProvider{}},
@@ -288,6 +289,9 @@ func TestResultSizeGuard(t *testing.T) {
 		obj := sizeErrorObject(res)
 		So(obj["code"], ShouldEqual, "tool_result_too_large")
 		So(obj["guidance"], ShouldEqual, guidance)
+		So(obj["guidance"], ShouldContainSubstring, "NextCursor")
+		So(obj["guidance"], ShouldContainSubstring, "next_offset")
+		So(obj["guidance"], ShouldContainSubstring, "last row id")
 		So(strings.ToLower(obj["guidance"].(string)), ShouldNotContainSubstring, "count_export")
 		So(strings.ToLower(obj["guidance"].(string)), ShouldNotContainSubstring, "count export")
 	})

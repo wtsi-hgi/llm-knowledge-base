@@ -34,8 +34,8 @@ Registry catalogue suffix, and route product, file, CRAM, search, recency,
 run, aggregate, programme, sponsor, and study-user questions accurately.
 Cover all 6 acceptance tests from F1.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 #### Item 6.2: F2 - README for API 1.8.0 [parallel with F1, F3]
 
@@ -46,8 +46,8 @@ the complete curated tool catalogue, export and page continuation, and all
 domain caveats, while retaining shared-HTTP regression assertions. Cover all
 7 acceptance tests from F2.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 #### Item 6.3: F3 - Bounded and cancellable behavior [parallel with F1, F2]
 
@@ -58,8 +58,8 @@ core result guard. Verify pagination boundaries, cancellation, sentinel error
 precedence, accurate continuation guidance, samples-with-data date forwarding,
 and hermetic HTTP stubs, covering all 6 acceptance tests from F3.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 For parallel batch items, use separate subagents per item.
 Launch review subagents using the `go-reviewer` skill

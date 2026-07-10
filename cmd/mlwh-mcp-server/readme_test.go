@@ -105,6 +105,105 @@ func TestREADMEHTTPDocs(t *testing.T) {
 	})
 }
 
+func TestREADMEAPIEighteenDocs(t *testing.T) {
+	Convey("Given the complete public README for MLWH API 1.8.0", t, func() {
+		readmeBytes, err := os.ReadFile("../../README.md")
+		So(err, ShouldBeNil)
+
+		readme := strings.ToLower(string(readmeBytes))
+		prose := singleSpaced(readme)
+		pagination := singleSpaced(readmeSection(
+			readme,
+			"### pagination and continuation",
+			"### domain caveats",
+		))
+		caveats := singleSpaced(readmeSection(
+			readme,
+			"### domain caveats",
+			"## what the server exposes",
+		))
+		catalogue := readmeSection(
+			readme,
+			"## what the server exposes",
+			"the server also publishes two mcp resources",
+		)
+
+		Convey("F2.1: removed manifest workflows and tools are absent", func() {
+			So(readme, ShouldNotContainSubstring, "manifest")
+		})
+
+		Convey("F2.2: version prose and the version example use API 1.8.0 only", func() {
+			So(prose, ShouldContainSubstring, "currently mlwh api 1.8.0")
+			So(readme, ShouldContainSubstring, "# mlwh api version 1.8.0")
+			So(readme, ShouldNotContainSubstring, "1.7.0")
+		})
+
+		Convey("F2.3: product-table guidance uses bounded export and preserves products without iRODS", func() {
+			So(readme, ShouldContainSubstring, "`mlwh_export`")
+			So(readme, ShouldContainSubstring, "`children=products`")
+			So(readme, ShouldContainSubstring, "`parent_kind=study`")
+			So(prose, ShouldContainSubstring, "products without irods objects remain rows")
+			So(prose, ShouldContainSubstring, "there is no `mlwh_count_export`")
+			So(prose, ShouldContainSubstring, "bounded `total` sizes the export")
+		})
+
+		Convey("F2.4: sample search documents literal-prefix default and opt-in word-prefix mode", func() {
+			So(prose, ShouldContainSubstring, "case-insensitive literal whole-value prefix")
+			So(prose, ShouldContainSubstring, "`words=true` is the opt-in separator-agnostic word-prefix mode")
+			So(prose, ShouldContainSubstring, "not a substring mode")
+		})
+
+		Convey("F2.5: the catalogue names every curated tool added for API 1.8.0", func() {
+			tools := []string{
+				"mlwh_export",
+				"mlwh_latest_data_for_study",
+				"mlwh_count_latest_data_for_study",
+				"mlwh_latest_data_for_faculty_sponsor",
+				"mlwh_count_latest_data_for_faculty_sponsor",
+				"mlwh_runs_for_sample",
+				"mlwh_count_runs_for_sample",
+				"mlwh_count_studies_for_sample",
+				"mlwh_runs",
+				"mlwh_count_runs",
+				"mlwh_monthly_run_counts",
+				"mlwh_sequencing_aggregate",
+				"mlwh_studies_for_programme",
+				"mlwh_count_studies_for_programme",
+				"mlwh_programmes",
+				"mlwh_study_users",
+				"mlwh_count_study_users",
+				"mlwh_sample_crams_for_study",
+				"mlwh_count_sample_crams_for_study",
+			}
+
+			So(missingREADMETerms(catalogue, tools), ShouldBeEmpty)
+		})
+
+		Convey("F2.6: pagination notes distinguish every continuation model", func() {
+			So(pagination, ShouldContainSubstring, "bounded `mlwh_export` calls default to 1000 rows")
+			So(pagination, ShouldContainSubstring, "keyset-backed")
+			So(pagination, ShouldContainSubstring, "`nextcursor`")
+			So(pagination, ShouldContainSubstring, "offset-backed")
+			So(pagination, ShouldContainSubstring, "`offset + len(rows)`")
+			So(pagination, ShouldContainSubstring, "`total` and `next_offset`")
+			So(pagination, ShouldContainSubstring, "latest-data pages default to 10 rows")
+			So(pagination, ShouldContainSubstring, "last row's `id` as the cursor")
+			So(pagination, ShouldContainSubstring, "neither `total` nor `next_offset`")
+		})
+
+		Convey("F2.7: domain caveats cover attachments, CRAMs, dates, and freshness", func() {
+			So(caveats, ShouldContainSubstring, "product `file_type` is attachment-only")
+			So(caveats, ShouldContainSubstring, "merged-aware sample crams")
+			So(caveats, ShouldContainSubstring, "irods `created` means data was added to irods")
+			So(caveats, ShouldContainSubstring, "not source mutation")
+			So(caveats, ShouldContainSubstring, "`date_basis`")
+			So(caveats, ShouldContainSubstring, "ont warehouse load time")
+			So(caveats, ShouldContainSubstring, "not a true sequencing date")
+			So(caveats, ShouldContainSubstring, "`mlwh_freshness` is the cache as-of source")
+		})
+	})
+}
+
 func readmeSection(readme, startHeading, endHeading string) string {
 	start := strings.Index(readme, startHeading)
 	if start == -1 {
@@ -121,4 +220,15 @@ func readmeSection(readme, startHeading, endHeading string) string {
 
 func singleSpaced(text string) string {
 	return strings.Join(strings.Fields(text), " ")
+}
+
+func missingREADMETerms(readme string, terms []string) []string {
+	var missing []string
+	for _, term := range terms {
+		if !strings.Contains(readme, term) {
+			missing = append(missing, term)
+		}
+	}
+
+	return missing
 }

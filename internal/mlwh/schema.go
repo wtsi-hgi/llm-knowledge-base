@@ -545,14 +545,21 @@ func outputSchemaForPagedObject(componentName string) (map[string]any, error) {
 }
 
 // boundedPagination resolves a typed paged tool's effective limit and offset.
-// It rejects over-large limits before HTTP, defaults omitted/non-positive limits
-// to the bounded page size, and otherwise preserves the caller's offset.
+// It rejects negative and over-large limits before HTTP, defaults an omitted
+// zero limit to the bounded page size, and otherwise preserves the caller's
+// offset.
 func boundedPagination(limit, offset int) (int, int, error) {
+	if limit < 0 {
+		return 0, 0, fmt.Errorf("limit %d must be non-negative", limit)
+	}
 	if limit > pagedMaxLimit {
 		return 0, 0, fmt.Errorf("limit %d exceeds the maximum of %d (a larger limit is rejected, not clamped); request a smaller page", limit, pagedMaxLimit)
 	}
+	if offset < 0 {
+		return 0, 0, fmt.Errorf("offset %d must be non-negative", offset)
+	}
 
-	if limit <= 0 {
+	if limit == 0 {
 		limit = pagedDefaultLimit
 	}
 

@@ -4,9 +4,10 @@ A [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server, writte
 in Go, that lets LLM agents (Claude Code, Codex, and later a web UI server-side
 agent) query the Multi-LIMS Warehouse (MLWH) read API in natural, tool-driven
 ways: search and count samples and studies, resolve identifiers, answer cheap
-overview/status/availability questions, page through iRODS paths, route people
-and sponsor questions, drill into detail and fan-outs, and report data
-freshness.
+overview/status/availability questions, export chosen-column relationship
+tables, page through iRODS paths and global runs, query sequencing aggregates,
+discover programmes and study users, select merged-aware sample CRAMs, and
+report data freshness.
 
 The MLWH read API is provided by the separate upstream
 [`wa`](https://github.com/wtsi-hgi/wa) project (its `wa mlwh serve` command). This
@@ -231,6 +232,9 @@ Prompt cookbook:
   - "How many samples match `mus`?"
   - "What study id matches the name `cancer`?"
   - "List study candidates for `rare disease`, enough to disambiguate the id."
+  - Sample search defaults to a case-insensitive literal whole-value prefix.
+    `words=true` is the opt-in separator-agnostic word-prefix mode, not a
+    substring mode.
 - **Resolve or classify an identifier**
   - "What kind of MLWH identifier is `5901`?"
   - "Resolve sample `S1` to its canonical identifiers."
@@ -240,6 +244,14 @@ Prompt cookbook:
   - "Find samples where accession is exactly `ERS123`."
   - "Count samples with supplier name exactly `Bob`."
   - "Find samples for library type `WGS`."
+- **Product tables and relationship exports**
+  - "Use `mlwh_export` with `children=products`, `parent_kind=study`, and
+    `parent_id=S1` to return the chosen product columns."
+  - "Export the sample CRAM matrix for study `S1`."
+  - Chosen-column product tables route to
+    `mlwh_export(children=products,parent_kind=study,...)`; products without
+    iRODS objects remain rows. There is no `mlwh_count_export`; bounded `Total`
+    sizes the export.
 - **Study overview and metadata**
   - "Give me a quick overview of study `S1`."
   - "What data access group is study `S1` in?"
@@ -249,6 +261,7 @@ Prompt cookbook:
   - "List the first page of samples in `S1` with data between these two timestamps."
   - "Which samples in `S1` still have no sequencing data?"
   - "How much new data was added to iRODS for `S1` in the last 7 days?"
+  - "Show the latest data page for faculty sponsor `Carl`, filtered to CRAM."
 - **QC and status**
   - "Break down study `S1` by received, sequenced, not sequenced, and manual QC state."
   - "How many samples in `S1` passed, failed, or are pending QC?"
@@ -258,20 +271,30 @@ Prompt cookbook:
   - "Show sample `ONT1` progress, including not-tracked QC if present."
   - "Summarize run `52553`."
   - "Show the status timeline for run `52553`."
+- **Global runs and sequencing aggregates**
+  - "List PacBio and ONT runs in this half-open date window."
+  - "Count runs using the same platform and date filters."
+  - "Show monthly run counts with each platform's `date_basis`."
+  - "Group sequencing products by month, programme, and platform."
 - **iRODS paths and CRAMs**
   - "How many CRAM paths are there for sample `S1`?"
   - "List CRAM iRODS paths for study `S1`, first page only."
   - "Show iRODS paths for run `52553` with `file_type=cram`."
   - "Are there any VCF paths for `S1`?"
+  - "Select one merged-aware sample CRAM row per sample in study `S1`."
 - **People, sponsors, and users**
   - "Which studies have faculty sponsor `Carl`?"
   - "How many studies is `cwa` associated with as a user?"
   - "List studies where `cwa` has role `Follower`."
   - "Resolve the person name `Carl` across sponsors and study users."
+  - "Discover exact programme values, then list studies in programme `Cancer`."
+  - "List every study-user role assignment for study `S1`."
 - **Detail and fan-outs**
   - "Show sample detail for `S1`."
   - "Show lean study detail for `S1`, page size 100."
   - "List runs for study `S1`."
+  - "List and count runs for sample `S1`."
+  - "Count studies linked to sample `S1`."
   - "List libraries for study `S1`."
   - "How many lanes does sample `S1` have?"
   - "How many samples are linked to library id `LIB123`?"
@@ -282,6 +305,8 @@ Prompt cookbook:
 - **Large answers and paging**
   - "Count first, then list the first 100 rows."
   - "Continue from `next_offset=100`."
+  - "Continue this export using its returned cursor or offset model."
+  - "Continue global runs from the last row's composite id."
   - "Use a smaller page if the result is too large."
 - **Advanced registry access**
   - "Call the MLWH Registry method `AllStudies` with `limit=100` and `offset=0`."
@@ -289,27 +314,62 @@ Prompt cookbook:
 
 Notes for interpreting answers:
 
-- Paged list and paged detail tools default to `limit=100`, reject `limit > 1000`,
-  and return `total` plus `next_offset`; `next_offset=-1` means there is no next
-  page.
-- Count responses and bare list responses do not carry `cache_synced_at`; ask the
-  agent to use `mlwh_freshness` when you need a cache as-of caveat.
-- Responses that include `cache_synced_at` should use that field as the as-of
-  timestamp. Data "added to iRODS" means the upstream iRODS `created` timestamp,
-  not sync `last_run` or generic row-change fields.
+### Pagination and continuation
+
+- Normal semantic pages default to 100 rows, reject limits above 1000, and
+  return `total` and `next_offset`; `next_offset=-1` means there is no next page.
+- Latest-data pages default to 10 rows. They are bounded pages, not every row
+  tied for the maximum `created` value.
+- Bounded `mlwh_export` calls default to 1000 rows. Keyset-backed product pages
+  and unsorted iRODS export pages return `NextCursor`; pass it back as `cursor`.
+  Offset-backed export relationships do not accept a cursor and continue with
+  `offset + len(Rows)`. The matrix `Total` sizes a bounded export.
+- `mlwh_runs` is a separate keyset page: pass the last row's `id` as the cursor.
+  It returns neither `total` nor `next_offset`.
 - If a response would be too large, the server returns a structured
-  `tool_result_too_large` error with guidance instead of flooding the chat.
+  `tool_result_too_large` error with continuation guidance instead of flooding
+  the chat.
+
+### Domain caveats
+
+- Sample search defaults to a case-insensitive literal whole-value prefix;
+  `words=true` is the opt-in separator-agnostic word-prefix mode, not a
+  substring mode.
+- Product `file_type` is attachment-only: it filters iRODS objects attached to
+  each product, not the product rows. Products without iRODS objects remain
+  rows. Deliverability approximates iRODS target and `not is_spiked` where the
+  upstream discriminator exists.
+- Use `mlwh_sample_crams_for_study` for merged-aware sample CRAMs. An empty
+  product-level attachment does not prove that a sample-level CRAM is absent;
+  this tool prefers the merged composite when one exists.
+- iRODS `created` means data was added to iRODS, not source mutation, row-change,
+  or cache-sync time. Date windows are half-open: `since` is inclusive and
+  `until` is exclusive.
+- Global run and run-aggregate rows label their per-platform `date_basis`:
+  Illumina and Elembio use run complete, Ultimagen uses run archived, PacBio
+  uses `run_complete`, and ONT warehouse load time is not a true sequencing
+  date. Sample/product aggregate windows instead use iRODS `created`.
+- Faculty sponsorship, programme membership, and `study_users` roles are
+  distinct. `mlwh_study_users` without `role` returns all roles for a study;
+  `mlwh_studies_for_user` without `role` uses the upstream owner, manager, and
+  `data_access_contact` defaults. Use `mlwh_programmes` to discover the exact
+  programme values accepted by programme filters.
+- `mlwh_freshness` is the cache as-of source. Count and bare-list responses have
+  no `cache_synced_at`; rows that do carry it are only complete through that
+  synchronization state.
 
 ## What the server exposes
 
 A curated, LLM-ergonomic tool surface generated from the MLWH endpoint registry
 (so it stays in lockstep with the upstream API), grouped by task:
 
+- **Chosen-column relationship export**: `mlwh_export`. It returns the upstream
+  `Columns`/`Rows` matrix and its bounded or complete continuation metadata.
 - **Search and study lookup**: `mlwh_search_samples`, `mlwh_count_samples`,
   `mlwh_search_studies`, `mlwh_count_studies_search`, `mlwh_count_studies`.
-  Sample search is a case-insensitive word-prefix match; study search is a
-  case-insensitive substring match across `name`, `study_title`, `programme`,
-  and `faculty_sponsor`.
+  Sample search defaults to the literal-prefix semantics above; study search is
+  a case-insensitive substring across `name`, `study_title`, `programme`, and
+  `faculty_sponsor`.
 - **Resolve, classify, exact find, and expand**: `mlwh_classify_identifier`,
   `mlwh_resolve_sample`, `mlwh_resolve_sample_name`, `mlwh_resolve_study`,
   `mlwh_resolve_run`, `mlwh_resolve_library`,
@@ -324,27 +384,35 @@ A curated, LLM-ergonomic tool surface generated from the MLWH endpoint registry
   `mlwh_count_samples_with_data_for_study`,
   `mlwh_samples_with_data_for_study`,
   `mlwh_samples_without_data_for_study`,
+  `mlwh_latest_data_for_study`, `mlwh_count_latest_data_for_study`,
+  `mlwh_latest_data_for_faculty_sponsor`,
+  `mlwh_count_latest_data_for_faculty_sponsor`,
   `mlwh_irods_paths_for_sample`, `mlwh_count_irods_paths_for_sample`,
   `mlwh_irods_paths_for_study`, `mlwh_count_irods_paths_for_study`,
-  `mlwh_irods_paths_for_run`, `mlwh_count_irods_paths_for_run`. iRODS tools
-  support upstream `file_type` suffix filtering, such as `cram`.
+  `mlwh_irods_paths_for_run`, `mlwh_count_irods_paths_for_run`,
+  `mlwh_sample_crams_for_study`, `mlwh_count_sample_crams_for_study`.
+- **Global runs and aggregates**: `mlwh_runs`, `mlwh_count_runs`,
+  `mlwh_monthly_run_counts`, `mlwh_sequencing_aggregate`.
 - **Detail, fan-out, and count counterparts**: `mlwh_sample_detail`,
   `mlwh_study_detail`, `mlwh_run_detail`, `mlwh_library_detail`,
   `mlwh_all_studies`, `mlwh_samples_for_study`, `mlwh_count_samples_for_study`,
   `mlwh_samples_for_run`, `mlwh_count_samples_for_run`,
   `mlwh_libraries_for_study`, `mlwh_count_libraries_for_study`,
   `mlwh_runs_for_study`, `mlwh_count_runs_for_study`,
+  `mlwh_runs_for_sample`, `mlwh_count_runs_for_sample`,
   `mlwh_lanes_for_sample`, `mlwh_count_lanes_for_sample`,
-  `mlwh_studies_for_sample`, `mlwh_count_samples_for_library`,
+  `mlwh_studies_for_sample`, `mlwh_count_studies_for_sample`,
+  `mlwh_count_samples_for_library`,
   `mlwh_count_samples_for_library_id`,
   `mlwh_count_samples_for_library_lims_id`,
   `mlwh_count_samples_for_library_type`.
-- **People, sponsors, and study users**:
+- **Programmes, people, sponsors, and study users**:
+  `mlwh_studies_for_programme`, `mlwh_count_studies_for_programme`,
+  `mlwh_programmes`, `mlwh_study_users`, `mlwh_count_study_users`,
   `mlwh_studies_for_faculty_sponsor`,
   `mlwh_count_studies_for_faculty_sponsor`, `mlwh_studies_for_user`,
   `mlwh_count_studies_for_user`, `mlwh_resolve_person`,
-  `mlwh_count_resolve_person`. Sponsor tools read `faculty_sponsor`; user tools
-  read `study_users` membership and optionally filter by role.
+  `mlwh_count_resolve_person`.
 - **Freshness**: `mlwh_freshness` reports per-table sync state so answers can be
   caveated; it succeeds even against a never-synced cache.
 - **Escape hatch**: `mlwh_call_endpoint` dispatches any upstream Registry method
@@ -378,8 +446,8 @@ CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs `make lint` and
 using the same Makefile targets.
 
 See [`.docs/mcp/spec.md`](.docs/mcp/spec.md) for the original MCP server
-specification, and [`.docs/realworld/spec.md`](.docs/realworld/spec.md) for the
-RealWorld MLWH tool expansion reviewed here.
+specification, and [`.docs/realworld3/spec.md`](.docs/realworld3/spec.md) for
+the MLWH API 1.8.0 expansion reviewed here.
 
 ## Architecture
 

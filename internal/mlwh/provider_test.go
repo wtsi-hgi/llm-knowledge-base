@@ -28,6 +28,8 @@ package mlwh
 import (
 	"context"
 	"flag"
+	"maps"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -280,6 +282,105 @@ func TestWAAPI18Contract(t *testing.T) {
 		So(ok, ShouldBeTrue)
 		So(studyCount["description"], ShouldEqual, "distinct studies for this candidate")
 	})
+}
+
+func TestF3ProviderGuardGuidanceAndHermeticHarness(t *testing.T) {
+	Convey("F3.4: provider size guidance names every actual continuation mechanism", t, func() {
+		guidance := strings.ToLower(ToolResultSizeGuidance)
+		So(guidance, ShouldContainSubstring, "smaller")
+		So(guidance, ShouldContainSubstring, "nextcursor")
+		So(guidance, ShouldContainSubstring, "offset")
+		So(guidance, ShouldContainSubstring, "next_offset")
+		So(guidance, ShouldContainSubstring, "last row")
+		So(guidance, ShouldContainSubstring, "cursor")
+	})
+
+	Convey("F3.6: the provider runs end-to-end against only its loopback httptest server", t, func() {
+		stub := newStubMLWH(t)
+		stub.respondJSON("/programmes", http.StatusOK, []wa.Programme{})
+		cs, cleanup := runMLWHServerWithClient(t, stub)
+		defer cleanup()
+
+		result := callTool(t, cs, "mlwh_programmes", map[string]any{})
+		So(result.IsError, ShouldBeFalse)
+		So(stub.server, ShouldNotBeNil)
+		So(stub.server.URL, ShouldStartWith, "http://127.0.0.1:")
+		So(stub.requestCount(), ShouldEqual, 1)
+	})
+}
+
+type f3PagedToolCase struct {
+	name           string
+	path           string
+	arguments      map[string]any
+	body           any
+	defaultLimit   string
+	supportsOffset bool
+	headerPage     bool
+}
+
+func f3PagedToolCases() []f3PagedToolCase {
+	return []f3PagedToolCase{
+		{
+			name: "mlwh_samples_with_data_for_study", path: "/study/S1/samples-with-data",
+			arguments: map[string]any{"study_lims_id": "S1"}, body: []wa.SampleWithData{},
+			defaultLimit: "100", supportsOffset: true, headerPage: true,
+		},
+		{
+			name: "mlwh_samples_without_data_for_study", path: "/study/S1/samples-without-data",
+			arguments: map[string]any{"study_lims_id": "S1"}, body: []wa.SampleWithData{},
+			defaultLimit: "100", supportsOffset: true, headerPage: true,
+		},
+		{
+			name: "mlwh_irods_paths_for_sample", path: "/sample/S1/irods",
+			arguments: map[string]any{"sanger_name": "S1"}, body: []wa.IRODSPath{},
+			defaultLimit: "100", supportsOffset: true, headerPage: true,
+		},
+		{
+			name: "mlwh_irods_paths_for_study", path: "/study/S1/irods",
+			arguments: map[string]any{"study_lims_id": "S1"}, body: []wa.IRODSPath{},
+			defaultLimit: "100", supportsOffset: true, headerPage: true,
+		},
+		{
+			name: "mlwh_irods_paths_for_run", path: "/run/52553/irods",
+			arguments: map[string]any{"id_run": "52553"}, body: []wa.IRODSPath{},
+			defaultLimit: "100", supportsOffset: true, headerPage: true,
+		},
+		{
+			name: "mlwh_latest_data_for_study", path: "/study/S1/latest-data",
+			arguments: map[string]any{"study_lims_id": "S1"}, body: []wa.RecentDataRow{},
+			defaultLimit: "10", supportsOffset: true, headerPage: true,
+		},
+		{
+			name: "mlwh_latest_data_for_faculty_sponsor", path: "/latest-data/faculty-sponsor/Ada",
+			arguments: map[string]any{"faculty_sponsor": "Ada"}, body: []wa.RecentDataRow{},
+			defaultLimit: "10", supportsOffset: true, headerPage: true,
+		},
+		{
+			name: "mlwh_sample_crams_for_study", path: "/study/S1/sample-crams",
+			arguments: map[string]any{"study_lims_id": "S1"}, body: []wa.SampleCRAM{},
+			defaultLimit: "100", supportsOffset: true, headerPage: true,
+		},
+		{
+			name: "mlwh_runs_for_sample", path: "/sample/S1/runs",
+			arguments: map[string]any{"sanger_name": "S1"}, body: []wa.Run{},
+			defaultLimit: "100", supportsOffset: true, headerPage: true,
+		},
+		{
+			name: "mlwh_runs", path: "/runs", arguments: map[string]any{}, body: []wa.RunListingRow{},
+			defaultLimit: "100",
+		},
+		{
+			name: "mlwh_studies_for_programme", path: "/studies/programme/Cancer",
+			arguments: map[string]any{"programme": "Cancer"}, body: []wa.Study{},
+			defaultLimit: "100", supportsOffset: true, headerPage: true,
+		},
+		{
+			name: "mlwh_study_users", path: "/study/S1/users",
+			arguments: map[string]any{"study_lims_id": "S1"}, body: []wa.StudyUser{},
+			defaultLimit: "100", supportsOffset: true, headerPage: true,
+		},
+	}
 }
 
 // TestProviderFullSurface exercises Story I1: with only the MLWH provider
@@ -697,4 +798,68 @@ func clearMLWHEnv(t *testing.T) {
 	t.Setenv("MLWH_CA_CERT", "")
 	t.Setenv("MLWH_TIMEOUT", "")
 	t.Setenv("MLWH_MAX_TOOL_RESULT_BYTES", "")
+}
+
+func TestF3PaginationBoundaries(t *testing.T) {
+	Convey("F3.1: every new paged list applies its default and maximum and rejects invalid MCP-owned pagination before HTTP", t, func() {
+		for _, testCase := range f3PagedToolCases() {
+			Convey(testCase.name, func() {
+				stub := newStubMLWH(t)
+				if testCase.headerPage {
+					stub.respondJSONWithHeaders(testCase.path, http.StatusOK, testCase.body, http.Header{
+						"X-Total-Count": {"0"}, "X-Next-Offset": {"-1"},
+					})
+				} else {
+					stub.respondJSON(testCase.path, http.StatusOK, testCase.body)
+				}
+
+				cs, cleanup := runMLWHServerWithClient(t, stub)
+				defer cleanup()
+
+				result := callTool(t, cs, testCase.name, maps.Clone(testCase.arguments))
+				So(result.IsError, ShouldBeFalse)
+				request, ok := stub.lastRequest()
+				So(ok, ShouldBeTrue)
+				So(request.Path, ShouldEqual, testCase.path)
+				So(request.Query.Get("limit"), ShouldEqual, testCase.defaultLimit)
+				if testCase.supportsOffset {
+					So(request.Query.Get("offset"), ShouldEqual, "0")
+				}
+
+				beforeNegativeLimit := stub.requestCount()
+				negativeLimit := maps.Clone(testCase.arguments)
+				negativeLimit["limit"] = -1
+				result = callTool(t, cs, testCase.name, negativeLimit)
+				So(result.IsError, ShouldBeTrue)
+				So(firstTextContent(result), ShouldContainSubstring, "non-negative")
+				So(stub.requestCount(), ShouldEqual, beforeNegativeLimit)
+
+				if testCase.supportsOffset {
+					beforeNegativeOffset := stub.requestCount()
+					negativeOffset := maps.Clone(testCase.arguments)
+					negativeOffset["offset"] = -1
+					result = callTool(t, cs, testCase.name, negativeOffset)
+					So(result.IsError, ShouldBeTrue)
+					So(firstTextContent(result), ShouldContainSubstring, "non-negative")
+					So(stub.requestCount(), ShouldEqual, beforeNegativeOffset)
+				}
+
+				maximum := maps.Clone(testCase.arguments)
+				maximum["limit"] = 1000
+				result = callTool(t, cs, testCase.name, maximum)
+				So(result.IsError, ShouldBeFalse)
+				request, ok = stub.lastRequest()
+				So(ok, ShouldBeTrue)
+				So(request.Query.Get("limit"), ShouldEqual, "1000")
+
+				beforeOverMaximum := stub.requestCount()
+				overMaximum := maps.Clone(testCase.arguments)
+				overMaximum["limit"] = 1001
+				result = callTool(t, cs, testCase.name, overMaximum)
+				So(result.IsError, ShouldBeTrue)
+				So(firstTextContent(result), ShouldContainSubstring, "maximum of 1000")
+				So(stub.requestCount(), ShouldEqual, beforeOverMaximum)
+			})
+		}
+	})
 }

@@ -26,10 +26,13 @@
 package mlwh
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	wa "github.com/wtsi-hgi/wa/mlwh"
@@ -633,6 +636,122 @@ func TestSampleCRAMToolsE3(t *testing.T) {
 				}
 			}
 		})
+	})
+}
+
+func TestAvailabilityToolsF3Cancellation(t *testing.T) {
+	Convey("F3.2: cancellation before a remote call makes no request and returns no successful result", t, func() {
+		stub := newStubMLWH(t)
+		stub.respondJSONWithHeaders("/study/S1/latest-data", http.StatusOK, []wa.RecentDataRow{}, irodsPageHeaders("0", "-1"))
+		cs, cleanup := runMLWHServerWithClient(t, stub)
+		defer cleanup()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		result, err := cs.CallTool(ctx, &mcp.CallToolParams{
+			Name: "mlwh_latest_data_for_study", Arguments: map[string]any{"study_lims_id": "S1"},
+		})
+
+		So(result, ShouldBeNil)
+		So(errors.Is(err, context.Canceled), ShouldBeTrue)
+		So(stub.requestCount(), ShouldEqual, 0)
+	})
+
+	Convey("F3.2: cancellation during a remote call cancels its HTTP request without retry or a partial success", t, func() {
+		stub := newStubMLWH(t)
+		requestStarted := make(chan struct{})
+		stub.respondHandler("/study/S1/latest-data", func(_ http.ResponseWriter, request *http.Request) {
+			close(requestStarted)
+			<-request.Context().Done()
+		})
+		cs, cleanup := runMLWHServerWithClient(t, stub)
+		defer cleanup()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		type callOutcome struct {
+			result *mcp.CallToolResult
+			err    error
+		}
+		callDone := make(chan callOutcome, 1)
+		go func() {
+			result, err := cs.CallTool(ctx, &mcp.CallToolParams{
+				Name: "mlwh_latest_data_for_study", Arguments: map[string]any{"study_lims_id": "S1"},
+			})
+			callDone <- callOutcome{result: result, err: err}
+		}()
+
+		select {
+		case <-requestStarted:
+		case <-time.After(5 * time.Second):
+			t.Fatal("latest-data request did not reach the stub")
+		}
+		cancel()
+
+		var outcome callOutcome
+		select {
+		case outcome = <-callDone:
+		case <-time.After(5 * time.Second):
+			t.Fatal("cancelled latest-data request did not return")
+		}
+
+		So(outcome.result, ShouldBeNil)
+		So(errors.Is(outcome.err, context.Canceled), ShouldBeTrue)
+		So(stub.requestCount(), ShouldEqual, 1)
+	})
+}
+
+func TestAvailabilityToolsF3DateWindows(t *testing.T) {
+	Convey("F3.5: samples-with-data list and count receive the same exact RFC3339 window and return matching totals", t, func() {
+		stub := newStubMLWH(t)
+		stub.respondJSONWithHeaders("/study/S1/samples-with-data", http.StatusOK, []wa.SampleWithData{
+			{Sample: wa.Sample{IDSampleTmp: 1, Name: "S1-A"}, Platforms: []string{}},
+		}, irodsPageHeaders("1", "-1"))
+		stub.respondJSON("/study/S1/samples-with-data/count", http.StatusOK, wa.Count{Count: 1})
+		cs, cleanup := runMLWHServerWithClient(t, stub)
+		defer cleanup()
+
+		since := "2026-07-01T12:34:56Z"
+		until := "2026-07-08T12:34:56Z"
+		arguments := map[string]any{"study_lims_id": "S1", "since": since, "until": until}
+
+		list := structuredObject(callTool(t, cs, "mlwh_samples_with_data_for_study", arguments))
+		So(list["total"], ShouldEqual, 1)
+		listRequest, ok := stub.lastRequest()
+		So(ok, ShouldBeTrue)
+		So(listRequest.Query, ShouldResemble, url.Values{
+			"since": {since}, "until": {until}, "limit": {"100"}, "offset": {"0"},
+		})
+
+		count := structuredObject(callTool(t, cs, "mlwh_count_samples_with_data_for_study", arguments))
+		So(count["count"], ShouldEqual, list["total"])
+		countRequest, ok := stub.lastRequest()
+		So(ok, ShouldBeTrue)
+		So(countRequest.Query, ShouldResemble, url.Values{"since": {since}, "until": {until}})
+	})
+
+	Convey("F3.5: until without since remains an upstream bad request for both list and count", t, func() {
+		stub := newStubMLWH(t)
+		const upstreamMessage = "until requires since"
+		stub.respondError("/study/S1/samples-with-data", http.StatusBadRequest, "bad_request", upstreamMessage)
+		stub.respondError("/study/S1/samples-with-data/count", http.StatusBadRequest, "bad_request", upstreamMessage)
+		cs, cleanup := runMLWHServerWithClient(t, stub)
+		defer cleanup()
+
+		until := "2026-07-08T12:34:56Z"
+		arguments := map[string]any{"study_lims_id": "S1", "until": until}
+		for _, tool := range []string{
+			"mlwh_samples_with_data_for_study", "mlwh_count_samples_with_data_for_study",
+		} {
+			result := callTool(t, cs, tool, arguments)
+			So(result.IsError, ShouldBeTrue)
+			So(firstTextContent(result), ShouldContainSubstring, upstreamMessage)
+			request, ok := stub.lastRequest()
+			So(ok, ShouldBeTrue)
+			So(request.Query.Get("since"), ShouldBeEmpty)
+			So(request.Query.Get("until"), ShouldEqual, until)
+		}
+		So(stub.requestCount(), ShouldEqual, 2)
 	})
 }
 

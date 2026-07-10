@@ -189,6 +189,9 @@ func setNonEmptyQueryValue(query url.Values, name, value string) {
 }
 
 func latestDataPagination(limit, offset int) (int, int, error) {
+	if limit < 0 {
+		return 0, 0, fmt.Errorf("limit %d must be non-negative", limit)
+	}
 	if limit > pagedMaxLimit {
 		return 0, 0, fmt.Errorf("limit %d exceeds the maximum of %d (a larger limit is rejected, not clamped); request a smaller page", limit, pagedMaxLimit)
 	}
@@ -197,7 +200,7 @@ func latestDataPagination(limit, offset int) (int, int, error) {
 		return 0, 0, fmt.Errorf("offset %d must be non-negative", offset)
 	}
 
-	if limit <= 0 {
+	if limit == 0 {
 		limit = latestDataDefaultLimit
 	}
 

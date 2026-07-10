@@ -58,7 +58,8 @@ const DefaultMaxToolResultBytes = 1048576
 // calls, so agents know to switch to cheaper aggregate/count/page workflows.
 const ToolResultSizeGuidance = "Request a smaller limit. For bounded mlwh_export results, use Total to size the export; " +
 	"continue products and unsorted iRODS with NextCursor, or offset-backed relationships with offset plus the number of returned Rows. " +
-	"For other list/detail endpoints, use MLWH overview, status, or count tools first and request a smaller page with limit and offset."
+	"For semantic and generic offset pages, continue with the returned next_offset as offset. For mlwh_runs, pass the last row's id as cursor. " +
+	"For other list/detail endpoints, use MLWH overview, status, or count tools first."
 
 // ErrBaseURLRequired is returned by New when no MLWH base URL was configured
 // through any source. The MLWH API is reached only by its base URL, so the
