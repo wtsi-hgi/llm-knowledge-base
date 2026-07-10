@@ -28,7 +28,6 @@ package mlwh
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	wa "github.com/wtsi-hgi/wa/mlwh"
@@ -63,10 +62,6 @@ func (p *provider) addSequencingAggregate(r core.Registrar, outputSchema map[str
 		Description:  description,
 		OutputSchema: outputSchema,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in sequencingAggregateInput) (*mcp.CallToolResult, sequencingAggregatesResult, error) {
-		if err := validateSequencingAggregateInput(in); err != nil {
-			return core.ToolError[sequencingAggregatesResult](err)
-		}
-
 		rows, err := client.SequencingAggregate(ctx, wa.SequencingAggregateOptions{
 			GroupBy: in.GroupBy, Unit: in.Unit, Since: in.Since, Until: in.Until, Platforms: in.Platform,
 		})
@@ -78,48 +73,6 @@ func (p *provider) addSequencingAggregate(r core.Registrar, outputSchema map[str
 	})
 
 	return nil
-}
-
-func validateSequencingAggregateInput(in sequencingAggregateInput) error {
-	validGroups := 0
-	for _, raw := range in.GroupBy {
-		for _, group := range strings.Split(raw, ",") {
-			if strings.TrimSpace(group) == "" {
-				continue
-			}
-			validGroups++
-			if !validSequencingAggregateGroup(group) {
-				return fmt.Errorf("unsupported group_by %q; choose month, platform, manufacturer, programme, or faculty_sponsor", group)
-			}
-		}
-	}
-	if validGroups == 0 {
-		return fmt.Errorf("group_by is required; choose one or more of month, platform, manufacturer, programme, or faculty_sponsor")
-	}
-
-	if !validSequencingAggregateUnit(in.Unit) {
-		return fmt.Errorf("unit must be one of runs, samples, or products; got %q", in.Unit)
-	}
-
-	return nil
-}
-
-func validSequencingAggregateGroup(raw string) bool {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "month", "platform", "manufacturer", "programme", "faculty_sponsor":
-		return true
-	default:
-		return false
-	}
-}
-
-func validSequencingAggregateUnit(raw string) bool {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "runs", "samples", "products":
-		return true
-	default:
-		return false
-	}
 }
 
 func runAggregationOptions(since, until string, platforms []string) wa.RunAggregationOptions {

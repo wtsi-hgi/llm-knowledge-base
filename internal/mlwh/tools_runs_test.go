@@ -271,17 +271,14 @@ func TestRunAggregateToolsD3(t *testing.T) {
 			}})
 		})
 
-		Convey("D3.4: missing or invalid group_by and unit are actionable errors without upstream calls", func() {
+		Convey("D3.4: missing group_by or unit is rejected by the required input schema", func() {
 			cases := []struct {
 				name string
 				args map[string]any
 				want string
 			}{
 				{name: "missing group_by", args: map[string]any{"unit": "runs"}, want: "group_by"},
-				{name: "empty group_by", args: map[string]any{"group_by": []any{}, "unit": "runs"}, want: "group_by"},
-				{name: "invalid group_by", args: map[string]any{"group_by": []any{"study"}, "unit": "runs"}, want: "group_by"},
 				{name: "missing unit", args: map[string]any{"group_by": []any{"month"}}, want: "unit"},
-				{name: "invalid unit", args: map[string]any{"group_by": []any{"month"}, "unit": "reads"}, want: "unit"},
 			}
 
 			for _, tc := range cases {
@@ -290,6 +287,46 @@ func TestRunAggregateToolsD3(t *testing.T) {
 				So(strings.ToLower(firstTextContent(res)), ShouldContainSubstring, tc.want)
 			}
 			So(stub.requestCount(), ShouldEqual, 0)
+		})
+
+		Convey("D3.4: invalid group_by or unit is delegated to the upstream error path", func() {
+			cases := []struct {
+				name      string
+				args      map[string]any
+				message   string
+				groupBy   []string
+				unit      string
+			}{
+				{
+					name: "empty group_by", args: map[string]any{"group_by": []any{}, "unit": "runs"},
+					message: "group_by is required", unit: "runs",
+				},
+				{
+					name: "invalid group_by", args: map[string]any{"group_by": []any{"study"}, "unit": "runs"},
+					message: "unsupported group_by study", groupBy: []string{"study"}, unit: "runs",
+				},
+				{
+					name: "invalid unit", args: map[string]any{"group_by": []any{"month"}, "unit": "reads"},
+					message: "unsupported unit reads", groupBy: []string{"month"}, unit: "reads",
+				},
+			}
+
+			for _, tc := range cases {
+				stub.respondError("/sequencing/aggregate", http.StatusBadRequest, "bad_request", tc.message)
+				before := stub.requestCount()
+
+				res := callTool(t, cs, "mlwh_sequencing_aggregate", tc.args)
+				So(res.IsError, ShouldBeTrue)
+				text := strings.ToLower(firstTextContent(res))
+				So(text, ShouldContainSubstring, tc.message)
+				So(text, ShouldContainSubstring, "fix the input")
+				So(stub.requestCount(), ShouldEqual, before+1)
+
+				req, ok := stub.lastRequest()
+				So(ok, ShouldBeTrue)
+				So(req.Query["group_by"], ShouldResemble, tc.groupBy)
+				So(req.Query.Get("unit"), ShouldEqual, tc.unit)
+			}
 		})
 
 		Convey("D3.5: descriptions explain date bases and multi-study run attribution", func() {
