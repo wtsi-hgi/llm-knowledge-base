@@ -428,7 +428,21 @@ func applyComponentSchemaOverrides(schemas map[string]any) {
 		allowNullProperty(schema, "deliverable")
 	}
 	if schema, ok := schemas["SequencingAggregateRow"].(map[string]any); ok {
-		allowStringMapProperty(schema, "group")
+		allowMapProperty(schema, "group", map[string]any{"type": "string"})
+	}
+
+	for _, componentName := range []string{"StudyDetail", "RunDetail"} {
+		schema, ok := schemas[componentName].(map[string]any)
+		if !ok {
+			continue
+		}
+
+		allowMapProperty(schema, "study_lookup", map[string]any{
+			"$ref": openAPISchemaRefPrefix + "Study",
+		})
+		allowMapProperty(schema, "library_lookup", map[string]any{
+			"$ref": openAPISchemaRefPrefix + "Library",
+		})
 	}
 }
 
@@ -449,9 +463,10 @@ func allowNullProperty(schema map[string]any, propertyName string) {
 	property["type"] = []any{"boolean", "null"}
 }
 
-// allowStringMapProperty corrects an OpenAPI generator limitation for
-// map[string]string fields, which otherwise appear as scalar strings.
-func allowStringMapProperty(schema map[string]any, propertyName string) {
+// allowMapProperty corrects an OpenAPI generator limitation for map fields,
+// which otherwise appear as scalar strings. It replaces only the map-specific
+// schema keywords, preserving the property's description and other metadata.
+func allowMapProperty(schema map[string]any, propertyName string, valueSchema map[string]any) {
 	properties, ok := schema["properties"].(map[string]any)
 	if !ok {
 		return
@@ -463,7 +478,7 @@ func allowStringMapProperty(schema map[string]any, propertyName string) {
 	}
 
 	property["type"] = "object"
-	property["additionalProperties"] = map[string]any{"type": "string"}
+	property["additionalProperties"] = valueSchema
 }
 
 // outputSchemaForSlice returns the object-typed output schema for a list tool

@@ -678,3 +678,111 @@ func runDetail52553() wa.RunDetail {
 		Studies: []wa.Study{{IDStudyLims: "S1", Name: "Study One"}},
 	}
 }
+
+// TestNonLeanStudyDetailLookupMaps proves the non-lean study detail response
+// accepts the object-valued study and library lookup tables emitted by wa.
+func TestNonLeanStudyDetailLookupMaps(t *testing.T) {
+	Convey("Given a non-lean study detail with populated lookup maps", t, func() {
+		stub := newStubMLWH(t)
+		cs, cleanup := runMLWHServerWithClient(t, stub)
+		defer cleanup()
+
+		stub.respondJSONWithHeaders("/study/S1/detail", http.StatusOK, studyDetailS1NonLean(), http.Header{
+			"X-Total-Count": {"1"},
+		})
+
+		res := callTool(t, cs, "mlwh_study_detail", map[string]any{"study_lims_id": "S1"})
+		obj := structuredObject(res)
+
+		studyLookup, ok := obj["study_lookup"].(map[string]any)
+		So(ok, ShouldBeTrue)
+		study, ok := studyLookup["S1"].(map[string]any)
+		So(ok, ShouldBeTrue)
+		So(study["name"], ShouldEqual, "Study One")
+
+		libraryLookup, ok := obj["library_lookup"].(map[string]any)
+		So(ok, ShouldBeTrue)
+		library, ok := libraryLookup["LIB1"].(map[string]any)
+		So(ok, ShouldBeTrue)
+		So(library["pipeline_id_lims"], ShouldEqual, "P1")
+	})
+}
+
+// TestNonLeanRunDetailLookupMaps proves both the run-level and nested
+// StudyDetail lookup tables accept their real object values over MCP.
+func TestNonLeanRunDetailLookupMaps(t *testing.T) {
+	Convey("Given a non-lean run detail with populated root and nested lookup maps", t, func() {
+		stub := newStubMLWH(t)
+		cs, cleanup := runMLWHServerWithClient(t, stub)
+		defer cleanup()
+
+		stub.respondJSONWithHeaders("/run/52553/detail", http.StatusOK, runDetail52553NonLean(), http.Header{
+			"X-Total-Count": {"1"},
+		})
+
+		res := callTool(t, cs, "mlwh_run_detail", map[string]any{"id_run": "52553"})
+		obj := structuredObject(res)
+
+		studyLookup, ok := obj["study_lookup"].(map[string]any)
+		So(ok, ShouldBeTrue)
+		study, ok := studyLookup["S1"].(map[string]any)
+		So(ok, ShouldBeTrue)
+		So(study["name"], ShouldEqual, "Study One")
+
+		libraryLookup, ok := obj["library_lookup"].(map[string]any)
+		So(ok, ShouldBeTrue)
+		library, ok := libraryLookup["LIB1"].(map[string]any)
+		So(ok, ShouldBeTrue)
+		So(library["pipeline_id_lims"], ShouldEqual, "P1")
+
+		studyDetails, ok := obj["study_details"].([]any)
+		So(ok, ShouldBeTrue)
+		So(studyDetails, ShouldHaveLength, 1)
+		nested, ok := studyDetails[0].(map[string]any)
+		So(ok, ShouldBeTrue)
+		nestedStudyLookup, ok := nested["study_lookup"].(map[string]any)
+		So(ok, ShouldBeTrue)
+		_, ok = nestedStudyLookup["S1"].(map[string]any)
+		So(ok, ShouldBeTrue)
+		nestedLibraryLookup, ok := nested["library_lookup"].(map[string]any)
+		So(ok, ShouldBeTrue)
+		_, ok = nestedLibraryLookup["LIB1"].(map[string]any)
+		So(ok, ShouldBeTrue)
+	})
+}
+
+// runDetail52553NonLean is a de-duplicated non-lean RunDetail with populated
+// lookup tables both at the root and in its nested StudyDetail.
+func runDetail52553NonLean() wa.RunDetail {
+	studyDetail := studyDetailS1NonLean()
+
+	return wa.RunDetail{
+		Run:           wa.Run{IDRun: 52553},
+		Samples:       []wa.Sample{{IDSampleTmp: 1, Name: "SAM1"}},
+		Studies:       []wa.Study{studyDetail.Study},
+		StudyDetails:  []wa.StudyDetail{studyDetail},
+		StudyLookup:   studyDetail.StudyLookup,
+		LibraryLookup: studyDetail.LibraryLookup,
+	}
+}
+
+// studyDetailS1NonLean is a de-duplicated non-lean StudyDetail with the real
+// object-valued lookup tables returned by wa v0.8.0.
+func studyDetailS1NonLean() wa.StudyDetail {
+	study := wa.Study{IDStudyLims: "S1", Name: "Study One"}
+	library := wa.Library{
+		PipelineIDLims: "P1",
+		IDStudyLims:    "S1",
+		LibraryID:      "LIB1",
+	}
+
+	return wa.StudyDetail{
+		Study: study,
+		Libraries: []wa.LibraryDetail{{
+			Library: library,
+			Samples: []wa.Sample{{IDSampleTmp: 1, Name: "SAM1"}},
+		}},
+		StudyLookup:   map[string]wa.Study{"S1": study},
+		LibraryLookup: map[string]wa.Library{"LIB1": library},
+	}
+}
