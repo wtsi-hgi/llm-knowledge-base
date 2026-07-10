@@ -60,6 +60,33 @@ func TestWorkflowResource(t *testing.T) {
 			So(contents.Text, ShouldContainSubstring, wa.EndpointReference())
 		})
 
+		Convey("A1.3: the workflow guidance and Registry catalogue contain no removed manifest API", func() {
+			So(contents.Text, ShouldNotContainSubstring, "StudyManifest")
+			So(contents.Text, ShouldNotContainSubstring, "CountStudyManifest")
+			So(contents.Text, ShouldNotContainSubstring, "/manifest")
+			So(contents.Text, ShouldNotContainSubstring, "mlwh_study_manifest")
+			So(contents.Text, ShouldNotContainSubstring, "mlwh_count_study_manifest")
+		})
+
+		Convey("A2.4: Registry and EndpointReference catalogue include Export and exclude manifests", func() {
+			registryMethods := make(map[string]bool, len(wa.Registry))
+			for _, entry := range wa.Registry {
+				registryMethods[entry.Method] = true
+			}
+
+			So(registryMethods["Export"], ShouldBeTrue)
+			So(registryMethods["StudyManifest"], ShouldBeFalse)
+			So(registryMethods["CountStudyManifest"], ShouldBeFalse)
+
+			catalogue := wa.EndpointReference()
+			So(contents.Text, ShouldEqual, workflowGuidance+catalogue)
+			So(catalogue, ShouldContainSubstring, "`GET /export/:children/:parent_kind/:parent_id`")
+			So(catalogue, ShouldContainSubstring, "ExportResult")
+			So(catalogue, ShouldNotContainSubstring, "StudyManifest")
+			So(catalogue, ShouldNotContainSubstring, "CountStudyManifest")
+			So(catalogue, ShouldNotContainSubstring, "/manifest")
+		})
+
 		Convey("G1.2: the resource's MIMEType is text/markdown", func() {
 			So(contents.MIMEType, ShouldEqual, "text/markdown")
 		})
@@ -77,7 +104,6 @@ func TestWorkflowResource(t *testing.T) {
 			So(guidance, ShouldContainSubstring, "mlwh_study_status_breakdown")
 			So(guidance, ShouldContainSubstring, "mlwh_sample_progress")
 			So(guidance, ShouldContainSubstring, "mlwh_run_status")
-			So(guidance, ShouldContainSubstring, "mlwh_study_manifest")
 			So(guidance, ShouldContainSubstring, "file_type=cram")
 			So(guidance, ShouldContainSubstring, "mlwh_resolve_person")
 		})

@@ -4,9 +4,9 @@ A [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server, writte
 in Go, that lets LLM agents (Claude Code, Codex, and later a web UI server-side
 agent) query the Multi-LIMS Warehouse (MLWH) read API in natural, tool-driven
 ways: search and count samples and studies, resolve identifiers, answer cheap
-overview/status/availability questions, page through manifests and iRODS paths,
-route people and sponsor questions, drill into detail and fan-outs, and report
-data freshness.
+overview/status/availability questions, page through iRODS paths, route people
+and sponsor questions, drill into detail and fan-outs, and report data
+freshness.
 
 The MLWH read API is provided by the separate upstream
 [`wa`](https://github.com/wtsi-hgi/wa) project (its `wa mlwh serve` command). This
@@ -14,7 +14,7 @@ server is a thin, well-described bridge whose value is making those endpoints
 ergonomic and correctly usable by an LLM, not re-implementing them: it imports
 `github.com/wtsi-hgi/wa/mlwh` and reuses its typed client, response types,
 registry, and OpenAPI document directly, so there is no type drift and the server
-is compile-time-locked to the upstream API version (currently MLWH API 1.7.0).
+is compile-time-locked to the upstream API version (currently MLWH API 1.8.0).
 
 The MLWH provider serves over the **stdio** transport by default, so it can run
 as a local subprocess launched per user by an agent CLI. It can also run in
@@ -45,7 +45,7 @@ below. Check the build and the versions it targets:
 ```bash
 mlwh-mcp-server --version
 # mlwh-mcp-server version <build version>
-# MLWH API version 1.7.0
+# MLWH API version 1.8.0
 ```
 
 ## Configuration
@@ -263,10 +263,6 @@ Prompt cookbook:
   - "List CRAM iRODS paths for study `S1`, first page only."
   - "Show iRODS paths for run `52553` with `file_type=cram`."
   - "Are there any VCF paths for `S1`?"
-- **Study manifest**
-  - "Build a manifest for study `S1`."
-  - "Build a study `S1` manifest with an iRODS CRAM column."
-  - "How many manifest rows would study `S1` return?"
 - **People, sponsors, and users**
   - "Which studies have faculty sponsor `Carl`?"
   - "How many studies is `cwa` associated with as a user?"
@@ -324,15 +320,14 @@ A curated, LLM-ergonomic tool surface generated from the MLWH endpoint registry
   `mlwh_study_status_breakdown`, `mlwh_run_overview`, `mlwh_run_status`,
   `mlwh_sample_progress`. These are the preferred tools for common availability,
   QC, run, and "what is happening?" questions.
-- **Availability, iRODS, and manifests**:
+- **Availability and iRODS**:
   `mlwh_count_samples_with_data_for_study`,
   `mlwh_samples_with_data_for_study`,
   `mlwh_samples_without_data_for_study`,
   `mlwh_irods_paths_for_sample`, `mlwh_count_irods_paths_for_sample`,
   `mlwh_irods_paths_for_study`, `mlwh_count_irods_paths_for_study`,
-  `mlwh_irods_paths_for_run`, `mlwh_count_irods_paths_for_run`,
-  `mlwh_study_manifest`, `mlwh_count_study_manifest`. iRODS tools support
-  upstream `file_type` suffix filtering, such as `cram`.
+  `mlwh_irods_paths_for_run`, `mlwh_count_irods_paths_for_run`. iRODS tools
+  support upstream `file_type` suffix filtering, such as `cram`.
 - **Detail, fan-out, and count counterparts**: `mlwh_sample_detail`,
   `mlwh_study_detail`, `mlwh_run_detail`, `mlwh_library_detail`,
   `mlwh_all_studies`, `mlwh_samples_for_study`, `mlwh_count_samples_for_study`,

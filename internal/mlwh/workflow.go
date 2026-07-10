@@ -45,7 +45,7 @@ const workflowResourceURI = "mlwh://workflow"
 // G1.3, but the guidance is genuine planning help, not test scaffolding.
 const workflowGuidance = "# MLWH workflows\n\n" +
 	"This server bridges the read-only `wa mlwh` API. Prefer cheap overview, count, " +
-	"status, manifest, person-resolution, and freshness tools before expensive detail " +
+	"status, person-resolution, and freshness tools before expensive detail " +
 	"or list calls. A common identifier workflow is to **resolve** a raw identifier into " +
 	"a canonical `Match` (e.g. `mlwh_resolve_sample`, `mlwh_resolve_study`), fetch " +
 	"**detail** aggregates only when cheaper tools do not answer the question (e.g. " +
@@ -65,16 +65,15 @@ const workflowGuidance = "# MLWH workflows\n\n" +
 	"- Sample/run progress: use `mlwh_sample_progress` and `mlwh_run_status`; compute " +
 	"open phase elapsed time on the agent side from `reached_at` or `entered_at`.\n" +
 	"- CRAM paths: count first, then use an iRODS path tool with `file_type=cram`.\n" +
-	"- Manifest: use `mlwh_study_manifest`; set `with_irods=true` and " +
-	"`file_type=cram` when a CRAM column is requested.\n" +
 	"- People routing: send sponsor questions to faculty-sponsor tools, " +
 	"login/email/membership questions to user tools, and ambiguous names through " +
 	"`mlwh_resolve_person`.\n" +
 	"- Freshness: use response `cache_synced_at` when present; use `mlwh_freshness` for " +
 	"bare lists, counts, `mlwh_run_status`, and `mlwh_call_endpoint` responses without " +
 	"cache_synced_at.\n\n" +
-	"The full, always-current endpoint catalogue follows; the generic `mlwh_call_endpoint` " +
-	"tool can reach any endpoint by its Registry Method name.\n\n" +
+	"The full, always-current `wa.EndpointReference()` catalogue follows. Choose a Registry " +
+	"Method from the `mlwh_call_endpoint` input enum, then use this catalogue for its path and " +
+	"query parameters; the generic tool can reach every entry without a curated tool.\n\n" +
 	"---\n\n"
 
 // workflowResourceBody assembles the workflow resource body: the workflow

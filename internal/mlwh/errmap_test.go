@@ -192,20 +192,6 @@ func TestF1ToolErrorMapping(t *testing.T) {
 				},
 			},
 			{
-				name:    "F1.7: a new manifest tool advises retrying after cache or upstream recovery",
-				tool:    "mlwh_study_manifest",
-				args:    map[string]any{"study_lims_id": "S1", "with_irods": true, "file_type": "cram"},
-				path:    "/study/S1/manifest",
-				status:  http.StatusBadGateway,
-				code:    "upstream_impaired",
-				message: "cache/upstream impaired while building manifest",
-				substrings: []string{
-					"retry",
-					"cache",
-					"upstream recovery",
-				},
-			},
-			{
 				name:    "F1.8: a new person tool advises fixing input or retrying later",
 				tool:    "mlwh_studies_for_user",
 				args:    map[string]any{"person": "cwa"},

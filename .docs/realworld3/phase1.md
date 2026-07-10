@@ -32,8 +32,8 @@ types, schemas, registration, tests, workflow text, and downstream API
 references. Update `internal/mlwh/provider.go`, availability code, and command
 tests, covering all 4 acceptance tests from A1.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 ### Item 1.2: A2 - Preserve complete Registry and OpenAPI parity
 
@@ -45,5 +45,5 @@ Update `internal/mlwh/tools_call.go`, `schema.go`, and `workflow.go` so
 comes from `wa.EndpointReference()`. Cover all 4 acceptance tests from A2.
 This item depends on item 1.1 being reviewed.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed

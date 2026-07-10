@@ -44,8 +44,9 @@ import (
 // tool.
 const callEndpointDescription = "Escape hatch: call any MLWH endpoint by its Registry Method name. " +
 	"Prefer the curated tools (search, resolve, detail, fan-out, freshness) where one exists; use this " +
-	"only to reach an endpoint that has no curated tool. Set method to the Registry Method name (e.g. " +
-	"\"ResolveStudy\", \"AllStudies\"); the mlwh://workflow resource lists every Method with its path and " +
+	"only to reach an endpoint that has no curated tool. Choose method from the complete Registry-derived " +
+	"input enum (e.g. \"ResolveStudy\", \"AllStudies\", \"Export\"); the mlwh://workflow resource contains " +
+	"the EndpointReference catalogue with every endpoint's path and " +
 	"query parameters. Supply path_params in the endpoint's declared order and query_params (including " +
 	"limit/offset for paginated endpoints). Unknown methods and the wrong number of path params are " +
 	"rejected. The decoded result is returned untyped (no per-endpoint output schema); dynamic calls with " +
@@ -73,8 +74,9 @@ func (p *provider) registerCallTool(r core.Registrar) error {
 	client := p.client
 
 	mcp.AddTool(r.Server(), &mcp.Tool{
-		Name:        "mlwh_call_endpoint",
-		Description: callEndpointDescription,
+		Name:         "mlwh_call_endpoint",
+		Description:  callEndpointDescription,
+		InputSchema: callEndpointInputSchema(),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in CallInput) (*mcp.CallToolResult, any, error) {
 		return callEndpoint(ctx, client, in)
 	})

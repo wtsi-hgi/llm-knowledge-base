@@ -50,6 +50,7 @@ import (
 func TestRunVersionFlag(t *testing.T) {
 	Convey("Given --version and a captured stdout, with no MLWH_BASE_URL configured", t, func() {
 		t.Setenv("MLWH_BASE_URL", "")
+		So(wa.APIVersion, ShouldEqual, "1.8.0")
 
 		var stdout bytes.Buffer
 		coreFactoryCalls := 0
@@ -95,7 +96,7 @@ func TestRunVersionFlag(t *testing.T) {
 
 			out := stdout.String()
 			So(out, ShouldContainSubstring, core.ServerVersion)
-			So(out, ShouldContainSubstring, wa.APIVersion)
+			So(out, ShouldContainSubstring, "MLWH API version "+wa.APIVersion)
 		})
 
 		Convey("A1.4: it opens neither stdio nor HTTP serving", func() {

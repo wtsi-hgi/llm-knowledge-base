@@ -111,19 +111,13 @@ func availabilityListDescription(method string) (string, error) {
 	return base + pagedFanOutPaginationNote + bareListFreshnessNote, nil
 }
 
-// registerAvailabilityTools adds the phase 6 availability-family tools: C1
-// sample availability, C2 iRODS run/count additions, and C3 study manifest
-// list/count tools. Window and file_type values are passed through unchanged to
-// wa, preserving upstream RFC3339 and bad-request semantics.
+// registerAvailabilityTools adds sample availability and iRODS run/count
+// tools. Window and file_type values are passed through unchanged to wa,
+// preserving upstream RFC3339 and bad-request semantics.
 func (p *provider) registerAvailabilityTools(r core.Registrar) error {
 	samplesSchema, err := outputSchemaForPagedSlice("samples", "SampleWithData")
 	if err != nil {
 		return fmt.Errorf("mlwh: build sample availability output schema: %w", err)
-	}
-
-	manifestSchema, err := outputSchemaForPagedObject("StudyManifest")
-	if err != nil {
-		return fmt.Errorf("mlwh: build study manifest output schema: %w", err)
 	}
 
 	irodsSchema, err := outputSchemaForPagedSlice("irods_paths", "IRODSPath")
@@ -145,14 +139,6 @@ func (p *provider) registerAvailabilityTools(r core.Registrar) error {
 	}
 
 	if err := p.addSamplesWithoutDataForStudy(r, samplesSchema); err != nil {
-		return err
-	}
-
-	if err := p.addStudyManifest(r, manifestSchema); err != nil {
-		return err
-	}
-
-	if err := p.addCountStudyManifest(r, countSchema); err != nil {
 		return err
 	}
 
@@ -384,87 +370,6 @@ func (p *provider) addSamplesWithoutDataForStudy(r core.Registrar, outputSchema 
 			Total:      page.Total,
 			NextOffset: page.NextOffset,
 		}, nil
-	})
-
-	return nil
-}
-
-// pagedStudyManifestResult flattens wa.PagedStudyManifest for MCP: the upstream
-// StudyManifest fields stay at top level and the page metadata is added beside
-// them, with no study_manifest wrapper.
-type pagedStudyManifestResult struct {
-	wa.StudyManifest
-	Total      int `json:"total"`
-	NextOffset int `json:"next_offset"`
-}
-
-// studyManifestInput is the input for mlwh_study_manifest: a LIMS study id,
-// optional iRODS path enrichment/filtering, and bounded page controls.
-type studyManifestInput struct {
-	StudyLimsID string `json:"study_lims_id" jsonschema:"the LIMS identifier of the study to manifest"`
-	WithIRODS   bool   `json:"with_irods,omitempty" jsonschema:"include irods_path on each manifest row when true"`
-	FileType    string `json:"file_type,omitempty" jsonschema:"optional iRODS filename suffix filter, used only when with_irods is true"`
-	Limit       int    `json:"limit,omitempty" jsonschema:"maximum rows to return; defaults to 100, maximum 1000 (a larger limit is rejected, not clamped)"`
-	Offset      int    `json:"offset,omitempty" jsonschema:"number of leading rows to skip before returning results; defaults to 0"`
-}
-
-// addStudyManifest registers mlwh_study_manifest (Story C3): a bounded,
-// header-aware study manifest page whose output flattens the upstream manifest
-// envelope with top-level total and next_offset.
-func (p *provider) addStudyManifest(r core.Registrar, outputSchema map[string]any) error {
-	description, err := resolveDescription("StudyManifest")
-	if err != nil {
-		return err
-	}
-
-	client := p.client
-
-	mcp.AddTool(r.Server(), &mcp.Tool{
-		Name:         "mlwh_study_manifest",
-		Description:  description + pagedFanOutPaginationNote,
-		OutputSchema: outputSchema,
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in studyManifestInput) (*mcp.CallToolResult, pagedStudyManifestResult, error) {
-		limit, offset, err := boundedPagination(in.Limit, in.Offset)
-		if err != nil {
-			return core.ToolError[pagedStudyManifestResult](err)
-		}
-
-		page, err := client.StudyManifestPage(ctx, in.StudyLimsID, in.FileType, in.WithIRODS, limit, offset)
-		if err != nil {
-			return core.ToolError[pagedStudyManifestResult](mapToolError(err))
-		}
-
-		return nil, pagedStudyManifestResult{
-			StudyManifest: page.StudyManifest,
-			Total:         page.Total,
-			NextOffset:    page.NextOffset,
-		}, nil
-	})
-
-	return nil
-}
-
-// addCountStudyManifest registers mlwh_count_study_manifest (Story C3): the
-// product-grained count counterpart for mlwh_study_manifest.
-func (p *provider) addCountStudyManifest(r core.Registrar, outputSchema map[string]any) error {
-	description, err := resolveDescription("CountStudyManifest")
-	if err != nil {
-		return err
-	}
-
-	client := p.client
-
-	mcp.AddTool(r.Server(), &mcp.Tool{
-		Name:         "mlwh_count_study_manifest",
-		Description:  description + countFreshnessNote,
-		OutputSchema: outputSchema,
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in studyIDInput) (*mcp.CallToolResult, wa.Count, error) {
-		count, err := client.CountStudyManifest(ctx, in.StudyLimsID)
-		if err != nil {
-			return core.ToolError[wa.Count](mapToolError(err))
-		}
-
-		return nil, count, nil
 	})
 
 	return nil

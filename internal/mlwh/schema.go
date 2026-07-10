@@ -49,6 +49,41 @@ const (
 	pagedMaxLimit      = 1000
 )
 
+// callEndpointInputSchema describes the generic call tool input and advertises
+// every Registry Method as the method enum. The enum is rebuilt from the live
+// Registry when the provider registers, so adding an upstream endpoint makes
+// it discoverable without adding another curated tool or maintaining a second
+// method list.
+func callEndpointInputSchema() map[string]any {
+	methods := make([]any, len(wa.Registry))
+	for i, entry := range wa.Registry {
+		methods[i] = entry.Method
+	}
+
+	return map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"properties": map[string]any{
+			"method": map[string]any{
+				"type":        "string",
+				"description": "the Registry Method name to dispatch (see mlwh://workflow for its endpoint)",
+				"enum":        methods,
+			},
+			"path_params": map[string]any{
+				"type":        "array",
+				"description": "the endpoint's path parameters, in Registry declaration order",
+				"items":       map[string]any{"type": "string"},
+			},
+			"query_params": map[string]any{
+				"type":                 "object",
+				"description":          "the endpoint's query parameters, including pagination controls",
+				"additionalProperties": map[string]any{"type": "string"},
+			},
+		},
+		"required": []any{"method"},
+	}
+}
+
 // slice wrapper structs give each list-returning tool an object-typed Out, as
 // MCP requires (output schemas and StructuredContent must be JSON objects, not
 // bare arrays). Each wraps exactly one slice under a JSON field name that is
@@ -236,8 +271,8 @@ func outputSchemaForPagedSlice(propertyName, componentName string) (map[string]a
 // outputSchemaForPagedObject returns the OpenAPI-sourced object schema for an
 // upstream envelope with the required pagination metadata added at the top
 // level. It is used for paged typed tools whose semantic response is already an
-// object, such as StudyManifest, so the MCP result stays flattened instead of
-// wrapping the object under another property.
+// object, so the MCP result stays flattened instead of wrapping the object
+// under another property.
 func outputSchemaForPagedObject(componentName string) (map[string]any, error) {
 	schema, err := outputSchemaFor(componentName)
 	if err != nil {

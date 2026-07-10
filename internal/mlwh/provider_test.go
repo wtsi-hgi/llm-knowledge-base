@@ -40,7 +40,7 @@ import (
 
 // fullSurfaceTools is the full set of typed MLWH tools the provider registers:
 // the original A-E tools plus the phase 5-8 overview/status, availability,
-// manifest, people, and count surfaces that F2 guards. I1.1 requires at least
+// availability, people, and count surfaces that F2 guards. I1.1 requires at least
 // the eight headline tools listed in the spec; this fuller set strengthens the
 // assertion so a dropped tool in any group fails the test, not just one of the
 // named headline tools.
@@ -94,8 +94,6 @@ var fullSurfaceTools = []string{
 	"mlwh_count_irods_paths_for_sample",
 	"mlwh_count_irods_paths_for_study",
 	"mlwh_count_irods_paths_for_run",
-	"mlwh_study_manifest",
-	"mlwh_count_study_manifest",
 	"mlwh_count_samples_for_study",
 	"mlwh_count_samples_for_run",
 	"mlwh_count_runs_for_study",
@@ -146,7 +144,6 @@ var f2HeadlineTools = []string{
 	"mlwh_sample_progress",
 	"mlwh_samples_with_data_for_study",
 	"mlwh_samples_without_data_for_study",
-	"mlwh_study_manifest",
 	"mlwh_irods_paths_for_run",
 	"mlwh_studies_for_user",
 	"mlwh_resolve_person",
@@ -217,13 +214,23 @@ func TestProviderNew(t *testing.T) {
 	})
 }
 
-func TestWAAPI17Contract(t *testing.T) {
-	Convey("Given the updated module, provider construction targets wa API 1.7.0", t, func() {
-		So(wa.APIVersion, ShouldEqual, "1.7.0")
+func TestWAAPI18Contract(t *testing.T) {
+	Convey("A1.1: Given the updated module, provider construction targets wa API 1.8.0", t, func() {
+		So(wa.APIVersion, ShouldEqual, "1.8.0")
 
 		provider, err := New(wa.RemoteConfig{BaseURL: "http://stub.example"})
 		So(err, ShouldBeNil)
-		So(provider.APIVersion(), ShouldEqual, "1.7.0")
+		So(provider.APIVersion(), ShouldEqual, wa.APIVersion)
+	})
+
+	Convey("A1.4: Given the v0.8.0 Registry, removed manifest APIs are not part of the compiled contract", t, func() {
+		_, hasStudyManifest := registryEntryByMethod("StudyManifest")
+		So(hasStudyManifest, ShouldBeFalse)
+
+		_, hasCountStudyManifest := registryEntryByMethod("CountStudyManifest")
+		So(hasCountStudyManifest, ShouldBeFalse)
+
+		So(wa.EndpointReference(), ShouldNotContainSubstring, "/manifest")
 	})
 
 	Convey("Given wa.Registry, the A1 methods expose upstream endpoint documentation", t, func() {
@@ -288,8 +295,10 @@ func TestProviderFullSurface(t *testing.T) {
 		cs, cleanup := runMLWHServerWithClient(t, stub)
 		defer cleanup()
 
-		Convey("I1.1/F2.1: a tools listing includes the full MLWH surface", func() {
+		Convey("A1.2/I1.1/F2.1: a tools listing excludes manifests and includes every other existing tool", func() {
 			registered := listToolNames(t, cs)
+			So(registered, ShouldNotContainKey, "mlwh_study_manifest")
+			So(registered, ShouldNotContainKey, "mlwh_count_study_manifest")
 
 			for _, name := range i1HeadlineTools {
 				So(registered, ShouldContainKey, name)
@@ -312,26 +321,19 @@ func TestProviderFullSurface(t *testing.T) {
 			So(missing, ShouldBeEmpty)
 		})
 
-		Convey("F2.2: every Registry /count method is surfaced by one MCP count tool", func() {
+		Convey("A1.2: every surviving existing count tool remains Registry-backed", func() {
 			tools := listToolsByName(t, cs)
 			registered := toolNameSet(tools)
 			expected := registryCountToolNames()
 
-			missing := missingRegistryCountTools(registered, expected)
-			So(missing, ShouldBeEmpty)
-
-			extra := extraRegisteredCountTools(registered, expected)
-			So(extra, ShouldBeEmpty)
-
-			nonFindMethods := nonFindMethodsUsingCountFindSamples(expected)
-			So(nonFindMethods, ShouldBeEmpty)
+			failures := existingCountToolRegistryFailures(registered, expected)
+			So(failures, ShouldBeEmpty)
 		})
 
-		Convey("F2.3: paged availability and manifest schemas keep semantic fields plus required page metadata", func() {
+		Convey("F2.3: paged availability schemas keep semantic fields plus required page metadata", func() {
 			tools := listToolsByName(t, cs)
 
 			failures := pagedToolSchemaFailures(tools, "mlwh_samples_with_data_for_study", "samples")
-			failures = append(failures, pagedToolSchemaFailures(tools, "mlwh_study_manifest", "rows")...)
 
 			So(failures, ShouldBeEmpty)
 		})
@@ -453,48 +455,26 @@ func camelToSnake(value string) string {
 	return snaked
 }
 
-func missingRegistryCountTools(registered map[string]struct{}, expected map[string]string) []string {
-	var missing []string
-
-	for method, toolName := range expected {
-		if _, ok := registered[toolName]; !ok {
-			missing = append(missing, method+" -> "+toolName)
-		}
-	}
-
-	return missing
-}
-
-func extraRegisteredCountTools(registered map[string]struct{}, expected map[string]string) []string {
+func existingCountToolRegistryFailures(registered map[string]struct{}, expected map[string]string) []string {
 	expectedNames := map[string]struct{}{}
 	for _, name := range expected {
 		expectedNames[name] = struct{}{}
 	}
 
-	var extra []string
-
-	for name := range registered {
+	var failures []string
+	for _, name := range fullSurfaceTools {
 		if !strings.HasPrefix(name, "mlwh_count_") {
 			continue
 		}
+		if _, ok := registered[name]; !ok {
+			failures = append(failures, name+" is not registered")
+		}
 		if _, ok := expectedNames[name]; !ok {
-			extra = append(extra, name)
+			failures = append(failures, name+" has no Registry count method")
 		}
 	}
 
-	return extra
-}
-
-func nonFindMethodsUsingCountFindSamples(expected map[string]string) []string {
-	var methods []string
-
-	for method, toolName := range expected {
-		if toolName == "mlwh_count_find_samples" && !strings.HasPrefix(method, "CountFindSamplesBy") {
-			methods = append(methods, method)
-		}
-	}
-
-	return methods
+	return failures
 }
 
 func pagedToolSchemaFailures(tools map[string]*mcp.Tool, toolName, semanticField string) []string {
