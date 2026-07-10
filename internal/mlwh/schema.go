@@ -50,6 +50,39 @@ const (
 	pagedMaxLimit          = 1000
 )
 
+const studyUsersRoleDescription = "optional comma-separated exact case-insensitive set of stored study_users roles; " +
+	"omit to match all roles; allowed roles are owner, manager, data_access_contact, follower, slf_manager, " +
+	"lab_manager, and administrator"
+
+// studyUsersInputSchema describes the inverse study-to-users tools. Role stays
+// an unrestricted string in the MCP schema because MLWH owns validation and
+// its mapped bad-request error must remain authoritative.
+func studyUsersInputSchema(paged bool) map[string]any {
+	properties := map[string]any{
+		"study_lims_id": map[string]any{
+			"type": "string", "description": "SQSCP LIMS study identifier",
+		},
+		"role": map[string]any{
+			"type": "string", "description": studyUsersRoleDescription,
+		},
+	}
+	if paged {
+		properties["limit"] = map[string]any{
+			"type": "integer", "description": "maximum rows to return; defaults to 100, maximum 1000",
+		}
+		properties["offset"] = map[string]any{
+			"type": "integer", "description": "non-negative number of leading rows to skip; defaults to 0",
+		}
+	}
+
+	return map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"properties":           properties,
+		"required":             []any{"study_lims_id"},
+	}
+}
+
 // exportInputSchema describes the generic relationship export input. Its three
 // vocabulary-bearing properties are generated from wa's runtime sources of
 // truth so aliases, parent kinds, defaults, and selectable columns move with

@@ -253,3 +253,248 @@ func TestPeopleTools(t *testing.T) {
 		})
 	})
 }
+
+// TestProgrammeTools covers E1: exact programme membership, vocabulary, and
+// the discovery/freshness guidance exposed through the curated MCP tools.
+func TestProgrammeTools(t *testing.T) {
+	Convey("Given the MLWH server (stub-backed) with programme tools", t, func() {
+		stub := newStubMLWH(t)
+		cs, cleanup := runMLWHServerWithClient(t, stub)
+		defer cleanup()
+
+		Convey("E1.1: programme list and count use exact paths with pagination only on the list", func() {
+			stub.respondJSONWithHeaders("/studies/programme/Cancer", http.StatusOK, []wa.Study{
+				{IDStudyLims: "5901", Name: "Cancer study", Programme: "Cancer"},
+			}, http.Header{
+				"X-Total-Count": {"1"},
+				"X-Next-Offset": {"-1"},
+			})
+			stub.respondJSON("/studies/programme/Cancer/count", http.StatusOK, wa.Count{Count: 1})
+
+			list := callTool(t, cs, "mlwh_studies_for_programme", map[string]any{
+				"programme": "Cancer",
+				"limit":     5,
+				"offset":    10,
+			})
+
+			listObject := structuredObject(list)
+			studies, ok := listObject["studies"].([]any)
+			So(ok, ShouldBeTrue)
+			So(len(studies), ShouldEqual, 1)
+			So(listObject["total"], ShouldEqual, 1)
+			So(listObject["next_offset"], ShouldEqual, -1)
+
+			study, ok := studies[0].(map[string]any)
+			So(ok, ShouldBeTrue)
+			So(study["programme"], ShouldEqual, "Cancer")
+
+			listRequest, ok := stub.lastRequest()
+			So(ok, ShouldBeTrue)
+			So(listRequest.Path, ShouldEqual, "/studies/programme/Cancer")
+			So(listRequest.Query.Get("limit"), ShouldEqual, "5")
+			So(listRequest.Query.Get("offset"), ShouldEqual, "10")
+
+			count := callTool(t, cs, "mlwh_count_studies_for_programme", map[string]any{
+				"programme": "Cancer",
+			})
+
+			So(structuredObject(count)["count"], ShouldEqual, 1)
+
+			countRequest, ok := stub.lastRequest()
+			So(ok, ShouldBeTrue)
+			So(countRequest.Path, ShouldEqual, "/studies/programme/Cancer/count")
+			So(countRequest.Query, ShouldBeEmpty)
+		})
+
+		Convey("E1.2: programme vocabulary preserves distinct non-empty names and exact counts", func() {
+			stub.respondJSON("/programmes", http.StatusOK, []wa.Programme{
+				{Name: "Cancer", StudyCount: 12},
+				{Name: "Rare Disease", StudyCount: 3},
+			})
+
+			res := callTool(t, cs, "mlwh_programmes", map[string]any{})
+
+			obj := structuredObject(res)
+			programmes, ok := obj["programmes"].([]any)
+			So(ok, ShouldBeTrue)
+			So(len(programmes), ShouldEqual, 2)
+			cancer, ok := programmes[0].(map[string]any)
+			So(ok, ShouldBeTrue)
+			So(cancer["name"], ShouldEqual, "Cancer")
+			So(cancer["study_count"], ShouldEqual, 12)
+			rareDisease, ok := programmes[1].(map[string]any)
+			So(ok, ShouldBeTrue)
+			So(rareDisease["name"], ShouldEqual, "Rare Disease")
+			So(rareDisease["study_count"], ShouldEqual, 3)
+
+			req, ok := stub.lastRequest()
+			So(ok, ShouldBeTrue)
+			So(req.Path, ShouldEqual, "/programmes")
+			So(req.Query, ShouldBeEmpty)
+		})
+
+		Convey("E1.4: programme descriptions point to exact-value discovery and cache state", func() {
+			for _, name := range []string{
+				"mlwh_studies_for_programme",
+				"mlwh_count_studies_for_programme",
+				"mlwh_programmes",
+			} {
+				tool, ok := toolByName(t, cs, name)
+				So(ok, ShouldBeTrue)
+				So(tool.Description, ShouldContainSubstring, "mlwh_programmes")
+				So(tool.Description, ShouldContainSubstring, "mlwh_freshness")
+			}
+		})
+	})
+}
+
+// TestStudyUserTools covers E2: study-to-user membership preserves the
+// upstream all-role default, optional role set, page shape, errors, and the
+// direction-specific routing guidance.
+func TestStudyUserTools(t *testing.T) {
+	Convey("Given the MLWH server (stub-backed) with inverse study-user tools", t, func() {
+		stub := newStubMLWH(t)
+		cs, cleanup := runMLWHServerWithClient(t, stub)
+		defer cleanup()
+
+		Convey("E2.1: omitted role lists and counts all role assignments without a role query", func() {
+			stub.respondJSONWithHeaders("/study/S1/users", http.StatusOK, []wa.StudyUser{
+				{Role: "owner", Name: "Olive Owner", Login: "oo1", Email: "oo1@example.org"},
+				{Role: "manager", Name: "Maya Manager", Login: "mm1", Email: "mm1@example.org"},
+				{Role: "follower", Name: "Fran Follower", Login: "ff1", Email: "ff1@example.org"},
+			}, http.Header{
+				"X-Total-Count": {"3"},
+				"X-Next-Offset": {"-1"},
+			})
+			stub.respondJSON("/study/S1/users/count", http.StatusOK, wa.Count{Count: 3})
+
+			list := callTool(t, cs, "mlwh_study_users", map[string]any{"study_lims_id": "S1"})
+			users, ok := structuredObject(list)["users"].([]any)
+			So(ok, ShouldBeTrue)
+			So(len(users), ShouldEqual, 3)
+
+			listRequest, ok := stub.lastRequest()
+			So(ok, ShouldBeTrue)
+			So(listRequest.Path, ShouldEqual, "/study/S1/users")
+			So(listRequest.Query.Get("limit"), ShouldEqual, "100")
+			So(listRequest.Query.Get("offset"), ShouldEqual, "0")
+			_, hasRole := listRequest.Query["role"]
+			So(hasRole, ShouldBeFalse)
+
+			count := callTool(t, cs, "mlwh_count_study_users", map[string]any{"study_lims_id": "S1"})
+			So(structuredObject(count)["count"], ShouldEqual, 3)
+
+			countRequest, ok := stub.lastRequest()
+			So(ok, ShouldBeTrue)
+			So(countRequest.Path, ShouldEqual, "/study/S1/users/count")
+			So(countRequest.Query, ShouldBeEmpty)
+		})
+
+		Convey("E2.2: owner,follower is forwarded identically by list and count and returns only that exact set", func() {
+			stub.respondJSONWithHeaders("/study/S1/users", http.StatusOK, []wa.StudyUser{
+				{Role: "owner", Name: "Olive Owner", Login: "oo1", Email: "oo1@example.org"},
+				{Role: "follower", Name: "Fran Follower", Login: "ff1", Email: "ff1@example.org"},
+			}, http.Header{
+				"X-Total-Count": {"2"},
+				"X-Next-Offset": {"-1"},
+			})
+			stub.respondJSON("/study/S1/users/count", http.StatusOK, wa.Count{Count: 2})
+
+			args := map[string]any{"study_lims_id": "S1", "role": "owner,follower", "limit": 2, "offset": 1}
+			list := callTool(t, cs, "mlwh_study_users", args)
+			users := structuredObject(list)["users"].([]any)
+			So(len(users), ShouldEqual, 2)
+			So(users[0].(map[string]any)["role"], ShouldEqual, "owner")
+			So(users[1].(map[string]any)["role"], ShouldEqual, "follower")
+
+			listRequest, ok := stub.lastRequest()
+			So(ok, ShouldBeTrue)
+			So(listRequest.Query.Get("role"), ShouldEqual, "owner,follower")
+			So(listRequest.Query.Get("limit"), ShouldEqual, "2")
+			So(listRequest.Query.Get("offset"), ShouldEqual, "1")
+
+			count := callTool(t, cs, "mlwh_count_study_users", map[string]any{
+				"study_lims_id": "S1", "role": "owner,follower",
+			})
+			So(structuredObject(count)["count"], ShouldEqual, 2)
+			countRequest, ok := stub.lastRequest()
+			So(ok, ShouldBeTrue)
+			So(countRequest.Query.Get("role"), ShouldEqual, listRequest.Query.Get("role"))
+		})
+
+		Convey("E2.3: the user page and OpenAPI-backed schema expose exact rows and semantic metadata", func() {
+			stub.respondJSONWithHeaders("/study/S2/users", http.StatusOK, []wa.StudyUser{
+				{Role: "administrator", Name: "Ada Admin", Login: "aa1", Email: "aa1@example.org"},
+			}, http.Header{
+				"X-Total-Count": {"7"},
+				"X-Next-Offset": {"5"},
+			})
+
+			result := callTool(t, cs, "mlwh_study_users", map[string]any{
+				"study_lims_id": "S2", "limit": 1, "offset": 4,
+			})
+			object := structuredObject(result)
+			So(object["total"], ShouldEqual, 7)
+			So(object["next_offset"], ShouldEqual, 5)
+			users, ok := object["users"].([]any)
+			So(ok, ShouldBeTrue)
+			So(len(users), ShouldEqual, 1)
+			So(users[0], ShouldResemble, map[string]any{
+				"role": "administrator", "name": "Ada Admin", "login": "aa1", "email": "aa1@example.org",
+			})
+
+			tool, ok := toolByName(t, cs, "mlwh_study_users")
+			So(ok, ShouldBeTrue)
+			output := tool.OutputSchema.(map[string]any)
+			properties := output["properties"].(map[string]any)
+			So(properties, ShouldContainKey, "users")
+			So(properties, ShouldContainKey, "total")
+			So(properties, ShouldContainKey, "next_offset")
+			items := properties["users"].(map[string]any)["items"].(map[string]any)
+			userProperties := items["properties"].(map[string]any)
+			So(len(userProperties), ShouldEqual, 4)
+			So(userProperties, ShouldContainKey, "role")
+			So(userProperties, ShouldContainKey, "name")
+			So(userProperties, ShouldContainKey, "login")
+			So(userProperties, ShouldContainKey, "email")
+		})
+
+		Convey("E2.4: an invalid role remains an upstream mapped tool error", func() {
+			upstreamText := `invalid role "viewer"; allowed roles are owner, manager, data_access_contact, follower, slf_manager, lab_manager, administrator`
+			stub.respondError("/study/S1/users", http.StatusBadRequest, "bad_request", upstreamText)
+
+			result := callTool(t, cs, "mlwh_study_users", map[string]any{
+				"study_lims_id": "S1", "role": "viewer",
+			})
+
+			So(result.IsError, ShouldBeTrue)
+			So(firstTextContent(result), ShouldContainSubstring, upstreamText)
+			request, ok := stub.lastRequest()
+			So(ok, ShouldBeTrue)
+			So(request.Query.Get("role"), ShouldEqual, "viewer")
+		})
+
+		Convey("E2.5: descriptions distinguish inverse membership from sponsor and person defaults", func() {
+			for _, name := range []string{"mlwh_study_users", "mlwh_count_study_users"} {
+				tool, ok := toolByName(t, cs, name)
+				So(ok, ShouldBeTrue)
+				description := strings.ToLower(tool.Description)
+				So(description, ShouldContainSubstring, "faculty_sponsor")
+				So(description, ShouldContainSubstring, "study field")
+				So(description, ShouldContainSubstring, "mlwh_studies_for_user")
+				So(description, ShouldContainSubstring, "owner, manager, and data_access_contact")
+			}
+
+			list, _ := toolByName(t, cs, "mlwh_study_users")
+			input := list.InputSchema.(map[string]any)
+			role := input["properties"].(map[string]any)["role"].(map[string]any)
+			roleDescription := strings.ToLower(role["description"].(string))
+			So(roleDescription, ShouldContainSubstring, "exact case-insensitive set")
+			for _, allowed := range []string{
+				"owner", "manager", "data_access_contact", "follower", "slf_manager", "lab_manager", "administrator",
+			} {
+				So(roleDescription, ShouldContainSubstring, allowed)
+			}
+		})
+	})
+}

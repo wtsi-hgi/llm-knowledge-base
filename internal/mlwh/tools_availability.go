@@ -47,6 +47,8 @@ const (
 		" The created field is data-added time. Call mlwh_freshness for the cache as-of state."
 	latestDataCountSemanticsNote = " The created field is data-added time." +
 		" Call mlwh_freshness for the cache as-of state."
+	sampleCRAMSemanticsNote = " An empty product-level attachment does not prove a sample-level CRAM is absent; " +
+		"use this merged-aware sample surface. Call mlwh_freshness for the cache as-of state."
 )
 
 // irodsSamplePageInput is the input for mlwh_irods_paths_for_sample: a Sanger
@@ -229,6 +231,11 @@ func (p *provider) registerAvailabilityTools(r core.Registrar) error {
 		return fmt.Errorf("mlwh: build count output schema: %w", err)
 	}
 
+	sampleCRAMSchema, err := outputSchemaForPagedSlice("sample_crams", "SampleCRAM")
+	if err != nil {
+		return fmt.Errorf("mlwh: build sample_crams output schema: %w", err)
+	}
+
 	if err := p.addCountSamplesWithDataForStudy(r, countSchema); err != nil {
 		return err
 	}
@@ -257,7 +264,84 @@ func (p *provider) registerAvailabilityTools(r core.Registrar) error {
 		return err
 	}
 
+	if err := p.addSampleCRAMsForStudy(r, sampleCRAMSchema); err != nil {
+		return err
+	}
+
+	if err := p.addCountSampleCRAMsForStudy(r, countSchema); err != nil {
+		return err
+	}
+
 	return p.registerLatestDataTools(r, countSchema)
+}
+
+// pagedSampleCRAMResult wraps a header-aware selected sample CRAM page as
+// {"sample_crams":[...],"total":N,"next_offset":M}.
+type pagedSampleCRAMResult struct {
+	SampleCRAMs []wa.SampleCRAM `json:"sample_crams"`
+	Total       int             `json:"total"`
+	NextOffset  int             `json:"next_offset"`
+}
+
+func (p *provider) addSampleCRAMsForStudy(r core.Registrar, outputSchema map[string]any) error {
+	description, err := resolveDescription("SampleCRAMsForStudy")
+	if err != nil {
+		return err
+	}
+
+	client := p.client
+	mcp.AddTool(r.Server(), &mcp.Tool{
+		Name:         "mlwh_sample_crams_for_study",
+		Description:  description + pagedFanOutPaginationNote + bareListFreshnessNote + sampleCRAMSemanticsNote,
+		OutputSchema: outputSchema,
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in studyPageInput) (*mcp.CallToolResult, pagedSampleCRAMResult, error) {
+		limit, offset, err := boundedPagination(in.Limit, in.Offset)
+		if err != nil {
+			return core.ToolError[pagedSampleCRAMResult](err)
+		}
+
+		page, err := client.SampleCRAMsForStudyPage(ctx, in.StudyLimsID, limit, offset)
+		if err != nil {
+			return core.ToolError[pagedSampleCRAMResult](mapToolError(err))
+		}
+
+		return nil, pagedSampleCRAMResult{
+			SampleCRAMs: page.Items,
+			Total:       page.Total,
+			NextOffset:  page.NextOffset,
+		}, nil
+	})
+
+	return nil
+}
+
+// sampleCRAMStudyInput identifies the study whose selected per-sample CRAM
+// rows should be counted.
+type sampleCRAMStudyInput struct {
+	StudyLimsID string `json:"study_lims_id" jsonschema:"the LIMS identifier of the study whose selected sample CRAMs should be counted"`
+}
+
+func (p *provider) addCountSampleCRAMsForStudy(r core.Registrar, outputSchema map[string]any) error {
+	description, err := resolveDescription("CountSampleCRAMsForStudy")
+	if err != nil {
+		return err
+	}
+
+	client := p.client
+	mcp.AddTool(r.Server(), &mcp.Tool{
+		Name:         "mlwh_count_sample_crams_for_study",
+		Description:  description + countFreshnessNote + sampleCRAMSemanticsNote,
+		OutputSchema: outputSchema,
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in sampleCRAMStudyInput) (*mcp.CallToolResult, wa.Count, error) {
+		count, err := client.CountSampleCRAMsForStudy(ctx, in.StudyLimsID)
+		if err != nil {
+			return core.ToolError[wa.Count](mapToolError(err))
+		}
+
+		return nil, count, nil
+	})
+
+	return nil
 }
 
 func (p *provider) registerLatestDataTools(r core.Registrar, countSchema map[string]any) error {

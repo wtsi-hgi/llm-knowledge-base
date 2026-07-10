@@ -35,10 +35,26 @@ import (
 	"github.com/wtsi-hgi/llm-knowledge-base/internal/core"
 )
 
-// registerPeopleTools adds D2's faculty_sponsor, study_users, and
-// resolve-person tools. Descriptions are derived from the upstream Registry, so
-// the sponsor-versus-role-membership routing guidance stays aligned with MLWH.
+// programmeDiscoveryNote connects the exact-match membership tools to their
+// upstream vocabulary. It is also present on the vocabulary tool itself so all
+// programme-facing descriptions expose the same agent routing guidance.
+const programmeDiscoveryNote = " Call mlwh_programmes to discover exact programme values."
+
+const studyUserDirectionNote = " This study-to-users lookup differs from mlwh_studies_for_user: omitting role there " +
+	"defaults to owner, manager, and data_access_contact membership; faculty_sponsor is a Study field, not a study_users role."
+
+// registerPeopleTools adds E1's programme tools, E2's inverse study-user
+// tools, and D2's faculty_sponsor, user-study, and resolve-person tools.
+// Descriptions are derived from the upstream Registry, so routing guidance
+// stays aligned with MLWH.
 func (p *provider) registerPeopleTools(r core.Registrar) error {
+	if err := p.registerProgrammeTools(r); err != nil {
+		return err
+	}
+	if err := p.registerStudyUserTools(r); err != nil {
+		return err
+	}
+
 	studiesSchema, err := outputSchemaForPagedSlice("studies", "PersonStudy")
 	if err != nil {
 		return fmt.Errorf("mlwh: build person studies output schema: %w", err)
@@ -72,6 +88,235 @@ func (p *provider) registerPeopleTools(r core.Registrar) error {
 	if err := p.addCountResolvePerson(r, countSchema); err != nil {
 		return err
 	}
+
+	return nil
+}
+
+func (p *provider) registerStudyUserTools(r core.Registrar) error {
+	usersSchema, err := outputSchemaForPagedSlice("users", "StudyUser")
+	if err != nil {
+		return fmt.Errorf("mlwh: build study users output schema: %w", err)
+	}
+
+	countSchema, err := outputSchemaFor("Count")
+	if err != nil {
+		return fmt.Errorf("mlwh: build study users count output schema: %w", err)
+	}
+
+	if err := p.addStudyUsers(r, usersSchema); err != nil {
+		return err
+	}
+
+	return p.addCountStudyUsers(r, countSchema)
+}
+
+// studyUsersPageInput is the input for mlwh_study_users: a study identifier,
+// optional raw role set, and optional bounded pagination.
+type studyUsersPageInput struct {
+	StudyLimsID string `json:"study_lims_id"`
+	Role        string `json:"role,omitempty"`
+	Limit       int    `json:"limit,omitempty"`
+	Offset      int    `json:"offset,omitempty"`
+}
+
+// pagedStudyUsersResult wraps an upstream StudyUser page under its semantic
+// users property with exact header-derived pagination metadata.
+type pagedStudyUsersResult struct {
+	Users      []wa.StudyUser `json:"users"`
+	Total      int            `json:"total"`
+	NextOffset int            `json:"next_offset"`
+}
+
+func (p *provider) addStudyUsers(r core.Registrar, outputSchema map[string]any) error {
+	description, err := resolveDescription("StudyUsers")
+	if err != nil {
+		return err
+	}
+
+	client := p.client
+
+	mcp.AddTool(r.Server(), &mcp.Tool{
+		Name:         "mlwh_study_users",
+		Description:  description + pagedFanOutPaginationNote + bareListFreshnessNote + studyUserDirectionNote,
+		InputSchema:  studyUsersInputSchema(true),
+		OutputSchema: outputSchema,
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in studyUsersPageInput) (*mcp.CallToolResult, pagedStudyUsersResult, error) {
+		limit, offset, err := boundedPagination(in.Limit, in.Offset)
+		if err != nil {
+			return core.ToolError[pagedStudyUsersResult](err)
+		}
+
+		page, err := client.StudyUsersPage(ctx, in.StudyLimsID, in.Role, limit, offset)
+		if err != nil {
+			return core.ToolError[pagedStudyUsersResult](mapToolError(err))
+		}
+
+		return nil, pagedStudyUsersResult{
+			Users: page.Items, Total: page.Total, NextOffset: page.NextOffset,
+		}, nil
+	})
+
+	return nil
+}
+
+// studyUsersInput is the identifier and optional raw role set accepted by
+// mlwh_count_study_users.
+type studyUsersInput struct {
+	StudyLimsID string `json:"study_lims_id"`
+	Role        string `json:"role,omitempty"`
+}
+
+func (p *provider) addCountStudyUsers(r core.Registrar, outputSchema map[string]any) error {
+	description, err := resolveDescription("CountStudyUsers")
+	if err != nil {
+		return err
+	}
+
+	client := p.client
+
+	mcp.AddTool(r.Server(), &mcp.Tool{
+		Name:         "mlwh_count_study_users",
+		Description:  description + countFreshnessNote + studyUserDirectionNote,
+		InputSchema:  studyUsersInputSchema(false),
+		OutputSchema: outputSchema,
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in studyUsersInput) (*mcp.CallToolResult, wa.Count, error) {
+		count, err := client.CountStudyUsers(ctx, in.StudyLimsID, in.Role)
+		if err != nil {
+			return core.ToolError[wa.Count](mapToolError(err))
+		}
+
+		return nil, count, nil
+	})
+
+	return nil
+}
+
+func (p *provider) registerProgrammeTools(r core.Registrar) error {
+	studiesSchema, err := outputSchemaForPagedSlice("studies", "Study")
+	if err != nil {
+		return fmt.Errorf("mlwh: build programme studies output schema: %w", err)
+	}
+
+	countSchema, err := outputSchemaFor("Count")
+	if err != nil {
+		return fmt.Errorf("mlwh: build programme count output schema: %w", err)
+	}
+
+	programmesSchema, err := outputSchemaForSlice("programmes", "Programme")
+	if err != nil {
+		return fmt.Errorf("mlwh: build programmes output schema: %w", err)
+	}
+
+	if err := p.addStudiesForProgramme(r, studiesSchema); err != nil {
+		return err
+	}
+	if err := p.addCountStudiesForProgramme(r, countSchema); err != nil {
+		return err
+	}
+
+	return p.addProgrammes(r, programmesSchema)
+}
+
+// programmePageInput is the input for mlwh_studies_for_programme: an exact
+// programme value plus optional bounded pagination.
+type programmePageInput struct {
+	Programme string `json:"programme" jsonschema:"exact programme value; call mlwh_programmes to discover valid values"`
+	Limit     int    `json:"limit,omitempty" jsonschema:"maximum rows to return; defaults to 100, maximum 1000 (a larger limit is rejected, not clamped)"`
+	Offset    int    `json:"offset,omitempty" jsonschema:"number of leading rows to skip before returning results; defaults to 0"`
+}
+
+func (p *provider) addStudiesForProgramme(r core.Registrar, outputSchema map[string]any) error {
+	description, err := resolveDescription("StudiesForProgramme")
+	if err != nil {
+		return err
+	}
+
+	client := p.client
+
+	mcp.AddTool(r.Server(), &mcp.Tool{
+		Name:         "mlwh_studies_for_programme",
+		Description:  description + pagedFanOutPaginationNote + bareListFreshnessNote + programmeDiscoveryNote,
+		OutputSchema: outputSchema,
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in programmePageInput) (*mcp.CallToolResult, pagedStudiesResult, error) {
+		limit, offset, err := boundedPagination(in.Limit, in.Offset)
+		if err != nil {
+			return core.ToolError[pagedStudiesResult](err)
+		}
+
+		page, err := client.StudiesForProgrammePage(ctx, in.Programme, limit, offset)
+		if err != nil {
+			return core.ToolError[pagedStudiesResult](mapToolError(err))
+		}
+
+		return nil, pagedStudiesResult{
+			Studies:    page.Items,
+			Total:      page.Total,
+			NextOffset: page.NextOffset,
+		}, nil
+	})
+
+	return nil
+}
+
+// programmeInput is the exact programme value accepted by
+// mlwh_count_studies_for_programme.
+type programmeInput struct {
+	Programme string `json:"programme" jsonschema:"exact programme value; call mlwh_programmes to discover valid values"`
+}
+
+func (p *provider) addCountStudiesForProgramme(r core.Registrar, outputSchema map[string]any) error {
+	description, err := resolveDescription("CountStudiesForProgramme")
+	if err != nil {
+		return err
+	}
+
+	client := p.client
+
+	mcp.AddTool(r.Server(), &mcp.Tool{
+		Name:         "mlwh_count_studies_for_programme",
+		Description:  description + countFreshnessNote + programmeDiscoveryNote,
+		OutputSchema: outputSchema,
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in programmeInput) (*mcp.CallToolResult, wa.Count, error) {
+		count, err := client.CountStudiesForProgramme(ctx, in.Programme)
+		if err != nil {
+			return core.ToolError[wa.Count](mapToolError(err))
+		}
+
+		return nil, count, nil
+	})
+
+	return nil
+}
+
+// programmesInput keeps mlwh_programmes' public input as an empty object.
+type programmesInput struct{}
+
+// programmesResult wraps the exact upstream vocabulary rows under the semantic
+// programmes property required by MCP object results.
+type programmesResult struct {
+	Programmes []wa.Programme `json:"programmes"`
+}
+
+func (p *provider) addProgrammes(r core.Registrar, outputSchema map[string]any) error {
+	description, err := resolveDescription("Programmes")
+	if err != nil {
+		return err
+	}
+
+	client := p.client
+
+	mcp.AddTool(r.Server(), &mcp.Tool{
+		Name:         "mlwh_programmes",
+		Description:  description + bareListFreshnessNote + programmeDiscoveryNote,
+		OutputSchema: outputSchema,
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ programmesInput) (*mcp.CallToolResult, programmesResult, error) {
+		programmes, err := client.Programmes(ctx)
+		if err != nil {
+			return core.ToolError[programmesResult](mapToolError(err))
+		}
+
+		return nil, programmesResult{Programmes: programmes}, nil
+	})
 
 	return nil
 }

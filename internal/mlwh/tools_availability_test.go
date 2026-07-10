@@ -525,6 +525,117 @@ func TestLatestDataToolsC3(t *testing.T) {
 	})
 }
 
+// TestSampleCRAMToolsE3 covers spec E3: the merged-aware per-sample CRAM page
+// and its count counterpart preserve upstream selection, canonical row fields,
+// semantic pagination metadata, exact paths, and cache caveats through MCP.
+func TestSampleCRAMToolsE3(t *testing.T) {
+	Convey("Given the MLWH server (stub-backed) with sample CRAM tools", t, func() {
+		stub := newStubMLWH(t)
+		cs, cleanup := runMLWHServerWithClient(t, stub)
+		defer cleanup()
+
+		Convey("E3.1: ordinary and merged selections return one row per sample with the merged composite preferred", func() {
+			stub.respondJSONWithHeaders("/study/S1/sample-crams", http.StatusOK, []wa.SampleCRAM{
+				{Name: "ordinary", AccessionNumber: "ERS1", IRODSPath: "/seq/ordinary.cram"},
+				{Name: "multi-lane", AccessionNumber: "ERS2", IRODSPath: "/seq/multi-lane.merged.cram", Merged: true},
+			}, irodsPageHeaders("2", "-1"))
+
+			obj := structuredObject(callTool(t, cs, "mlwh_sample_crams_for_study", map[string]any{
+				"study_lims_id": "S1",
+			}))
+			rows, ok := obj["sample_crams"].([]any)
+			So(ok, ShouldBeTrue)
+			So(rows, ShouldHaveLength, 2)
+			So(rows[0].(map[string]any)["name"], ShouldEqual, "ordinary")
+			So(rows[0].(map[string]any)["merged"], ShouldEqual, false)
+			So(rows[1].(map[string]any)["name"], ShouldEqual, "multi-lane")
+			So(rows[1].(map[string]any)["merged"], ShouldEqual, true)
+
+			req, ok := stub.lastRequest()
+			So(ok, ShouldBeTrue)
+			So(req.Path, ShouldEqual, "/study/S1/sample-crams")
+			So(req.Query, ShouldResemble, url.Values{"limit": {"100"}, "offset": {"0"}})
+		})
+
+		Convey("E3.2: legacy upstream aliases decode but MCP emits only the four canonical fields", func() {
+			stub.respondJSONWithHeaders("/study/S1/sample-crams", http.StatusOK, []map[string]any{
+				{
+					"name": "legacy", "ega_id": "ERS3", "irods_cram_path": "/seq/legacy.cram", "merged": true,
+				},
+			}, irodsPageHeaders("1", "-1"))
+
+			obj := structuredObject(callTool(t, cs, "mlwh_sample_crams_for_study", map[string]any{
+				"study_lims_id": "S1",
+			}))
+			rows := obj["sample_crams"].([]any)
+			So(rows, ShouldResemble, []any{map[string]any{
+				"name": "legacy", "accession_number": "ERS3", "irods_path": "/seq/legacy.cram", "merged": true,
+			}})
+			So(rows[0].(map[string]any), ShouldNotContainKey, "ega_id")
+			So(rows[0].(map[string]any), ShouldNotContainKey, "irods_cram_path")
+		})
+
+		Convey("E3.3: response headers and the provider schema expose exact semantic page metadata", func() {
+			stub.respondJSONWithHeaders("/study/S1/sample-crams", http.StatusOK, []wa.SampleCRAM{
+				{Name: "sample-3", AccessionNumber: "ERS3", IRODSPath: "/seq/sample-3.cram"},
+			}, irodsPageHeaders("17", "10"))
+
+			obj := structuredObject(callTool(t, cs, "mlwh_sample_crams_for_study", map[string]any{
+				"study_lims_id": "S1", "limit": 5, "offset": 5,
+			}))
+			So(obj, ShouldContainKey, "sample_crams")
+			So(obj["total"], ShouldEqual, 17)
+			So(obj["next_offset"], ShouldEqual, 10)
+
+			tool, ok := toolByName(t, cs, "mlwh_sample_crams_for_study")
+			So(ok, ShouldBeTrue)
+			output := tool.OutputSchema.(map[string]any)
+			properties := output["properties"].(map[string]any)
+			So(properties, ShouldContainKey, "sample_crams")
+			So(properties, ShouldContainKey, "total")
+			So(properties, ShouldContainKey, "next_offset")
+			itemProperties := properties["sample_crams"].(map[string]any)["items"].(map[string]any)["properties"].(map[string]any)
+			So(itemProperties, ShouldHaveLength, 4)
+			So(itemProperties, ShouldContainKey, "name")
+			So(itemProperties, ShouldContainKey, "accession_number")
+			So(itemProperties, ShouldContainKey, "irods_path")
+			So(itemProperties, ShouldContainKey, "merged")
+		})
+
+		Convey("E3.4: the count tool uses the exact count endpoint and returns the matching selected-row count", func() {
+			stub.respondJSON("/study/S1/sample-crams/count", http.StatusOK, wa.Count{Count: 2})
+
+			obj := structuredObject(callTool(t, cs, "mlwh_count_sample_crams_for_study", map[string]any{
+				"study_lims_id": "S1",
+			}))
+			So(obj["count"], ShouldEqual, 2)
+
+			req, ok := stub.lastRequest()
+			So(ok, ShouldBeTrue)
+			So(req.Path, ShouldEqual, "/study/S1/sample-crams/count")
+			So(req.Query, ShouldBeEmpty)
+		})
+
+		Convey("E3.5: descriptions distinguish product attachments from sample CRAM absence and direct callers to freshness", func() {
+			for _, name := range []string{"mlwh_sample_crams_for_study", "mlwh_count_sample_crams_for_study"} {
+				tool, ok := toolByName(t, cs, name)
+				So(ok, ShouldBeTrue)
+
+				description := strings.ToLower(tool.Description)
+				So(description, ShouldContainSubstring, "empty product-level attachment")
+				So(description, ShouldContainSubstring, "does not prove")
+				So(description, ShouldContainSubstring, "sample-level cram is absent")
+				So(description, ShouldContainSubstring, "mlwh_freshness")
+				if strings.Contains(name, "count") {
+					So(description, ShouldContainSubstring, "count responses have no cache_synced_at")
+				} else {
+					So(description, ShouldContainSubstring, "bare list responses have no cache_synced_at")
+				}
+			}
+		})
+	})
+}
+
 func irodsPageHeaders(total, nextOffset string) http.Header {
 	return http.Header{
 		"X-Total-Count": {total},

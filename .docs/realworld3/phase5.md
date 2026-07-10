@@ -34,8 +34,8 @@ Add programme list/count/vocabulary tools in
 `tools_overview.go` and OpenAPI-backed schemas, and add focused people and
 overview tests. Cover all 4 acceptance tests from E1.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 #### Item 5.2: E3 - Add merged-aware sample CRAM tools [parallel with E1]
 
@@ -46,8 +46,8 @@ Add the sample-CRAM page and count tools in
 `sample_crams`, semantic page metadata, provider schemas, and freshness
 guidance. Cover all 5 acceptance tests from E3.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 ### Batch 2 (parallel, after batch 1 is reviewed)
 
@@ -60,8 +60,8 @@ count tools, optional exact case-insensitive role sets, semantic user pages,
 and the distinction from faculty sponsorship and person-to-study defaults.
 Cover all 5 acceptance tests from E2.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 #### Item 5.4: E4 - Preserve empty-study status arrays [parallel with E2]
 
@@ -72,8 +72,8 @@ Normalize nil `PerPlatform` values in
 `per_platform: []` while populated values and other status fields remain
 unchanged. Cover both acceptance tests from E4.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 For parallel batch items, use separate subagents per item.
 Launch review subagents using the `go-reviewer` skill

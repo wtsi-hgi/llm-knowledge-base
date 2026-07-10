@@ -26,6 +26,7 @@
 package mlwh
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -87,12 +88,32 @@ func TestStudyOverviewTool(t *testing.T) {
 			So(lower, ShouldContainSubstring, "check")
 			So(lower, ShouldContainSubstring, "identifier")
 		})
+
+		Convey("E1.3: mlwh_study_overview exposes programme in its result and OpenAPI-backed schema", func() {
+			stub.respondJSON("/study/S1/overview", http.StatusOK, studyOverviewS1())
+
+			res := callTool(t, cs, "mlwh_study_overview", map[string]any{"study_lims_id": "S1"})
+
+			So(structuredObject(res)["programme"], ShouldEqual, "Cancer")
+
+			tool, ok := toolByName(t, cs, "mlwh_study_overview")
+			So(ok, ShouldBeTrue)
+			schema, ok := tool.OutputSchema.(map[string]any)
+			So(ok, ShouldBeTrue)
+			properties, ok := schema["properties"].(map[string]any)
+			So(ok, ShouldBeTrue)
+			programme, ok := properties["programme"].(map[string]any)
+			So(ok, ShouldBeTrue)
+			So(programme["type"], ShouldEqual, "string")
+			So(programme["description"], ShouldContainSubstring, "programme grouping / attribution unit")
+		})
 	})
 }
 
 func studyOverviewS1() wa.StudyOverview {
 	return wa.StudyOverview{
 		IDStudyLims:            "S1",
+		Programme:              "Cancer",
 		DataAccessGroup:        "dag1",
 		SamplesTotal:           5,
 		SamplesWithData:        3,
@@ -186,6 +207,53 @@ func TestStudyStatusBreakdownTool(t *testing.T) {
 			So(syncIndex, ShouldBeGreaterThanOrEqualTo, 0)
 			So(syncIndex, ShouldBeLessThan, notFoundIndex)
 		})
+
+		Convey("E4.1: nil and empty per-platform values are arrays in structured and text JSON", func() {
+			for _, perPlatform := range [][]wa.PlatformPhaseLadder{nil, {}} {
+				breakdown := emptyStatusBreakdownS0()
+				breakdown.PerPlatform = perPlatform
+				stub.respondJSON("/study/S0/status-breakdown", http.StatusOK, breakdown)
+
+				res := callTool(t, cs, "mlwh_study_status_breakdown", map[string]any{"study_lims_id": "S0"})
+
+				structured, ok := structuredObject(res)["per_platform"].([]any)
+				So(ok, ShouldBeTrue)
+				So(len(structured), ShouldEqual, 0)
+
+				text := firstTextContent(res)
+				So(text, ShouldContainSubstring, `"per_platform":[]`)
+				So(text, ShouldNotContainSubstring, `"per_platform":null`)
+			}
+		})
+
+		Convey("E4.2: populated platform entries and every aggregate field remain unchanged", func() {
+			want := statusBreakdownS1()
+			want.PerPlatform = append(want.PerPlatform, wa.PlatformPhaseLadder{
+				Platform: "Illumina",
+				Ladder: wa.PhaseLadder{
+					WithData:        2,
+					SequencedNoData: 1,
+				},
+			})
+			stub.respondJSON("/study/S1/status-breakdown", http.StatusOK, want)
+
+			res := callTool(t, cs, "mlwh_study_status_breakdown", map[string]any{"study_lims_id": "S1"})
+
+			perPlatform, ok := structuredObject(res)["per_platform"].([]any)
+			So(ok, ShouldBeTrue)
+			So(len(perPlatform), ShouldEqual, 2)
+			ont, ok := perPlatform[0].(map[string]any)
+			So(ok, ShouldBeTrue)
+			So(ont["platform"], ShouldEqual, "ONT")
+			illumina, ok := perPlatform[1].(map[string]any)
+			So(ok, ShouldBeTrue)
+			So(illumina["platform"], ShouldEqual, "Illumina")
+
+			var got wa.StatusBreakdown
+			err := json.Unmarshal([]byte(firstTextContent(res)), &got)
+			So(err, ShouldBeNil)
+			So(got, ShouldResemble, want)
+		})
 	})
 }
 
@@ -212,6 +280,13 @@ func statusBreakdownS1() wa.StatusBreakdown {
 		},
 		WithDetailedTimeline: 2,
 		CacheSyncedAt:        "2026-06-30T09:00:00Z",
+	}
+}
+
+func emptyStatusBreakdownS0() wa.StatusBreakdown {
+	return wa.StatusBreakdown{
+		IDStudyLims:   "S0",
+		CacheSyncedAt: "2026-06-30T09:00:00Z",
 	}
 }
 
