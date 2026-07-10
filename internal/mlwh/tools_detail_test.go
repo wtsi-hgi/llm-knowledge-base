@@ -134,6 +134,100 @@ func TestFanOutCountTools(t *testing.T) {
 	})
 }
 
+// TestSampleRunAndStudyCountTools covers D1: a bounded run page and the two
+// sample-keyed count tools, including the existing structured error precedence.
+func TestSampleRunAndStudyCountTools(t *testing.T) {
+	Convey("Given the MLWH server (stub-backed) with the sample run and study count tools", t, func() {
+		stub := newStubMLWH(t)
+		cs, cleanup := runMLWHServerWithClient(t, stub)
+		defer cleanup()
+
+		Convey("D1.1: runs for S1 preserve explicit pagination and the semantic page wrapper", func() {
+			stub.respondJSONWithHeaders("/sample/S1/runs", http.StatusOK, []wa.Run{
+				{IDRun: 52553},
+				{IDRun: 52554},
+			}, http.Header{
+				"X-Total-Count": {"82"},
+				"X-Next-Offset": {"75"},
+			})
+
+			res := callTool(t, cs, "mlwh_runs_for_sample", map[string]any{
+				"sanger_name": "S1",
+				"limit":       25,
+				"offset":      50,
+			})
+
+			obj := structuredObject(res)
+			runs, ok := obj["runs"].([]any)
+			So(ok, ShouldBeTrue)
+			So(len(runs), ShouldEqual, 2)
+			firstRun, ok := runs[0].(map[string]any)
+			So(ok, ShouldBeTrue)
+			So(firstRun["id_run"], ShouldEqual, 52553)
+			secondRun, ok := runs[1].(map[string]any)
+			So(ok, ShouldBeTrue)
+			So(secondRun["id_run"], ShouldEqual, 52554)
+			So(obj["total"], ShouldEqual, 82)
+			So(obj["next_offset"], ShouldEqual, 75)
+
+			req, ok := stub.lastRequest()
+			So(ok, ShouldBeTrue)
+			So(req.Path, ShouldEqual, "/sample/S1/runs")
+			So(req.Query.Get("limit"), ShouldEqual, "25")
+			So(req.Query.Get("offset"), ShouldEqual, "50")
+
+			tool, ok := toolByName(t, cs, "mlwh_runs_for_sample")
+			So(ok, ShouldBeTrue)
+			schema, ok := tool.OutputSchema.(map[string]any)
+			So(ok, ShouldBeTrue)
+			properties, ok := schema["properties"].(map[string]any)
+			So(ok, ShouldBeTrue)
+			So(properties, ShouldContainKey, "runs")
+			So(properties, ShouldContainKey, "total")
+			So(properties, ShouldContainKey, "next_offset")
+		})
+
+		Convey("D1.2: the two sample count tools return their exact upstream Count objects", func() {
+			stub.respondJSON("/sample/S1/runs/count", http.StatusOK, wa.Count{Count: 82})
+			stub.respondJSON("/sample/S1/studies/count", http.StatusOK, wa.Count{Count: 3})
+
+			runs := callTool(t, cs, "mlwh_count_runs_for_sample", map[string]any{"sanger_name": "S1"})
+			So(structuredObject(runs)["count"], ShouldEqual, 82)
+
+			req, ok := stub.lastRequest()
+			So(ok, ShouldBeTrue)
+			So(req.Path, ShouldEqual, "/sample/S1/runs/count")
+
+			studies := callTool(t, cs, "mlwh_count_studies_for_sample", map[string]any{"sanger_name": "S1"})
+			So(structuredObject(studies)["count"], ShouldEqual, 3)
+
+			req, ok = stub.lastRequest()
+			So(ok, ShouldBeTrue)
+			So(req.Path, ShouldEqual, "/sample/S1/studies/count")
+		})
+
+		Convey("D1.3: sample run tools preserve not-found and never-synced error precedence", func() {
+			stub.respondError("/sample/MISSING/runs", http.StatusNotFound, "not_found", "sample MISSING was not found")
+			stub.respondError(
+				"/sample/S1/runs/count",
+				http.StatusServiceUnavailable,
+				"cache_never_synced",
+				"sample run cache has never synced",
+			)
+
+			notFound := callTool(t, cs, "mlwh_runs_for_sample", map[string]any{"sanger_name": "MISSING"})
+			So(notFound.IsError, ShouldBeTrue)
+			So(strings.ToLower(firstTextContent(notFound)), ShouldContainSubstring, "not found")
+
+			neverSynced := callTool(t, cs, "mlwh_count_runs_for_sample", map[string]any{"sanger_name": "S1"})
+			So(neverSynced.IsError, ShouldBeTrue)
+			text := strings.ToLower(firstTextContent(neverSynced))
+			So(text, ShouldContainSubstring, "never synced")
+			So(text, ShouldNotContainSubstring, "not found")
+		})
+	})
+}
+
 // TestDetailTools covers Story C1: the four grouped detail tools
 // (mlwh_sample_detail, mlwh_study_detail, mlwh_run_detail, mlwh_library_detail).
 // Every assertion drives the tool over the real in-memory MCP client against the
@@ -430,6 +524,7 @@ func TestFanOutPaginatedDefaults(t *testing.T) {
 		{"mlwh_samples_for_run", map[string]any{"id_run": "100"}, "/run/100/samples"},
 		{"mlwh_libraries_for_study", map[string]any{"study_lims_id": "5901"}, "/study/5901/libraries"},
 		{"mlwh_runs_for_study", map[string]any{"study_lims_id": "5901"}, "/study/5901/runs"},
+		{"mlwh_runs_for_sample", map[string]any{"sanger_name": "S1"}, "/sample/S1/runs"},
 		{"mlwh_lanes_for_sample", map[string]any{"sanger_name": "S1"}, "/sample/S1/lanes"},
 		{"mlwh_irods_paths_for_sample", map[string]any{"sanger_name": "S1"}, "/sample/S1/irods"},
 		{"mlwh_irods_paths_for_study", map[string]any{"study_lims_id": "5901"}, "/study/5901/irods"},
@@ -496,6 +591,7 @@ func TestFanOutToolDescriptions(t *testing.T) {
 		"mlwh_samples_for_run",
 		"mlwh_libraries_for_study",
 		"mlwh_runs_for_study",
+		"mlwh_runs_for_sample",
 		"mlwh_lanes_for_sample",
 		"mlwh_irods_paths_for_sample",
 		"mlwh_irods_paths_for_study",
@@ -528,7 +624,12 @@ func TestFanOutToolDescriptions(t *testing.T) {
 		})
 
 		Convey("the non-paginated fan-out tools are registered", func() {
-			for _, name := range []string{"mlwh_studies_for_sample", "mlwh_count_samples_for_study"} {
+			for _, name := range []string{
+				"mlwh_studies_for_sample",
+				"mlwh_count_samples_for_study",
+				"mlwh_count_runs_for_sample",
+				"mlwh_count_studies_for_sample",
+			} {
 				_, ok := toolByName(t, cs, name)
 				So(ok, ShouldBeTrue)
 			}

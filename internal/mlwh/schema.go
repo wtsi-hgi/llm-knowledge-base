@@ -251,6 +251,24 @@ type runsResult struct {
 	Runs []wa.Run `json:"runs"`
 }
 
+// runListingsResult wraps the global keyset listing's exact
+// []wa.RunListingRow as {"runs":[...]} without offset-page metadata.
+type runListingsResult struct {
+	Runs []wa.RunListingRow `json:"runs"`
+}
+
+// monthlyRunCountsResult wraps the monthly run aggregate's exact
+// []wa.MonthlyRunCount as {"monthly_run_counts":[...]}.
+type monthlyRunCountsResult struct {
+	MonthlyRunCounts []wa.MonthlyRunCount `json:"monthly_run_counts"`
+}
+
+// sequencingAggregatesResult wraps the general sequencing aggregate's exact
+// []wa.SequencingAggregateRow as {"aggregates":[...]}.
+type sequencingAggregatesResult struct {
+	Aggregates []wa.SequencingAggregateRow `json:"aggregates"`
+}
+
 // lanesResult wraps a []wa.Lane as {"lanes":[...]}.
 type lanesResult struct {
 	Lanes []wa.Lane `json:"lanes"`
@@ -367,6 +385,9 @@ func outputSchemaFor(componentName string) (map[string]any, error) {
 	if componentName == "IRODSPath" {
 		allowNullProperty(resolved, "deliverable")
 	}
+	if componentName == "SequencingAggregateRow" {
+		allowStringMapProperty(resolved, "group")
+	}
 
 	return resolved, nil
 }
@@ -386,6 +407,23 @@ func allowNullProperty(schema map[string]any, propertyName string) {
 	}
 
 	property["type"] = []any{"boolean", "null"}
+}
+
+// allowStringMapProperty corrects an OpenAPI generator limitation for
+// map[string]string fields, which otherwise appear as scalar strings.
+func allowStringMapProperty(schema map[string]any, propertyName string) {
+	properties, ok := schema["properties"].(map[string]any)
+	if !ok {
+		return
+	}
+
+	property, ok := properties[propertyName].(map[string]any)
+	if !ok {
+		return
+	}
+
+	property["type"] = "object"
+	property["additionalProperties"] = map[string]any{"type": "string"}
 }
 
 // outputSchemaForSlice returns the object-typed output schema for a list tool

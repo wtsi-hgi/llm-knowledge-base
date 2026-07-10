@@ -33,8 +33,8 @@ Add `mlwh_runs_for_sample`, `mlwh_count_runs_for_sample`, and
 `mlwh_studies_for_sample` and the normal semantic page wrapper. Update schemas
 and focused tests, covering all 3 acceptance tests from D1.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 #### Item 4.2: D2 - Add global run listing and count [parallel with D1]
 
@@ -45,8 +45,8 @@ Create `internal/mlwh/tools_runs.go` with `mlwh_runs` keyset pagination and
 exact `wa.RunListingRow` fields and run-date caveats. Cover all 5 acceptance
 tests from D2.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 For parallel batch items, use separate subagents per item.
 Launch review subagents using the `go-reviewer` skill
@@ -61,5 +61,5 @@ with `mlwh_monthly_run_counts` and `mlwh_sequencing_aggregate`. Forward the
 required grouping, unit, date, and repeated platform values in exactly one
 upstream call, covering all 5 acceptance tests from D3.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed

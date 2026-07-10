@@ -176,7 +176,7 @@ func (p *provider) registerDetailGroup(r core.Registrar) error {
 
 // sampleNameInput is the input for the sample-keyed tools that take only a
 // Sanger sample name and no pagination (mlwh_sample_detail,
-// mlwh_studies_for_sample, mlwh_count_lanes_for_sample).
+// mlwh_studies_for_sample, and sample-keyed counts).
 type sampleNameInput struct {
 	SangerName string `json:"sanger_name" jsonschema:"the Sanger sample name to look up"`
 }
@@ -203,6 +203,42 @@ func (p *provider) addSampleDetail(r core.Registrar, outputSchema map[string]any
 		}
 
 		return nil, detail, nil
+	})
+
+	return nil
+}
+
+// addRunsForSample registers mlwh_runs_for_sample (D1): it lists the distinct
+// sequencing runs associated with a sample, with the normal bounded semantic
+// page wrapper {"runs":[...],"total":N,"next_offset":M}.
+func (p *provider) addRunsForSample(r core.Registrar, outputSchema map[string]any) error {
+	description, err := paginatedFanOutDescription("RunsForSample")
+	if err != nil {
+		return err
+	}
+
+	client := p.client
+
+	mcp.AddTool(r.Server(), &mcp.Tool{
+		Name:         "mlwh_runs_for_sample",
+		Description:  description,
+		OutputSchema: outputSchema,
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in samplePageInput) (*mcp.CallToolResult, pagedRunsResult, error) {
+		limit, offset, err := boundedPagination(in.Limit, in.Offset)
+		if err != nil {
+			return core.ToolError[pagedRunsResult](err)
+		}
+
+		page, err := client.RunsForSamplePage(ctx, in.SangerName, limit, offset)
+		if err != nil {
+			return core.ToolError[pagedRunsResult](mapToolError(err))
+		}
+
+		return nil, pagedRunsResult{
+			Runs:       page.Items,
+			Total:      page.Total,
+			NextOffset: page.NextOffset,
+		}, nil
 	})
 
 	return nil
@@ -385,7 +421,7 @@ func (p *provider) registerFanOutTools(r core.Registrar) error {
 	return p.registerNonPaginatedFanOuts(r)
 }
 
-// registerPaginatedFanOuts adds the eight paged fan-out tools. Each pre-sets
+// registerPaginatedFanOuts adds the paged fan-out tools. Each pre-sets
 // its paged wrapper output schema and appends the bounded-page note to its
 // Registry-derived description, then registers a handler that rejects
 // over-large pages before the typed call.
@@ -412,6 +448,10 @@ func (p *provider) registerPaginatedFanOuts(r core.Registrar) error {
 	}
 
 	if err := p.addRunsForStudy(r, schemas["runs"]); err != nil {
+		return err
+	}
+
+	if err := p.addRunsForSample(r, schemas["runs"]); err != nil {
 		return err
 	}
 
@@ -631,8 +671,9 @@ func (p *provider) addRunsForStudy(r core.Registrar, outputSchema map[string]any
 	return nil
 }
 
-// samplePageInput is the input for the sample-keyed paged fan-out tools
-// (mlwh_lanes_for_sample): a Sanger sample name plus bounded pagination.
+// samplePageInput is the input for sample-keyed paged fan-out tools such as
+// mlwh_runs_for_sample and mlwh_lanes_for_sample: a Sanger sample name plus
+// bounded pagination.
 type samplePageInput struct {
 	SangerName string `json:"sanger_name" jsonschema:"the Sanger sample name to enumerate"`
 	Limit      int    `json:"limit,omitempty" jsonschema:"maximum rows to return; defaults to 100, maximum 1000 (a larger limit is rejected, not clamped)"`
@@ -771,6 +812,14 @@ func (p *provider) registerNonPaginatedFanOuts(r core.Registrar) error {
 		return err
 	}
 
+	if err := p.addCountRunsForSample(r, countSchema); err != nil {
+		return err
+	}
+
+	if err := p.addCountStudiesForSample(r, countSchema); err != nil {
+		return err
+	}
+
 	if err := p.addCountLibrariesForStudy(r, countSchema); err != nil {
 		return err
 	}
@@ -859,6 +908,28 @@ func (p *provider) addCountRunsForStudy(r core.Registrar, outputSchema map[strin
 	return addFanOutCountTool[studyIDInput](r, outputSchema, "mlwh_count_runs_for_study", "CountRunsForStudy",
 		func(ctx context.Context, in studyIDInput) (wa.Count, error) {
 			return client.CountRunsForStudy(ctx, in.StudyLimsID)
+		})
+}
+
+// addCountRunsForSample registers mlwh_count_runs_for_sample, the Count
+// counterpart of mlwh_runs_for_sample.
+func (p *provider) addCountRunsForSample(r core.Registrar, outputSchema map[string]any) error {
+	client := p.client
+
+	return addFanOutCountTool[sampleNameInput](r, outputSchema, "mlwh_count_runs_for_sample", "CountRunsForSample",
+		func(ctx context.Context, in sampleNameInput) (wa.Count, error) {
+			return client.CountRunsForSample(ctx, in.SangerName)
+		})
+}
+
+// addCountStudiesForSample registers mlwh_count_studies_for_sample, the Count
+// counterpart of the retained mlwh_studies_for_sample list.
+func (p *provider) addCountStudiesForSample(r core.Registrar, outputSchema map[string]any) error {
+	client := p.client
+
+	return addFanOutCountTool[sampleNameInput](r, outputSchema, "mlwh_count_studies_for_sample", "CountStudiesForSample",
+		func(ctx context.Context, in sampleNameInput) (wa.Count, error) {
+			return client.CountStudiesForSample(ctx, in.SangerName)
 		})
 }
 
