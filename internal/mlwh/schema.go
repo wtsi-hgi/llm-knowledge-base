@@ -254,9 +254,17 @@ func callEndpointInputSchema() map[string]any {
 				"items":       map[string]any{"type": "string"},
 			},
 			"query_params": map[string]any{
-				"type":                 "object",
-				"description":          "the endpoint's query parameters, including pagination controls",
-				"additionalProperties": map[string]any{"type": "string"},
+				"type":        "object",
+				"description": "the endpoint's query parameters; each value is a string or ordered array of strings",
+				"additionalProperties": map[string]any{
+					"oneOf": []any{
+						map[string]any{"type": "string"},
+						map[string]any{
+							"type":  "array",
+							"items": map[string]any{"type": "string"},
+						},
+					},
+				},
 			},
 		},
 		"required": []any{"method"},

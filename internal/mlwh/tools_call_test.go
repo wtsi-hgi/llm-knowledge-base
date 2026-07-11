@@ -96,6 +96,25 @@ func TestCallTool(t *testing.T) {
 			So(req.Query.Get("offset"), ShouldEqual, "0")
 		})
 
+		Convey("repeated query parameters reach the endpoint once and in order", func() {
+			stub.respondJSON("/runs", 200, []wa.RunListingRow{})
+
+			res := callTool(t, cs, "mlwh_call_endpoint", map[string]any{
+				"method": "RunListing",
+				"query_params": map[string]any{
+					"platform": []any{"illumina", "pacbio"},
+				},
+			})
+
+			So(res.IsError, ShouldBeFalse)
+			So(stub.requestCount(), ShouldEqual, 1)
+
+			req, ok := stub.lastRequest()
+			So(ok, ShouldBeTrue)
+			So(req.Path, ShouldEqual, "/runs")
+			So(req.Query["platform"], ShouldResemble, []string{"illumina", "pacbio"})
+		})
+
 		Convey("E2.3: an unknown method is a mapped tool error whose message names the method", func() {
 			res := callTool(t, cs, "mlwh_call_endpoint", map[string]any{"method": "NoSuchMethod"})
 
