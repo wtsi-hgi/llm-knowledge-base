@@ -40,9 +40,9 @@ const openAPISchemaRefPrefix = "#/components/schemas/"
 // exact-field sample finders the mlwh_find_samples tool unifies.
 const findSamplesMethodPrefix = "FindSamplesBy"
 
-// Shared typed-tool pagination bounds. A missing or non-positive limit becomes
-// one bounded page; values above pagedMaxLimit are rejected before any HTTP
-// request reaches MLWH.
+// Shared typed-tool pagination bounds. A missing or zero limit becomes one
+// bounded page; negative limits and values above pagedMaxLimit are rejected
+// before any HTTP request reaches MLWH.
 const (
 	latestDataDefaultLimit = 10
 	pagedDefaultLimit      = 100
