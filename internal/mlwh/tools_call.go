@@ -84,6 +84,19 @@ func (values *QueryParameterValues) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// queryValues converts the input's scalar or repeated query parameters to the
+// url.Values the remote client's Call expects, preserving value order. A nil or
+// empty map yields empty url.Values, so an endpoint with no query parameters is
+// called with no query string.
+func queryValues(params map[string]QueryParameterValues) url.Values {
+	values := make(url.Values, len(params))
+	for key, parameterValues := range params {
+		values[key] = append([]string(nil), parameterValues...)
+	}
+
+	return values
+}
+
 // CallInput is the input for mlwh_call_endpoint: a Registry Method name, the
 // endpoint's path parameters in declaration order, and its query parameters. The
 // Method and the path-param arity are validated by (*RemoteClient).Call itself,
@@ -130,19 +143,6 @@ func callEndpoint(ctx context.Context, client caller, in CallInput) (*mcp.CallTo
 	}
 
 	return nil, dynamicResult(decoded, headers), nil
-}
-
-// queryValues converts the input's scalar or repeated query parameters to the
-// url.Values the remote client's Call expects, preserving value order. A nil or
-// empty map yields empty url.Values, so an endpoint with no query parameters is
-// called with no query string.
-func queryValues(params map[string]QueryParameterValues) url.Values {
-	values := make(url.Values, len(params))
-	for key, parameterValues := range params {
-		values[key] = append([]string(nil), parameterValues...)
-	}
-
-	return values
 }
 
 func dynamicResult(decoded any, headers http.Header) any {
