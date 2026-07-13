@@ -303,20 +303,23 @@ func TestLiteralPrefixSampleSearchOptionsC1(t *testing.T) {
 		So(stub.requestCount(), ShouldEqual, 10)
 	})
 
-	Convey("C1.4: a two-character term with an exact filter makes one upstream request", t, func() {
+	Convey("C1.4: a two-character term with an exact filter remains valid for list and count", t, func() {
 		stub := newStubMLWH(t)
 		cs, cleanup := runMLWHServerWithClient(t, stub)
 		defer cleanup()
 
 		stub.respondJSON("/search/sample/ab", 200, []wa.Sample{{IDSampleTmp: 1, Name: "filtered"}})
+		stub.respondJSON("/search/sample/ab/count", 200, wa.Count{Count: 1})
 
 		res := callTool(t, cs, "mlwh_search_samples", map[string]any{"term": "ab", "organism": "mouse"})
 		obj := structuredObject(res)
 		samples, ok := obj["samples"].([]any)
+		countRes := callTool(t, cs, "mlwh_count_samples", map[string]any{"term": "ab", "organism": "mouse"})
 
 		So(ok, ShouldBeTrue)
 		So(len(samples), ShouldEqual, 1)
-		So(stub.requestCount(), ShouldEqual, 1)
+		So(structuredObject(countRes)["count"], ShouldEqual, 1)
+		So(stub.requestCount(), ShouldEqual, 2)
 	})
 
 	Convey("C1.5: a two-character term without an exact filter is rejected before HTTP", t, func() {
@@ -357,6 +360,25 @@ func TestLiteralPrefixSampleSearchOptionsC1(t *testing.T) {
 			So(firstTextContent(listRes), ShouldContainSubstring, "3")
 			So(countRes.IsError, ShouldBeTrue)
 			So(firstTextContent(countRes), ShouldContainSubstring, "3")
+		}
+
+		So(stub.requestCount(), ShouldEqual, 0)
+	})
+
+	Convey("blank terms remain invalid when an exact filter is present", t, func() {
+		stub := newStubMLWH(t)
+		cs, cleanup := runMLWHServerWithClient(t, stub)
+		defer cleanup()
+
+		for _, term := range []string{"", " \t\n"} {
+			for _, tool := range []string{"mlwh_search_samples", "mlwh_count_samples"} {
+				res := callTool(t, cs, tool, map[string]any{"term": term, "organism": "mouse"})
+
+				So(res.IsError, ShouldBeTrue)
+				message := strings.ToLower(firstTextContent(res))
+				So(message, ShouldContainSubstring, "term")
+				So(message, ShouldContainSubstring, "blank")
+			}
 		}
 
 		So(stub.requestCount(), ShouldEqual, 0)

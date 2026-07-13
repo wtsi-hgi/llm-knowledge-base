@@ -177,13 +177,22 @@ func (p *provider) addSearchSamples(r core.Registrar, outputSchema map[string]an
 }
 
 func guardSampleSearch(in sampleSearchInput) (limit, offset int, err error) {
-	if !in.hasExactFilter() {
-		if err = guardTerm(in.Term); err != nil {
-			return 0, 0, err
-		}
+	if err = guardSampleSearchTerm(in.Term, in.hasExactFilter()); err != nil {
+		return 0, 0, err
 	}
 
 	return boundedPagination(in.Limit, in.Offset)
+}
+
+func guardSampleSearchTerm(term string, hasExactFilter bool) error {
+	if strings.TrimSpace(term) == "" {
+		return fmt.Errorf("the search term %q must not be blank", term)
+	}
+	if hasExactFilter {
+		return nil
+	}
+
+	return guardTerm(term)
 }
 
 // guardTerm rejects a free-text-only search term shorter than the minimum
@@ -236,11 +245,7 @@ type sampleSearchCountInput struct {
 }
 
 func (in sampleSearchCountInput) guard() error {
-	if in.hasExactFilter() {
-		return nil
-	}
-
-	return guardTerm(in.Term)
+	return guardSampleSearchTerm(in.Term, in.hasExactFilter())
 }
 
 func (in sampleSearchCountInput) count(ctx context.Context, client *wa.RemoteClient) (wa.Count, error) {
