@@ -230,6 +230,8 @@ Prompt cookbook:
 - **Find samples or studies**
   - "Find samples matching `mus`."
   - "How many samples match `mus`?"
+  - "Find deliverable WGS mouse samples whose names start with `mus`."
+  - "Search sample names by word prefix instead of literal whole-value prefix."
   - "What study id matches the name `cancer`?"
   - "List study candidates for `rare disease`, enough to disambiguate the id."
   - Sample search defaults to a case-insensitive literal whole-value prefix.
@@ -248,6 +250,9 @@ Prompt cookbook:
   - "Use `mlwh_export` with `children=products`, `parent_kind=study`, and
     `parent_id=S1` to return the chosen product columns."
   - "Export the sample CRAM matrix for study `S1`."
+  - "Export users and their roles for study `S1`."
+  - "Export lanes for sample `S1`, or studies for programme `Cancer`."
+  - "Export deliverable CRAM paths for sample `S1`, newest first."
   - Chosen-column product tables route to
     `mlwh_export(children=products,parent_kind=study,...)`; products without
     iRODS objects remain rows. There is no `mlwh_count_export`; bounded `Total`
@@ -261,7 +266,9 @@ Prompt cookbook:
   - "List the first page of samples in `S1` with data between these two timestamps."
   - "Which samples in `S1` still have no sequencing data?"
   - "How much new data was added to iRODS for `S1` in the last 7 days?"
+  - "List the latest CRAM data rows for study `S1`, 10 at a time."
   - "Show the latest data page for faculty sponsor `Carl`, filtered to CRAM."
+  - "Count latest CRAM data rows for faculty sponsor `Carl`."
 - **QC and status**
   - "Break down study `S1` by received, sequenced, not sequenced, and manual QC state."
   - "How many samples in `S1` passed, failed, or are pending QC?"
@@ -280,15 +287,21 @@ Prompt cookbook:
   - "How many CRAM paths are there for sample `S1`?"
   - "List CRAM iRODS paths for study `S1`, first page only."
   - "Show iRODS paths for run `52553` with `file_type=cram`."
+  - "List deliverable CRAM paths for study `S1` added between these timestamps,
+    newest first."
+  - "Count those same filtered iRODS paths without paging."
   - "Are there any VCF paths for `S1`?"
   - "Select one merged-aware sample CRAM row per sample in study `S1`."
+  - "How many selected sample CRAMs are available for study `S1`?"
 - **People, sponsors, and users**
   - "Which studies have faculty sponsor `Carl`?"
   - "How many studies is `cwa` associated with as a user?"
   - "List studies where `cwa` has role `Follower`."
   - "Resolve the person name `Carl` across sponsors and study users."
   - "Discover exact programme values, then list studies in programme `Cancer`."
+  - "How many studies are in programme `Cancer`?"
   - "List every study-user role assignment for study `S1`."
+  - "How many owners and followers are assigned to study `S1`?"
 - **Detail and fan-outs**
   - "Show sample detail for `S1`."
   - "Show lean study detail for `S1`, page size 100."
@@ -310,6 +323,7 @@ Prompt cookbook:
   - "Use a smaller page if the result is too large."
 - **Advanced registry access**
   - "Call the MLWH Registry method `AllStudies` with `limit=100` and `offset=0`."
+  - "Call `RunListing` generically with `platform` repeated for PacBio and ONT."
   - "Use the generic endpoint caller for a Registry method that does not have a curated tool yet."
 
 Notes for interpreting answers:

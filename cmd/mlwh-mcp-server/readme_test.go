@@ -127,6 +127,11 @@ func TestREADMEAPIEighteenDocs(t *testing.T) {
 			"## what the server exposes",
 			"the server also publishes two mcp resources",
 		)
+		questions := readmeSection(
+			readme,
+			"## what can i ask?",
+			"notes for interpreting answers:",
+		)
 
 		Convey("F2.1: removed manifest workflows and tools are absent", func() {
 			So(readme, ShouldNotContainSubstring, "manifest")
@@ -200,6 +205,23 @@ func TestREADMEAPIEighteenDocs(t *testing.T) {
 			So(caveats, ShouldContainSubstring, "ont warehouse load time")
 			So(caveats, ShouldContainSubstring, "not a true sequencing date")
 			So(caveats, ShouldContainSubstring, "`mlwh_freshness` is the cache as-of source")
+		})
+
+		Convey("the prompt cookbook covers every new API 1.8.0 question family", func() {
+			examples := []string{
+				"find deliverable wgs mouse samples",
+				"export users and their roles",
+				"count latest cram data rows for faculty sponsor",
+				"count those same filtered irods paths without paging",
+				"how many selected sample crams",
+				"how many studies are in programme",
+				"how many owners and followers",
+				"list and count runs for sample",
+				"group sequencing products",
+				"`platform` repeated for pacbio and ont",
+			}
+
+			So(missingREADMETerms(questions, examples), ShouldBeEmpty)
 		})
 	})
 }
