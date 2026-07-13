@@ -26,6 +26,7 @@
 package mlwh
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -36,6 +37,45 @@ import (
 
 	. "github.com/smartystreets/goconvey/convey"
 )
+
+func TestCallInputQueryParameterValuesJSON(t *testing.T) {
+	Convey("Given JSON for mlwh_call_endpoint input", t, func() {
+		Convey("a scalar query parameter remains supported", func() {
+			var input CallInput
+			err := json.Unmarshal([]byte(`{"query_params":{"limit":"2"}}`), &input)
+
+			So(err, ShouldBeNil)
+			So(input.QueryParams["limit"], ShouldResemble, QueryParameterValues{"2"})
+		})
+
+		Convey("an ordered string-array query parameter remains supported", func() {
+			var input CallInput
+			err := json.Unmarshal([]byte(`{"query_params":{"platform":["illumina","pacbio"]}}`), &input)
+
+			So(err, ShouldBeNil)
+			So(input.QueryParams["platform"], ShouldResemble,
+				QueryParameterValues{"illumina", "pacbio"})
+		})
+
+		Convey("a null query parameter is rejected", func() {
+			var input CallInput
+			err := json.Unmarshal([]byte(`{"query_params":{"platform":null}}`), &input)
+
+			So(err, ShouldNotBeNil)
+			So(err.Error(), ShouldContainSubstring,
+				"query parameter must be a string or array of strings")
+		})
+
+		Convey("a null element in a query-parameter array is rejected", func() {
+			var input CallInput
+			err := json.Unmarshal([]byte(`{"query_params":{"platform":["illumina",null]}}`), &input)
+
+			So(err, ShouldNotBeNil)
+			So(err.Error(), ShouldContainSubstring,
+				"query parameter must be a string or array of strings")
+		})
+	})
+}
 
 // TestCallTool covers Story E2: the generic mlwh_call_endpoint escape-hatch tool.
 // Every assertion drives the tool over the real in-memory MCP client against the

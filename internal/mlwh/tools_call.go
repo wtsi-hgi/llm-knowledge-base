@@ -64,14 +64,18 @@ type QueryParameterValues []string
 // UnmarshalJSON accepts one query parameter as either a scalar string or an
 // ordered array of strings.
 func (values *QueryParameterValues) UnmarshalJSON(data []byte) error {
-	var scalar string
+	var scalar *string
 	if err := json.Unmarshal(data, &scalar); err == nil {
-		*values = []string{scalar}
+		if scalar == nil {
+			return errors.New("query parameter must be a string or array of strings")
+		}
+
+		*values = []string{*scalar}
 
 		return nil
 	}
 
-	var repeated []string
+	var repeated []*string
 	if err := json.Unmarshal(data, &repeated); err != nil {
 		return fmt.Errorf("query parameter must be a string or array of strings: %w", err)
 	}
@@ -79,7 +83,16 @@ func (values *QueryParameterValues) UnmarshalJSON(data []byte) error {
 		return errors.New("query parameter must be a string or array of strings")
 	}
 
-	*values = repeated
+	decoded := make([]string, len(repeated))
+	for i, value := range repeated {
+		if value == nil {
+			return errors.New("query parameter must be a string or array of strings")
+		}
+
+		decoded[i] = *value
+	}
+
+	*values = decoded
 
 	return nil
 }
