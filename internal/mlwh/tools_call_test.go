@@ -26,6 +26,7 @@
 package mlwh
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -36,6 +37,45 @@ import (
 
 	. "github.com/smartystreets/goconvey/convey"
 )
+
+func TestCallInputQueryParameterValuesJSON(t *testing.T) {
+	Convey("Given JSON for mlwh_call_endpoint input", t, func() {
+		Convey("a scalar query parameter remains supported", func() {
+			var input CallInput
+			err := json.Unmarshal([]byte(`{"query_params":{"limit":"2"}}`), &input)
+
+			So(err, ShouldBeNil)
+			So(input.QueryParams["limit"], ShouldResemble, QueryParameterValues{"2"})
+		})
+
+		Convey("an ordered string-array query parameter remains supported", func() {
+			var input CallInput
+			err := json.Unmarshal([]byte(`{"query_params":{"platform":["illumina","pacbio"]}}`), &input)
+
+			So(err, ShouldBeNil)
+			So(input.QueryParams["platform"], ShouldResemble,
+				QueryParameterValues{"illumina", "pacbio"})
+		})
+
+		Convey("a null query parameter is rejected", func() {
+			var input CallInput
+			err := json.Unmarshal([]byte(`{"query_params":{"platform":null}}`), &input)
+
+			So(err, ShouldNotBeNil)
+			So(err.Error(), ShouldContainSubstring,
+				"query parameter must be a string or array of strings")
+		})
+
+		Convey("a null element in a query-parameter array is rejected", func() {
+			var input CallInput
+			err := json.Unmarshal([]byte(`{"query_params":{"platform":["illumina",null]}}`), &input)
+
+			So(err, ShouldNotBeNil)
+			So(err.Error(), ShouldContainSubstring,
+				"query parameter must be a string or array of strings")
+		})
+	})
+}
 
 // TestCallTool covers Story E2: the generic mlwh_call_endpoint escape-hatch tool.
 // Every assertion drives the tool over the real in-memory MCP client against the
@@ -96,6 +136,25 @@ func TestCallTool(t *testing.T) {
 			So(req.Query.Get("offset"), ShouldEqual, "0")
 		})
 
+		Convey("repeated query parameters reach the endpoint once and in order", func() {
+			stub.respondJSON("/runs", 200, []wa.RunListingRow{})
+
+			res := callTool(t, cs, "mlwh_call_endpoint", map[string]any{
+				"method": "RunListing",
+				"query_params": map[string]any{
+					"platform": []any{"illumina", "pacbio"},
+				},
+			})
+
+			So(res.IsError, ShouldBeFalse)
+			So(stub.requestCount(), ShouldEqual, 1)
+
+			req, ok := stub.lastRequest()
+			So(ok, ShouldBeTrue)
+			So(req.Path, ShouldEqual, "/runs")
+			So(req.Query["platform"], ShouldResemble, []string{"illumina", "pacbio"})
+		})
+
 		Convey("E2.3: an unknown method is a mapped tool error whose message names the method", func() {
 			res := callTool(t, cs, "mlwh_call_endpoint", map[string]any{"method": "NoSuchMethod"})
 
@@ -145,6 +204,32 @@ func TestCallTool(t *testing.T) {
 			So(tool.Description, ShouldContainSubstring, "no cache_synced_at")
 			So(tool.Description, ShouldContainSubstring, "mlwh_freshness")
 		})
+
+		Convey("A2.2: Export returns its matrix and dispatches three ordered path parameters", func() {
+			stub.respondJSON("/export/products/study/S1", 200, wa.ExportResult{
+				Columns:    []string{"id_run", "lane", "tag_index"},
+				Rows:       [][]string{{"123", "4", "5"}},
+				Total:      1,
+				NextCursor: "",
+				Complete:   true,
+				Format:     "json",
+			})
+
+			res := callTool(t, cs, "mlwh_call_endpoint", map[string]any{
+				"method":      "Export",
+				"path_params": []any{"products", "study", "S1"},
+			})
+
+			obj := structuredObject(res)
+			So(obj["Columns"], ShouldResemble, []any{"id_run", "lane", "tag_index"})
+			So(obj["Rows"], ShouldResemble, []any{[]any{"123", "4", "5"}})
+			So(obj["Total"], ShouldEqual, 1)
+			So(obj["Complete"], ShouldBeTrue)
+
+			req, ok := stub.lastRequest()
+			So(ok, ShouldBeTrue)
+			So(req.Path, ShouldEqual, "/export/products/study/S1")
+		})
 	})
 }
 
@@ -157,6 +242,70 @@ func studyMatch() wa.Match {
 		Canonical: "5901",
 		Study:     &wa.Study{IDStudyTmp: 1, IDStudyLims: "5901", Name: "Cancer Study"},
 	}
+}
+
+// TestCallToolRegistryParity covers A2.1: the single generic tool advertises
+// the complete Registry method set, and every advertised method reaches the
+// upstream Registry-driven dispatcher. Each route returns that entry's own
+// zero result shape, so successful calls also prove generic result decoding.
+func TestCallToolRegistryParity(t *testing.T) {
+	Convey("A2.1: Given every v0.8.0 Registry entry, all 90 methods are advertised and dispatchable", t, func() {
+		stub := newStubMLWH(t)
+		for _, entry := range wa.Registry {
+			path, _ := registryTestCall(entry)
+			stub.respondJSON(path, 200, entry.NewResult())
+		}
+
+		cs, cleanup := runMLWHServerWithClient(t, stub)
+		defer cleanup()
+
+		tool, ok := toolByName(t, cs, "mlwh_call_endpoint")
+		So(ok, ShouldBeTrue)
+
+		inputSchema, ok := tool.InputSchema.(map[string]any)
+		So(ok, ShouldBeTrue)
+		properties, ok := inputSchema["properties"].(map[string]any)
+		So(ok, ShouldBeTrue)
+		methodSchema, ok := properties["method"].(map[string]any)
+		So(ok, ShouldBeTrue)
+		advertised, ok := methodSchema["enum"].([]any)
+		So(ok, ShouldBeTrue)
+
+		registryMethods := make([]any, len(wa.Registry))
+		for i, entry := range wa.Registry {
+			registryMethods[i] = entry.Method
+		}
+
+		So(len(wa.Registry), ShouldEqual, 90)
+		So(advertised, ShouldResemble, registryMethods)
+
+		var failed []string
+		for _, entry := range wa.Registry {
+			_, pathParams := registryTestCall(entry)
+			res := callTool(t, cs, "mlwh_call_endpoint", map[string]any{
+				"method":      entry.Method,
+				"path_params": pathParams,
+			})
+			if res.IsError {
+				failed = append(failed, entry.Method+": "+firstTextContent(res))
+			}
+		}
+
+		So(failed, ShouldBeEmpty)
+		So(stub.requestCount(), ShouldEqual, 90)
+	})
+}
+
+func registryTestCall(entry wa.Endpoint) (string, []any) {
+	path := entry.Path
+	pathParams := make([]any, len(entry.PathParams))
+	for i, name := range entry.PathParams {
+		value := "test-" + name
+		path = strings.ReplaceAll(path, ":"+name, value)
+		pathParams[i] = value
+	}
+
+	return path, pathParams
 }
 
 // TestCallToolResultSizeGuard covers A2.5 at the MLWH boundary: a dynamic

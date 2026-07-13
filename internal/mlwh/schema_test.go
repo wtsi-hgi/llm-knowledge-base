@@ -146,6 +146,46 @@ func TestIdentifierKindEnum(t *testing.T) {
 	})
 }
 
+func TestIRODSPathOutputSchemaContract(t *testing.T) {
+	Convey("IRODSPath output schemas require the always-serialized nullable deliverable field", t, func() {
+		schemas, err := componentSchemas()
+		So(err, ShouldBeNil)
+		source := schemas["IRODSPath"].(map[string]any)
+		sourceRequired := source["required"].([]any)
+		assertRequired := func(raw any) {
+			counts := map[string]int{}
+			for _, field := range raw.([]any) {
+				counts[field.(string)]++
+			}
+
+			missing := 0
+			for _, field := range sourceRequired {
+				if counts[field.(string)] == 0 {
+					missing++
+				}
+			}
+
+			So(missing, ShouldEqual, 0)
+			So(counts["deliverable"], ShouldEqual, 1)
+		}
+
+		resolved, err := outputSchemaFor("IRODSPath")
+		So(err, ShouldBeNil)
+		assertRequired(resolved["required"])
+
+		properties := resolved["properties"].(map[string]any)
+		deliverable := properties["deliverable"].(map[string]any)
+		So(deliverable["type"], ShouldResemble, []any{"boolean", "null"})
+
+		paged, err := outputSchemaForPagedSlice("irods_paths", "IRODSPath")
+		So(err, ShouldBeNil)
+		pagedProperties := paged["properties"].(map[string]any)
+		paths := pagedProperties["irods_paths"].(map[string]any)
+		items := paths["items"].(map[string]any)
+		assertRequired(items["required"])
+	})
+}
+
 func TestOutputSchemaFor(t *testing.T) {
 	Convey("outputSchemaFor sources MCP output schemas from wa.OpenAPIDocument()", t, func() {
 		Convey("F1.1: the Sample schema preserves the supplier_name doc-tag description", func() {
@@ -223,6 +263,53 @@ func TestOutputSchemaFor(t *testing.T) {
 	})
 }
 
+func TestOpenAPIComponentSchemaParity(t *testing.T) {
+	Convey("A2.3: every v0.8.0 OpenAPI component builds an object MCP schema with descriptions and no refs", t, func() {
+		schemas, err := componentSchemas()
+		So(err, ShouldBeNil)
+
+		var invalid []string
+		for name, raw := range schemas {
+			source, ok := raw.(map[string]any)
+			if !ok {
+				invalid = append(invalid, name+": source is not an object")
+
+				continue
+			}
+
+			resolved, resolveErr := outputSchemaFor(name)
+			if resolveErr != nil {
+				invalid = append(invalid, name+": "+resolveErr.Error())
+
+				continue
+			}
+			if resolved["type"] != "object" {
+				invalid = append(invalid, name+": resolved schema is not an object")
+			}
+			if containsRef(resolved) {
+				invalid = append(invalid, name+": unresolved $ref")
+			}
+			invalid = append(invalid, missingPropertyDescriptions(name, source, resolved)...)
+		}
+
+		So(invalid, ShouldBeEmpty)
+
+		for _, name := range []string{
+			"ExportResult", "MonthlyRunCount", "Programme", "RecentDataRow",
+			"RunListingRow", "SampleCRAM", "SequencingAggregateRow", "StudyUser",
+		} {
+			_, ok := schemas[name]
+			So(ok, ShouldBeTrue)
+		}
+
+		monthly, err := outputSchemaFor("MonthlyRunCount")
+		So(err, ShouldBeNil)
+		properties := monthly["properties"].(map[string]any)
+		month := properties["month"].(map[string]any)
+		So(month["description"], ShouldEqual, "YYYY-MM bucket")
+	})
+}
+
 func TestOutputSchemaForSlice(t *testing.T) {
 	Convey("outputSchemaForSlice builds the object wrapper schema list tools need", t, func() {
 		Convey("F2.2: the samples wrapper schema is an object with a samples array property", func() {
@@ -276,4 +363,29 @@ func containsRef(v any) bool {
 	}
 
 	return bytes.Contains(b, []byte(`"$ref"`))
+}
+
+func missingPropertyDescriptions(name string, source, resolved map[string]any) []string {
+	sourceProperties, _ := source["properties"].(map[string]any)
+	resolvedProperties, _ := resolved["properties"].(map[string]any)
+
+	var missing []string
+	for propertyName, raw := range sourceProperties {
+		sourceProperty, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+
+		description, described := sourceProperty["description"]
+		if !described {
+			continue
+		}
+
+		resolvedProperty, ok := resolvedProperties[propertyName].(map[string]any)
+		if !ok || resolvedProperty["description"] != description {
+			missing = append(missing, name+"."+propertyName+": description changed")
+		}
+	}
+
+	return missing
 }

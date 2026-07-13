@@ -116,7 +116,9 @@ func (p *provider) registerOverviewTools(r core.Registrar) error {
 }
 
 // addStudyOverview registers mlwh_study_overview (Story B1): it returns the
-// upstream StudyOverview aggregate unchanged for one LIMS study identifier.
+// upstream StudyOverview aggregate, including its programme grouping field,
+// unchanged for one LIMS study identifier. The supplied output schema is the
+// OpenAPI-derived StudyOverview component built by registerOverviewTools.
 func (p *provider) addStudyOverview(r core.Registrar, outputSchema map[string]any) error {
 	description, err := resolveDescription("StudyOverview")
 	if err != nil {
@@ -144,7 +146,8 @@ func (p *provider) addStudyOverview(r core.Registrar, outputSchema map[string]an
 // addStudyStatusBreakdown registers mlwh_study_status_breakdown (Story B2): it
 // returns the upstream StatusBreakdown aggregate exactly as MLWH reports it,
 // preserving distinct and per-platform ladders, QC split, detailed-timeline
-// count, and cache freshness.
+// count, and cache freshness. A nil per-platform slice is normalized to an
+// empty slice so both MCP result representations keep a stable array type.
 func (p *provider) addStudyStatusBreakdown(r core.Registrar, outputSchema map[string]any) error {
 	description, err := resolveDescription("StatusBreakdown")
 	if err != nil {
@@ -161,6 +164,9 @@ func (p *provider) addStudyStatusBreakdown(r core.Registrar, outputSchema map[st
 		breakdown, err := client.StatusBreakdown(ctx, in.StudyLimsID)
 		if err != nil {
 			return core.ToolError[wa.StatusBreakdown](mapToolError(err))
+		}
+		if breakdown.PerPlatform == nil {
+			breakdown.PerPlatform = []wa.PlatformPhaseLadder{}
 		}
 
 		return nil, breakdown, nil

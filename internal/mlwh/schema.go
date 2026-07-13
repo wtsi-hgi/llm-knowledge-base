@@ -40,14 +40,236 @@ const openAPISchemaRefPrefix = "#/components/schemas/"
 // exact-field sample finders the mlwh_find_samples tool unifies.
 const findSamplesMethodPrefix = "FindSamplesBy"
 
-// Shared typed-tool pagination bounds. A missing or non-positive limit becomes
-// one bounded page; values above pagedMaxLimit are rejected before any HTTP
-// request reaches MLWH.
+// Shared typed-tool pagination bounds. A missing or zero limit becomes one
+// bounded page; negative limits and values above pagedMaxLimit are rejected
+// before any HTTP request reaches MLWH.
 const (
-	pagedDefaultLimit  = 100
-	pagedDefaultOffset = 0
-	pagedMaxLimit      = 1000
+	latestDataDefaultLimit = 10
+	pagedDefaultLimit      = 100
+	pagedDefaultOffset     = 0
+	pagedMaxLimit          = 1000
 )
+
+const studyUsersRoleDescription = "optional comma-separated exact case-insensitive set of stored study_users roles; " +
+	"omit to match all roles; allowed roles are owner, manager, data_access_contact, follower, slf_manager, " +
+	"lab_manager, and administrator"
+
+// studyUsersInputSchema describes the inverse study-to-users tools. Role stays
+// an unrestricted string in the MCP schema because MLWH owns validation and
+// its mapped bad-request error must remain authoritative.
+func studyUsersInputSchema(paged bool) map[string]any {
+	properties := map[string]any{
+		"study_lims_id": map[string]any{
+			"type": "string", "description": "SQSCP LIMS study identifier",
+		},
+		"role": map[string]any{
+			"type": "string", "description": studyUsersRoleDescription,
+		},
+	}
+	if paged {
+		properties["limit"] = map[string]any{
+			"type": "integer", "description": "maximum rows to return; defaults to 100, maximum 1000",
+		}
+		properties["offset"] = map[string]any{
+			"type": "integer", "description": "non-negative number of leading rows to skip; defaults to 0",
+		}
+	}
+
+	return map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"properties":           properties,
+		"required":             []any{"study_lims_id"},
+	}
+}
+
+// exportInputSchema describes the generic relationship export input. Its three
+// vocabulary-bearing properties are generated from wa's runtime sources of
+// truth so aliases, parent kinds, defaults, and selectable columns move with
+// the upstream API instead of being copied into this provider.
+func exportInputSchema() map[string]any {
+	childrenEnum, parentEnum, childrenDescription, parentDescription := exportRelationshipSchema()
+	columnEnum, columnsDescription := exportColumnSchema()
+
+	return map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"properties": map[string]any{
+			"children": map[string]any{
+				"type": "string", "description": childrenDescription, "enum": childrenEnum,
+			},
+			"parent_kind": map[string]any{
+				"type": "string", "description": parentDescription, "enum": parentEnum,
+			},
+			"parent_id": map[string]any{
+				"type": "string", "description": "identifier of the selected parent; resolution is performed upstream",
+			},
+			"columns": map[string]any{
+				"type": "array", "description": columnsDescription,
+				"items": map[string]any{"type": "string", "enum": columnEnum},
+			},
+			"file_type": map[string]any{
+				"type": "string", "description": "optional file suffix for file exports or product iRODS attachments",
+			},
+			"deliverables_only": map[string]any{
+				"type": "boolean", "description": "optional tri-state deliverability filter; omit to use the relationship default",
+			},
+			"role": map[string]any{
+				"type": "string", "description": "optional comma-separated study_users role filter",
+			},
+			"qc": map[string]any{
+				"type": "string", "description": "optional product-backed QC filter", "enum": []any{"pass", "fail", "pending"},
+			},
+			"library_type": map[string]any{
+				"type": "string", "description": "optional exact library type filter for sample-backed exports",
+			},
+			"organism": map[string]any{
+				"type": "string", "description": "optional organism or common-name filter for sample-backed exports",
+			},
+			"sort": map[string]any{
+				"type": "string", "description": "optional iRODS created-time sort mode", "enum": []any{"created-desc", "created_desc"},
+			},
+			"since": map[string]any{
+				"type": "string", "description": "optional RFC3339 inclusive lower bound for iRODS created time",
+			},
+			"until": map[string]any{
+				"type": "string", "description": "optional RFC3339 exclusive upper bound for iRODS created time; requires since",
+			},
+			"limit": map[string]any{
+				"type": "integer", "description": "optional bounded page size; upstream defaults to 1000",
+			},
+			"offset": map[string]any{
+				"type": "integer", "description": "optional offset for offset-backed relationships",
+			},
+			"all": map[string]any{
+				"type": "boolean", "description": "return the complete matching set through the upstream iterator",
+			},
+			"cursor": map[string]any{
+				"type": "string", "description": "opaque continuation cursor returned by iRODS or products exports",
+			},
+			"format": map[string]any{
+				"type": "string", "description": "output format metadata; defaults upstream to tsv", "enum": []any{"tsv", "csv", "json"},
+			},
+		},
+		"required": []any{"children", "parent_kind", "parent_id"},
+	}
+}
+
+func exportRelationshipSchema() (childrenEnum, parentEnum []any, childrenDescription, parentDescription string) {
+	relationships := wa.ExportRelationshipDescriptions()
+	seenParents := map[string]bool{}
+	childrenParts := make([]string, len(relationships))
+	parentParts := make([]string, len(relationships))
+
+	for index, relationship := range relationships {
+		label := exportVocabularyLabel(relationship.Children, relationship.Aliases)
+		childrenParts[index] = label + " (" + relationship.Description + ")"
+		parentParts[index] = label + ": " + strings.Join(relationship.ParentKinds, ",")
+		childrenEnum = append(childrenEnum, relationship.Children)
+		for _, alias := range relationship.Aliases {
+			childrenEnum = append(childrenEnum, alias)
+		}
+		for _, parent := range relationship.ParentKinds {
+			if !seenParents[parent] {
+				parentEnum = append(parentEnum, parent)
+				seenParents[parent] = true
+			}
+		}
+	}
+
+	childrenDescription = "child relationship to export. Supported children and aliases: " + strings.Join(childrenParts, "; ")
+	parentDescription = "kind of parent identified by parent_id. Allowed parent kinds by child: " + strings.Join(parentParts, "; ")
+
+	return childrenEnum, parentEnum, childrenDescription, parentDescription
+}
+
+func exportColumnSchema() ([]any, string) {
+	vocabularies := wa.ExportColumnVocabularies()
+	seen := map[string]bool{}
+	enum := []any{}
+	descriptionParts := make([]string, len(vocabularies))
+
+	for index, vocabulary := range vocabularies {
+		columns := make([]string, len(vocabulary.Columns))
+		for columnIndex, column := range vocabulary.Columns {
+			columns[columnIndex] = exportColumnLabel(column)
+			for _, value := range append([]string{column.Name}, column.Aliases...) {
+				if !seen[value] {
+					enum = append(enum, value)
+					seen[value] = true
+				}
+			}
+		}
+
+		descriptionParts[index] = exportVocabularyLabel(vocabulary.Children, vocabulary.Aliases) +
+			" default " + strings.Join(vocabulary.Default, ",") +
+			"; available " + strings.Join(columns, ",")
+	}
+
+	description := "ordered columns to return; omit to use the relationship default. Columns by child: " +
+		strings.Join(descriptionParts, "; ")
+
+	return enum, description
+}
+
+func exportVocabularyLabel(children string, aliases []string) string {
+	if len(aliases) == 0 {
+		return children
+	}
+
+	return children + "/" + strings.Join(aliases, "/")
+}
+
+func exportColumnLabel(column wa.ExportColumnDescription) string {
+	if len(column.Aliases) == 0 {
+		return column.Name
+	}
+
+	return column.Name + " (aliases: " + strings.Join(column.Aliases, ",") + ")"
+}
+
+// callEndpointInputSchema describes the generic call tool input and advertises
+// every Registry Method as the method enum. The enum is rebuilt from the live
+// Registry when the provider registers, so adding an upstream endpoint makes
+// it discoverable without adding another curated tool or maintaining a second
+// method list.
+func callEndpointInputSchema() map[string]any {
+	methods := make([]any, len(wa.Registry))
+	for i, entry := range wa.Registry {
+		methods[i] = entry.Method
+	}
+
+	return map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"properties": map[string]any{
+			"method": map[string]any{
+				"type":        "string",
+				"description": "the Registry Method name to dispatch (see mlwh://workflow for its endpoint)",
+				"enum":        methods,
+			},
+			"path_params": map[string]any{
+				"type":        "array",
+				"description": "the endpoint's path parameters, in Registry declaration order",
+				"items":       map[string]any{"type": "string"},
+			},
+			"query_params": map[string]any{
+				"type":        "object",
+				"description": "the endpoint's query parameters; each value is a string or ordered array of strings",
+				"additionalProperties": map[string]any{
+					"oneOf": []any{
+						map[string]any{"type": "string"},
+						map[string]any{
+							"type":  "array",
+							"items": map[string]any{"type": "string"},
+						},
+					},
+				},
+			},
+		},
+		"required": []any{"method"},
+	}
+}
 
 // slice wrapper structs give each list-returning tool an object-typed Out, as
 // MCP requires (output schemas and StructuredContent must be JSON objects, not
@@ -68,6 +290,24 @@ type studiesResult struct {
 // runsResult wraps a []wa.Run as {"runs":[...]}.
 type runsResult struct {
 	Runs []wa.Run `json:"runs"`
+}
+
+// runListingsResult wraps the global keyset listing's exact
+// []wa.RunListingRow as {"runs":[...]} without offset-page metadata.
+type runListingsResult struct {
+	Runs []wa.RunListingRow `json:"runs"`
+}
+
+// monthlyRunCountsResult wraps the monthly run aggregate's exact
+// []wa.MonthlyRunCount as {"monthly_run_counts":[...]}.
+type monthlyRunCountsResult struct {
+	MonthlyRunCounts []wa.MonthlyRunCount `json:"monthly_run_counts"`
+}
+
+// sequencingAggregatesResult wraps the general sequencing aggregate's exact
+// []wa.SequencingAggregateRow as {"aggregates":[...]}.
+type sequencingAggregatesResult struct {
+	Aggregates []wa.SequencingAggregateRow `json:"aggregates"`
 }
 
 // lanesResult wraps a []wa.Lane as {"lanes":[...]}.
@@ -144,6 +384,14 @@ type pagedIRODSPathsResult struct {
 	NextOffset int            `json:"next_offset"`
 }
 
+// pagedLatestDataResult wraps a header-aware latest-data page as
+// {"latest_data":[...],"total":N,"next_offset":M}.
+type pagedLatestDataResult struct {
+	LatestData []wa.RecentDataRow `json:"latest_data"`
+	Total      int                `json:"total"`
+	NextOffset int                `json:"next_offset"`
+}
+
 // pagedLibrariesResult wraps a header-aware library page as
 // {"libraries":[...],"total":N,"next_offset":M}.
 type pagedLibrariesResult struct {
@@ -165,6 +413,7 @@ func outputSchemaFor(componentName string) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	applyComponentSchemaOverrides(schemas)
 
 	component, ok := schemas[componentName].(map[string]any)
 	if !ok {
@@ -177,6 +426,81 @@ func outputSchemaFor(componentName string) (map[string]any, error) {
 	}
 
 	return resolved, nil
+}
+
+// applyComponentSchemaOverrides corrects known OpenAPI generator limitations
+// before references are resolved, so both root components and every nested
+// reference to them receive the same JSON contract.
+func applyComponentSchemaOverrides(schemas map[string]any) {
+	if schema, ok := schemas["IRODSPath"].(map[string]any); ok {
+		allowNullProperty(schema, "deliverable")
+		requireProperty(schema, "deliverable")
+	}
+	if schema, ok := schemas["SequencingAggregateRow"].(map[string]any); ok {
+		allowMapProperty(schema, "group", map[string]any{"type": "string"})
+	}
+
+	for _, componentName := range []string{"StudyDetail", "RunDetail"} {
+		schema, ok := schemas[componentName].(map[string]any)
+		if !ok {
+			continue
+		}
+
+		allowMapProperty(schema, "study_lookup", map[string]any{
+			"$ref": openAPISchemaRefPrefix + "Study",
+		})
+		allowMapProperty(schema, "library_lookup", map[string]any{
+			"$ref": openAPISchemaRefPrefix + "Library",
+		})
+	}
+}
+
+// allowNullProperty amends an OpenAPI-derived property for a Go pointer field.
+// The upstream IRODSPath schema currently describes *bool Deliverable as only a
+// boolean even though its exact JSON contract is tri-state true/false/null.
+func allowNullProperty(schema map[string]any, propertyName string) {
+	properties, ok := schema["properties"].(map[string]any)
+	if !ok {
+		return
+	}
+
+	property, ok := properties[propertyName].(map[string]any)
+	if !ok {
+		return
+	}
+
+	property["type"] = []any{"boolean", "null"}
+}
+
+// requireProperty amends an OpenAPI-derived required list for a field that is
+// always serialized, preserving the generator's existing required fields.
+func requireProperty(schema map[string]any, propertyName string) {
+	required, _ := schema["required"].([]any)
+	for _, name := range required {
+		if name == propertyName {
+			return
+		}
+	}
+
+	schema["required"] = append(required, propertyName)
+}
+
+// allowMapProperty corrects an OpenAPI generator limitation for map fields,
+// which otherwise appear as scalar strings. It replaces only the map-specific
+// schema keywords, preserving the property's description and other metadata.
+func allowMapProperty(schema map[string]any, propertyName string, valueSchema map[string]any) {
+	properties, ok := schema["properties"].(map[string]any)
+	if !ok {
+		return
+	}
+
+	property, ok := properties[propertyName].(map[string]any)
+	if !ok {
+		return
+	}
+
+	property["type"] = "object"
+	property["additionalProperties"] = valueSchema
 }
 
 // outputSchemaForSlice returns the object-typed output schema for a list tool
@@ -236,8 +560,8 @@ func outputSchemaForPagedSlice(propertyName, componentName string) (map[string]a
 // outputSchemaForPagedObject returns the OpenAPI-sourced object schema for an
 // upstream envelope with the required pagination metadata added at the top
 // level. It is used for paged typed tools whose semantic response is already an
-// object, such as StudyManifest, so the MCP result stays flattened instead of
-// wrapping the object under another property.
+// object, so the MCP result stays flattened instead of wrapping the object
+// under another property.
 func outputSchemaForPagedObject(componentName string) (map[string]any, error) {
 	schema, err := outputSchemaFor(componentName)
 	if err != nil {
@@ -265,14 +589,21 @@ func outputSchemaForPagedObject(componentName string) (map[string]any, error) {
 }
 
 // boundedPagination resolves a typed paged tool's effective limit and offset.
-// It rejects over-large limits before HTTP, defaults omitted/non-positive limits
-// to the bounded page size, and otherwise preserves the caller's offset.
+// It rejects negative and over-large limits before HTTP, defaults an omitted
+// zero limit to the bounded page size, and otherwise preserves the caller's
+// offset.
 func boundedPagination(limit, offset int) (int, int, error) {
+	if limit < 0 {
+		return 0, 0, fmt.Errorf("limit %d must be non-negative", limit)
+	}
 	if limit > pagedMaxLimit {
 		return 0, 0, fmt.Errorf("limit %d exceeds the maximum of %d (a larger limit is rejected, not clamped); request a smaller page", limit, pagedMaxLimit)
 	}
+	if offset < 0 {
+		return 0, 0, fmt.Errorf("offset %d must be non-negative", offset)
+	}
 
-	if limit <= 0 {
+	if limit == 0 {
 		limit = pagedDefaultLimit
 	}
 

@@ -26,9 +26,13 @@
 package mlwh
 
 import (
+	"context"
+	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	wa "github.com/wtsi-hgi/wa/mlwh"
@@ -36,61 +40,26 @@ import (
 	. "github.com/smartystreets/goconvey/convey"
 )
 
-func TestStudyManifestToolSchemaAndDescription(t *testing.T) {
-	Convey("Given the registered mlwh_study_manifest tool", t, func() {
-		stub := newStubMLWH(t)
-		cs, cleanup := runMLWHServerWithClient(t, stub)
-		defer cleanup()
+type irodsToolCase struct {
+	name string
+	path string
+	args func() map[string]any
+}
 
-		tool, ok := toolByName(t, cs, "mlwh_study_manifest")
-		So(ok, ShouldBeTrue)
+func irodsListToolCases() []irodsToolCase {
+	return []irodsToolCase{
+		{"mlwh_irods_paths_for_sample", "/sample/S1/irods", func() map[string]any { return map[string]any{"sanger_name": "S1"} }},
+		{"mlwh_irods_paths_for_study", "/study/ST1/irods", func() map[string]any { return map[string]any{"study_lims_id": "ST1"} }},
+		{"mlwh_irods_paths_for_run", "/run/52553/irods", func() map[string]any { return map[string]any{"id_run": "52553"} }},
+	}
+}
 
-		Convey("C3.5: the output schema exposes flattened manifest rows and paging metadata", func() {
-			schema, ok := tool.OutputSchema.(map[string]any)
-			So(ok, ShouldBeTrue)
-
-			properties, ok := schema["properties"].(map[string]any)
-			So(ok, ShouldBeTrue)
-			_, wrapped := properties["study_manifest"]
-			So(wrapped, ShouldBeFalse)
-			So(properties, ShouldContainKey, "total")
-			So(properties, ShouldContainKey, "next_offset")
-
-			rows, ok := properties["rows"].(map[string]any)
-			So(ok, ShouldBeTrue)
-			items, ok := rows["items"].(map[string]any)
-			So(ok, ShouldBeTrue)
-			rowProperties, ok := items["properties"].(map[string]any)
-			So(ok, ShouldBeTrue)
-
-			missing := 0
-			for _, field := range []string{
-				"name",
-				"supplier_name",
-				"accession_number",
-				"sanger_sample_id",
-				"id_run",
-				"lane",
-				"tag_index",
-				"irods_path",
-			} {
-				if _, ok := rowProperties[field]; !ok {
-					missing++
-				}
-			}
-
-			So(missing, ShouldEqual, 0)
-		})
-
-		Convey("the description advertises with_irods/file_type semantics and bounded paging", func() {
-			lower := strings.ToLower(tool.Description)
-			So(lower, ShouldContainSubstring, "with_irods")
-			So(lower, ShouldContainSubstring, "file_type")
-			So(tool.Description, ShouldContainSubstring, "does NOT default to cram")
-			So(lower, ShouldContainSubstring, "defaults to a page of 100")
-			So(tool.Description, ShouldContainSubstring, "1000")
-		})
-	})
+func irodsCountToolCases() []irodsToolCase {
+	return []irodsToolCase{
+		{"mlwh_count_irods_paths_for_sample", "/sample/S1/irods/count", func() map[string]any { return map[string]any{"sanger_name": "S1"} }},
+		{"mlwh_count_irods_paths_for_study", "/study/ST1/irods/count", func() map[string]any { return map[string]any{"study_lims_id": "ST1"} }},
+		{"mlwh_count_irods_paths_for_run", "/run/52553/irods/count", func() map[string]any { return map[string]any{"id_run": "52553"} }},
+	}
 }
 
 // TestAvailabilityToolsC1 covers spec C1: the samples-with-data count/list
@@ -214,186 +183,575 @@ func TestAvailabilityToolsC1(t *testing.T) {
 	})
 }
 
-// TestIRODSToolsC2 covers Story C2: sample/study/run iRODS path tools accept
-// optional upstream file_type filtering, expose page metadata, and provide count
-// counterparts for bounded cram-path workflows.
+// TestIRODSToolsC2 covers spec C2: the sample, study, and run iRODS tools
+// preserve every upstream option, row field, page header, suffix/error
+// semantic, and freshness description through the public MCP boundary.
 func TestIRODSToolsC2(t *testing.T) {
 	Convey("Given the MLWH server (stub-backed) with the iRODS availability tools", t, func() {
 		stub := newStubMLWH(t)
 		cs, cleanup := runMLWHServerWithClient(t, stub)
 		defer cleanup()
 
-		Convey("C2.1: mlwh_irods_paths_for_study sends file_type and returns iRODS rows plus page metadata", func() {
-			stub.respondJSONWithHeaders("/study/S1/irods", http.StatusOK, []wa.IRODSPath{
-				{IDProduct: "P1", IDRun: 52553, Platform: "illumina"},
-			}, irodsPageHeaders("4", "-1"))
+		Convey("C2.1: all list options reach each exact path in one request", func() {
+			for index, tc := range irodsListToolCases() {
+				stub.respondJSONWithHeaders(tc.path, http.StatusOK, []wa.IRODSPath{}, irodsPageHeaders("0", "-1"))
 
-			res := callTool(t, cs, "mlwh_irods_paths_for_study", map[string]any{
-				"study_lims_id": "S1",
-				"file_type":     "cram",
-			})
+				args := tc.args()
+				args["file_type"] = "cram"
+				args["deliverables_only"] = true
+				args["order_by"] = "created_desc"
+				args["since"] = "2026-06-01T00:00:00Z"
+				args["until"] = "2026-07-01T00:00:00Z"
+				args["limit"] = 7
+				args["offset"] = 14
 
-			obj := structuredObject(res)
-			paths, ok := obj["irods_paths"].([]any)
-			So(ok, ShouldBeTrue)
-			So(len(paths), ShouldEqual, 1)
-			path, ok := paths[0].(map[string]any)
-			So(ok, ShouldBeTrue)
-			So(path["id_run"], ShouldEqual, 52553)
-			So(path["platform"], ShouldEqual, "illumina")
-			So(obj["total"], ShouldEqual, 4)
-			So(obj["next_offset"], ShouldEqual, -1)
+				res := callTool(t, cs, tc.name, args)
+				So(res.IsError, ShouldBeFalse)
+				So(stub.requestCount(), ShouldEqual, index+1)
 
-			req, ok := stub.lastRequest()
-			So(ok, ShouldBeTrue)
-			So(req.Path, ShouldEqual, "/study/S1/irods")
-			So(req.Query.Get("file_type"), ShouldEqual, "cram")
-			So(req.Query.Get("limit"), ShouldEqual, "100")
-			So(req.Query.Get("offset"), ShouldEqual, "0")
+				req, ok := stub.lastRequest()
+				So(ok, ShouldBeTrue)
+				So(req.Path, ShouldEqual, tc.path)
+				So(req.Query, ShouldResemble, url.Values{
+					"file_type":         {"cram"},
+					"deliverables_only": {"true"},
+					"order_by":          {"created_desc"},
+					"since":             {"2026-06-01T00:00:00Z"},
+					"until":             {"2026-07-01T00:00:00Z"},
+					"limit":             {"7"},
+					"offset":            {"14"},
+				})
+			}
 		})
 
-		Convey("C2.2: mlwh_count_irods_paths_for_sample preserves a dotted uppercase file_type", func() {
-			stub.respondJSON("/sample/S1/irods/count", http.StatusOK, wa.Count{Count: 4})
+		Convey("C2.2: matching counts send every filter and no list-only option", func() {
+			for index, tc := range irodsCountToolCases() {
+				stub.respondJSON(tc.path, http.StatusOK, wa.Count{Count: index + 1})
 
-			res := callTool(t, cs, "mlwh_count_irods_paths_for_sample", map[string]any{
-				"sanger_name": "S1",
-				"file_type":   ".CRAM",
-			})
+				args := tc.args()
+				args["file_type"] = "cram"
+				args["deliverables_only"] = true
+				args["since"] = "2026-06-01T00:00:00Z"
+				args["until"] = "2026-07-01T00:00:00Z"
 
-			obj := structuredObject(res)
-			So(obj["count"], ShouldEqual, 4)
+				res := callTool(t, cs, tc.name, args)
+				So(structuredObject(res)["count"], ShouldEqual, index+1)
 
-			req, ok := stub.lastRequest()
-			So(ok, ShouldBeTrue)
-			So(req.Path, ShouldEqual, "/sample/S1/irods/count")
-			So(req.Query.Get("file_type"), ShouldEqual, ".CRAM")
+				req, ok := stub.lastRequest()
+				So(ok, ShouldBeTrue)
+				So(req.Path, ShouldEqual, tc.path)
+				So(req.Query, ShouldResemble, url.Values{
+					"file_type":         {"cram"},
+					"deliverables_only": {"true"},
+					"since":             {"2026-06-01T00:00:00Z"},
+					"until":             {"2026-07-01T00:00:00Z"},
+				})
+			}
 		})
 
-		Convey("C2.3: mlwh_count_irods_paths_for_study preserves file_type and returns the count", func() {
-			stub.respondJSON("/study/S1/irods/count", http.StatusOK, wa.Count{Count: 9})
+		Convey("C2.3: all list wrappers preserve header page metadata", func() {
+			for _, tc := range irodsListToolCases() {
+				stub.respondJSONWithHeaders(tc.path, http.StatusOK, []wa.IRODSPath{{IDProduct: "P1"}}, irodsPageHeaders("23", "20"))
 
-			res := callTool(t, cs, "mlwh_count_irods_paths_for_study", map[string]any{
-				"study_lims_id": "S1",
-				"file_type":     "cram",
-			})
-
-			obj := structuredObject(res)
-			So(obj["count"], ShouldEqual, 9)
-
-			req, ok := stub.lastRequest()
-			So(ok, ShouldBeTrue)
-			So(req.Path, ShouldEqual, "/study/S1/irods/count")
-			So(req.Query.Get("file_type"), ShouldEqual, "cram")
+				obj := structuredObject(callTool(t, cs, tc.name, tc.args()))
+				paths, ok := obj["irods_paths"].([]any)
+				So(ok, ShouldBeTrue)
+				So(len(paths), ShouldEqual, 1)
+				So(obj["total"], ShouldEqual, 23)
+				So(obj["next_offset"], ShouldEqual, 20)
+			}
 		})
 
-		Convey("C2.4: mlwh_irods_paths_for_sample returns semantic irods_paths with all IRODSPath fields", func() {
-			stub.respondJSONWithHeaders("/sample/S1/irods", http.StatusOK, []wa.IRODSPath{
+		Convey("C2.4: ordinary and merged rows preserve every exact IRODSPath field", func() {
+			trueValue := true
+			falseValue := false
+			rows := []wa.IRODSPath{
 				{
-					IDProduct:   "P1",
-					Collection:  "/seq/1",
-					DataObject:  "a.cram",
-					IRODSPath:   "/seq/1/a.cram",
-					IDSampleTmp: 123,
-					Name:        "S1",
-					IDRun:       52553,
-					Platform:    "illumina",
+					IDProduct: "P1", Collection: "/seq/1", DataObject: "a.cram", IRODSPath: "/seq/1/a.cram",
+					IDSampleTmp: 123, Name: "S1", SupplierName: "supplier-1", SangerSampleID: "SAN1",
+					AccessionNumber: "ERS1", IDStudyLims: "ST1", StudyAccessionNumber: "ERP1",
+					Created: "2026-06-20T12:00:00Z", IDRun: 52553, Position: 2, TagIndex: 7,
+					Platform: "illumina", ManualQC: "pass", Deliverable: &trueValue,
+				},
+				{
+					IDProduct: "P2", Collection: "/seq/2", DataObject: "merged.cram", IRODSPath: "/seq/2/merged.cram",
+					IDSampleTmp: 124, Name: "S2", SupplierName: "supplier-2", SangerSampleID: "SAN2",
+					AccessionNumber: "ERS2", IDStudyLims: "ST2", StudyAccessionNumber: "ERP2",
+					Created: "2026-06-21T12:00:00Z", Platform: "illumina", Merged: true,
+					ManualQC: "fail", Deliverable: &falseValue,
+				},
+			}
+			stub.respondJSONWithHeaders("/sample/S1/irods", http.StatusOK, rows, irodsPageHeaders("2", "-1"))
+
+			obj := structuredObject(callTool(t, cs, "mlwh_irods_paths_for_sample", map[string]any{"sanger_name": "S1"}))
+			paths := obj["irods_paths"].([]any)
+			So(paths, ShouldResemble, []any{
+				map[string]any{
+					"id_product": "P1", "collection": "/seq/1", "data_object": "a.cram", "irods_path": "/seq/1/a.cram",
+					"id_sample_tmp": float64(123), "name": "S1", "supplier_name": "supplier-1", "sanger_sample_id": "SAN1",
+					"accession_number": "ERS1", "id_study_lims": "ST1", "study_accession_number": "ERP1",
+					"created": "2026-06-20T12:00:00Z", "id_run": float64(52553), "lane": float64(2), "tag_index": float64(7),
+					"platform": "illumina", "merged": false, "manual_qc": "pass", "deliverable": true,
+				},
+				map[string]any{
+					"id_product": "P2", "collection": "/seq/2", "data_object": "merged.cram", "irods_path": "/seq/2/merged.cram",
+					"id_sample_tmp": float64(124), "name": "S2", "supplier_name": "supplier-2", "sanger_sample_id": "SAN2",
+					"accession_number": "ERS2", "id_study_lims": "ST2", "study_accession_number": "ERP2",
+					"created": "2026-06-21T12:00:00Z", "id_run": float64(0), "lane": float64(0), "tag_index": float64(0),
+					"platform": "illumina", "merged": true, "manual_qc": "fail", "deliverable": false,
+				},
+			})
+		})
+
+		Convey("C2.5: deliverable remains true, false, or null", func() {
+			trueValue := true
+			falseValue := false
+			stub.respondJSONWithHeaders("/run/52553/irods", http.StatusOK, []wa.IRODSPath{
+				{IDProduct: "P1", Deliverable: &trueValue},
+				{IDProduct: "P2", Deliverable: &falseValue},
+				{IDProduct: "P3", Deliverable: nil},
+			}, irodsPageHeaders("3", "-1"))
+
+			obj := structuredObject(callTool(t, cs, "mlwh_irods_paths_for_run", map[string]any{"id_run": "52553"}))
+			paths := obj["irods_paths"].([]any)
+			So(paths[0].(map[string]any)["deliverable"], ShouldEqual, true)
+			So(paths[1].(map[string]any)["deliverable"], ShouldEqual, false)
+			So(paths[2].(map[string]any)["deliverable"], ShouldBeNil)
+		})
+
+		Convey("C2.6: all suffix outcomes are decided upstream", func() {
+			stub.respondJSONWithHeaders("/study/S1/irods", http.StatusOK, []wa.IRODSPath{{IDProduct: "P1"}}, irodsPageHeaders("1", "-1"))
+			matched := structuredObject(callTool(t, cs, "mlwh_irods_paths_for_study", map[string]any{
+				"study_lims_id": "S1", "file_type": ".CRAM",
+			}))
+			So(len(matched["irods_paths"].([]any)), ShouldEqual, 1)
+			req, ok := stub.lastRequest()
+			So(ok, ShouldBeTrue)
+			So(req.Query.Get("file_type"), ShouldEqual, ".CRAM")
+
+			stub.respondJSONWithHeaders("/study/S1/irods", http.StatusOK, []wa.IRODSPath{}, irodsPageHeaders("0", "-1"))
+			unmatched := structuredObject(callTool(t, cs, "mlwh_irods_paths_for_study", map[string]any{
+				"study_lims_id": "S1", "file_type": "vcf",
+			}))
+			So(len(unmatched["irods_paths"].([]any)), ShouldEqual, 0)
+
+			failures := countInvalidIRODSToolFailures(t, cs, stub, []string{" ", "%", "_", "/"})
+			So(failures, ShouldEqual, 0)
+		})
+
+		Convey("C2.7: schemas and descriptions explain ordering, row time, deliverability, and freshness", func() {
+			for _, tc := range irodsListToolCases() {
+				tool, ok := toolByName(t, cs, tc.name)
+				So(ok, ShouldBeTrue)
+				properties := tool.InputSchema.(map[string]any)["properties"].(map[string]any)
+				So(properties, ShouldContainKey, "order_by")
+				assertIRODSDescription(tool.Description)
+			}
+
+			for _, tc := range irodsCountToolCases() {
+				tool, ok := toolByName(t, cs, tc.name)
+				So(ok, ShouldBeTrue)
+				properties := tool.InputSchema.(map[string]any)["properties"].(map[string]any)
+				So(properties, ShouldNotContainKey, "order_by")
+				assertIRODSDescription(tool.Description)
+			}
+		})
+	})
+}
+
+// TestLatestDataToolsC3 covers spec C3: study- and faculty-sponsor-scoped
+// latest-data pages and their matching counts preserve upstream ordering,
+// pagination, row fields, filtering, and agent-facing semantics.
+func TestLatestDataToolsC3(t *testing.T) {
+	Convey("Given the MLWH server (stub-backed) with the latest-data tools", t, func() {
+		stub := newStubMLWH(t)
+		cs, cleanup := runMLWHServerWithClient(t, stub)
+		defer cleanup()
+
+		Convey("C3.1: a study list defaults to a ten-row newest-first page", func() {
+			stub.respondJSONWithHeaders("/study/S1/latest-data", http.StatusOK, []wa.RecentDataRow{
+				{Created: "2026-07-02T10:00:00Z", IRODSPath: "/seq/new.cram"},
+				{Created: "2026-07-01T10:00:00Z", IRODSPath: "/seq/old.cram"},
+			}, irodsPageHeaders("2", "-1"))
+
+			obj := structuredObject(callTool(t, cs, "mlwh_latest_data_for_study", map[string]any{
+				"study_lims_id": "S1",
+			}))
+			rows, ok := obj["latest_data"].([]any)
+			So(ok, ShouldBeTrue)
+			So(rows, ShouldHaveLength, 2)
+			So(rows[0].(map[string]any)["irods_path"], ShouldEqual, "/seq/new.cram")
+
+			req, ok := stub.lastRequest()
+			So(ok, ShouldBeTrue)
+			So(req.Path, ShouldEqual, "/study/S1/latest-data")
+			So(req.Query, ShouldResemble, url.Values{
+				"limit":  {"10"},
+				"offset": {"0"},
+			})
+		})
+
+		Convey("C3.2: a sponsor list preserves file type and explicit pagination", func() {
+			stub.respondJSONWithHeaders("/latest-data/faculty-sponsor/Ada", http.StatusOK, []wa.RecentDataRow{}, irodsPageHeaders("80", "60"))
+
+			res := callTool(t, cs, "mlwh_latest_data_for_faculty_sponsor", map[string]any{
+				"faculty_sponsor": "Ada",
+				"file_type":       "cram",
+				"limit":           20,
+				"offset":          40,
+			})
+			So(res.IsError, ShouldBeFalse)
+
+			req, ok := stub.lastRequest()
+			So(ok, ShouldBeTrue)
+			So(req.Path, ShouldEqual, "/latest-data/faculty-sponsor/Ada")
+			So(req.Query, ShouldResemble, url.Values{
+				"file_type": {"cram"},
+				"limit":     {"20"},
+				"offset":    {"40"},
+			})
+
+			overLimit := callTool(t, cs, "mlwh_latest_data_for_faculty_sponsor", map[string]any{
+				"faculty_sponsor": "Ada", "limit": 1001,
+			})
+			So(overLimit.IsError, ShouldBeTrue)
+			So(firstTextContent(overLimit), ShouldContainSubstring, "maximum of 1000")
+			So(stub.requestCount(), ShouldEqual, 1)
+
+			negativeOffset := callTool(t, cs, "mlwh_latest_data_for_faculty_sponsor", map[string]any{
+				"faculty_sponsor": "Ada", "offset": -1,
+			})
+			So(negativeOffset.IsError, ShouldBeTrue)
+			So(firstTextContent(negativeOffset), ShouldContainSubstring, "non-negative")
+			So(stub.requestCount(), ShouldEqual, 1)
+		})
+
+		Convey("C3.3: a latest-data page preserves metadata and every RecentDataRow field", func() {
+			row := wa.RecentDataRow{
+				Created:      "2026-07-02T10:00:00Z",
+				IRODSPath:    "/seq/52553/2/7/sample.cram",
+				IDStudyLims:  "S1",
+				StudyName:    "Study one",
+				Name:         "SANGER-1",
+				SupplierName: "Supplier 1",
+				IDRun:        52553,
+				Position:     2,
+				TagIndex:     7,
+				Platform:     "illumina",
+				Merged:       true,
+			}
+			stub.respondJSONWithHeaders("/study/S1/latest-data", http.StatusOK, []wa.RecentDataRow{row}, irodsPageHeaders("31", "20"))
+
+			obj := structuredObject(callTool(t, cs, "mlwh_latest_data_for_study", map[string]any{
+				"study_lims_id": "S1", "limit": 10, "offset": 10,
+			}))
+			So(obj["total"], ShouldEqual, 31)
+			So(obj["next_offset"], ShouldEqual, 20)
+			So(obj["latest_data"].([]any), ShouldResemble, []any{map[string]any{
+				"created":       "2026-07-02T10:00:00Z",
+				"irods_path":    "/seq/52553/2/7/sample.cram",
+				"id_study_lims": "S1",
+				"study_name":    "Study one",
+				"name":          "SANGER-1",
+				"supplier_name": "Supplier 1",
+				"id_run":        float64(52553),
+				"lane":          float64(2),
+				"tag_index":     float64(7),
+				"platform":      "illumina",
+				"merged":        true,
+			}})
+
+			tool, ok := toolByName(t, cs, "mlwh_latest_data_for_study")
+			So(ok, ShouldBeTrue)
+			outputSchema := tool.OutputSchema.(map[string]any)
+			properties := outputSchema["properties"].(map[string]any)
+			So(properties, ShouldContainKey, "latest_data")
+			So(properties, ShouldContainKey, "total")
+			So(properties, ShouldContainKey, "next_offset")
+		})
+
+		Convey("C3.4: study and sponsor counts preserve file type and exact count paths", func() {
+			cases := []struct {
+				name  string
+				path  string
+				args  map[string]any
+				count int
+			}{
+				{
+					name: "mlwh_count_latest_data_for_study", path: "/study/S1/latest-data/count",
+					args: map[string]any{"study_lims_id": "S1", "file_type": "cram"}, count: 31,
+				},
+				{
+					name: "mlwh_count_latest_data_for_faculty_sponsor", path: "/latest-data/faculty-sponsor/Ada/count",
+					args: map[string]any{"faculty_sponsor": "Ada", "file_type": "cram"}, count: 47,
+				},
+			}
+
+			for _, tc := range cases {
+				stub.respondJSON(tc.path, http.StatusOK, wa.Count{Count: tc.count})
+
+				obj := structuredObject(callTool(t, cs, tc.name, tc.args))
+				So(len(obj), ShouldEqual, 1)
+				So(obj["count"], ShouldEqual, tc.count)
+
+				req, ok := stub.lastRequest()
+				So(ok, ShouldBeTrue)
+				So(req.Path, ShouldEqual, tc.path)
+				So(req.Query, ShouldResemble, url.Values{"file_type": {"cram"}})
+			}
+		})
+
+		Convey("C3.5: descriptions explain bounded pages, data-added time, and freshness", func() {
+			for _, name := range []string{
+				"mlwh_latest_data_for_study",
+				"mlwh_latest_data_for_faculty_sponsor",
+			} {
+				tool, ok := toolByName(t, cs, name)
+				So(ok, ShouldBeTrue)
+
+				description := strings.ToLower(tool.Description)
+				So(description, ShouldContainSubstring, "bounded")
+				So(description, ShouldContainSubstring, "page")
+				So(description, ShouldContainSubstring, "not every row tied for the maximum created")
+				assertLatestDataDescription(description)
+			}
+
+			for _, name := range []string{
+				"mlwh_count_latest_data_for_study",
+				"mlwh_count_latest_data_for_faculty_sponsor",
+			} {
+				tool, ok := toolByName(t, cs, name)
+				So(ok, ShouldBeTrue)
+				assertLatestDataDescription(tool.Description)
+			}
+		})
+	})
+}
+
+// TestSampleCRAMToolsE3 covers spec E3: the merged-aware per-sample CRAM page
+// and its count counterpart preserve upstream selection, canonical row fields,
+// semantic pagination metadata, exact paths, and cache caveats through MCP.
+func TestSampleCRAMToolsE3(t *testing.T) {
+	Convey("Given the MLWH server (stub-backed) with sample CRAM tools", t, func() {
+		stub := newStubMLWH(t)
+		cs, cleanup := runMLWHServerWithClient(t, stub)
+		defer cleanup()
+
+		Convey("E3.1: ordinary and merged selections return one row per sample with the merged composite preferred", func() {
+			stub.respondJSONWithHeaders("/study/S1/sample-crams", http.StatusOK, []wa.SampleCRAM{
+				{Name: "ordinary", AccessionNumber: "ERS1", IRODSPath: "/seq/ordinary.cram"},
+				{Name: "multi-lane", AccessionNumber: "ERS2", IRODSPath: "/seq/multi-lane.merged.cram", Merged: true},
+			}, irodsPageHeaders("2", "-1"))
+
+			obj := structuredObject(callTool(t, cs, "mlwh_sample_crams_for_study", map[string]any{
+				"study_lims_id": "S1",
+			}))
+			rows, ok := obj["sample_crams"].([]any)
+			So(ok, ShouldBeTrue)
+			So(rows, ShouldHaveLength, 2)
+			So(rows[0].(map[string]any)["name"], ShouldEqual, "ordinary")
+			So(rows[0].(map[string]any)["merged"], ShouldEqual, false)
+			So(rows[1].(map[string]any)["name"], ShouldEqual, "multi-lane")
+			So(rows[1].(map[string]any)["merged"], ShouldEqual, true)
+
+			req, ok := stub.lastRequest()
+			So(ok, ShouldBeTrue)
+			So(req.Path, ShouldEqual, "/study/S1/sample-crams")
+			So(req.Query, ShouldResemble, url.Values{"limit": {"100"}, "offset": {"0"}})
+		})
+
+		Convey("E3.2: legacy upstream aliases decode but MCP emits only the four canonical fields", func() {
+			stub.respondJSONWithHeaders("/study/S1/sample-crams", http.StatusOK, []map[string]any{
+				{
+					"name": "legacy", "ega_id": "ERS3", "irods_cram_path": "/seq/legacy.cram", "merged": true,
 				},
 			}, irodsPageHeaders("1", "-1"))
 
-			res := callTool(t, cs, "mlwh_irods_paths_for_sample", map[string]any{
-				"sanger_name": "S1",
-				"file_type":   "cram",
-			})
-
-			obj := structuredObject(res)
-			paths, ok := obj["irods_paths"].([]any)
-			So(ok, ShouldBeTrue)
-			So(len(paths), ShouldEqual, 1)
-			_, hasItems := obj["items"]
-			So(hasItems, ShouldBeFalse)
-			path, ok := paths[0].(map[string]any)
-			So(ok, ShouldBeTrue)
-			So(path["id_product"], ShouldEqual, "P1")
-			So(path["collection"], ShouldEqual, "/seq/1")
-			So(path["data_object"], ShouldEqual, "a.cram")
-			So(path["irods_path"], ShouldEqual, "/seq/1/a.cram")
-			So(path["id_sample_tmp"], ShouldEqual, 123)
-			So(path["name"], ShouldEqual, "S1")
-			So(path["id_run"], ShouldEqual, 52553)
-			So(path["platform"], ShouldEqual, "illumina")
-			So(obj["total"], ShouldEqual, 1)
-			So(obj["next_offset"], ShouldEqual, -1)
-		})
-
-		Convey("C2.5: mlwh_irods_paths_for_run calls the run iRODS path and wraps rows under irods_paths", func() {
-			stub.respondJSONWithHeaders("/run/52553/irods", http.StatusOK, []wa.IRODSPath{
-				{IDProduct: "P1", IRODSPath: "/seq/1/a.cram"},
-				{IDProduct: "P2", IRODSPath: "/seq/2/b.cram"},
-			}, irodsPageHeaders("2", "-1"))
-
-			res := callTool(t, cs, "mlwh_irods_paths_for_run", map[string]any{
-				"id_run":    "52553",
-				"file_type": "cram",
-			})
-
-			obj := structuredObject(res)
-			paths, ok := obj["irods_paths"].([]any)
-			So(ok, ShouldBeTrue)
-			So(len(paths), ShouldEqual, 2)
-			_, hasItems := obj["items"]
-			So(hasItems, ShouldBeFalse)
-
-			req, ok := stub.lastRequest()
-			So(ok, ShouldBeTrue)
-			So(req.Path, ShouldEqual, "/run/52553/irods")
-			So(req.Query.Get("file_type"), ShouldEqual, "cram")
-		})
-
-		Convey("C2.6: mlwh_irods_paths_for_study returns an empty page for an unmatched valid suffix", func() {
-			stub.respondJSONWithHeaders("/study/S1/irods", http.StatusOK, []wa.IRODSPath{}, irodsPageHeaders("0", "-1"))
-
-			res := callTool(t, cs, "mlwh_irods_paths_for_study", map[string]any{
+			obj := structuredObject(callTool(t, cs, "mlwh_sample_crams_for_study", map[string]any{
 				"study_lims_id": "S1",
-				"file_type":     "vcf",
-			})
-
-			obj := structuredObject(res)
-			paths, ok := obj["irods_paths"].([]any)
-			So(ok, ShouldBeTrue)
-			So(len(paths), ShouldEqual, 0)
-			So(obj["total"], ShouldEqual, 0)
-			So(obj["next_offset"], ShouldEqual, -1)
+			}))
+			rows := obj["sample_crams"].([]any)
+			So(rows, ShouldResemble, []any{map[string]any{
+				"name": "legacy", "accession_number": "ERS3", "irods_path": "/seq/legacy.cram", "merged": true,
+			}})
+			So(rows[0].(map[string]any), ShouldNotContainKey, "ega_id")
+			So(rows[0].(map[string]any), ShouldNotContainKey, "irods_cram_path")
 		})
 
-		Convey("C2.7: mlwh_count_irods_paths_for_run returns exactly a zero count for an unmatched valid suffix", func() {
-			stub.respondJSON("/run/52553/irods/count", http.StatusOK, wa.Count{Count: 0})
+		Convey("E3.3: response headers and the provider schema expose exact semantic page metadata", func() {
+			stub.respondJSONWithHeaders("/study/S1/sample-crams", http.StatusOK, []wa.SampleCRAM{
+				{Name: "sample-3", AccessionNumber: "ERS3", IRODSPath: "/seq/sample-3.cram"},
+			}, irodsPageHeaders("17", "10"))
 
-			res := callTool(t, cs, "mlwh_count_irods_paths_for_run", map[string]any{
-				"id_run":    "52553",
-				"file_type": "vcf",
-			})
+			obj := structuredObject(callTool(t, cs, "mlwh_sample_crams_for_study", map[string]any{
+				"study_lims_id": "S1", "limit": 5, "offset": 5,
+			}))
+			So(obj, ShouldContainKey, "sample_crams")
+			So(obj["total"], ShouldEqual, 17)
+			So(obj["next_offset"], ShouldEqual, 10)
 
-			obj := structuredObject(res)
-			So(len(obj), ShouldEqual, 1)
-			So(obj["count"], ShouldEqual, 0)
+			tool, ok := toolByName(t, cs, "mlwh_sample_crams_for_study")
+			So(ok, ShouldBeTrue)
+			output := tool.OutputSchema.(map[string]any)
+			properties := output["properties"].(map[string]any)
+			So(properties, ShouldContainKey, "sample_crams")
+			So(properties, ShouldContainKey, "total")
+			So(properties, ShouldContainKey, "next_offset")
+			itemProperties := properties["sample_crams"].(map[string]any)["items"].(map[string]any)["properties"].(map[string]any)
+			So(itemProperties, ShouldHaveLength, 4)
+			So(itemProperties, ShouldContainKey, "name")
+			So(itemProperties, ShouldContainKey, "accession_number")
+			So(itemProperties, ShouldContainKey, "irods_path")
+			So(itemProperties, ShouldContainKey, "merged")
+		})
+
+		Convey("E3.4: the count tool uses the exact count endpoint and returns the matching selected-row count", func() {
+			stub.respondJSON("/study/S1/sample-crams/count", http.StatusOK, wa.Count{Count: 2})
+
+			obj := structuredObject(callTool(t, cs, "mlwh_count_sample_crams_for_study", map[string]any{
+				"study_lims_id": "S1",
+			}))
+			So(obj["count"], ShouldEqual, 2)
 
 			req, ok := stub.lastRequest()
 			So(ok, ShouldBeTrue)
-			So(req.Path, ShouldEqual, "/run/52553/irods/count")
-			So(req.Query.Get("file_type"), ShouldEqual, "vcf")
+			So(req.Path, ShouldEqual, "/study/S1/sample-crams/count")
+			So(req.Query, ShouldBeEmpty)
 		})
 
-		Convey("C2.8: invalid iRODS file_type values are left to upstream and mapped as tool errors", func() {
-			failures := countInvalidIRODSToolFailures(t, cs, stub, []string{" ", "%", "_"})
+		Convey("E3.5: descriptions distinguish product attachments from sample CRAM absence and direct callers to freshness", func() {
+			for _, name := range []string{"mlwh_sample_crams_for_study", "mlwh_count_sample_crams_for_study"} {
+				tool, ok := toolByName(t, cs, name)
+				So(ok, ShouldBeTrue)
 
-			So(failures, ShouldEqual, 0)
+				description := strings.ToLower(tool.Description)
+				So(description, ShouldContainSubstring, "empty product-level attachment")
+				So(description, ShouldContainSubstring, "does not prove")
+				So(description, ShouldContainSubstring, "sample-level cram is absent")
+				So(description, ShouldContainSubstring, "mlwh_freshness")
+				if strings.Contains(name, "count") {
+					So(description, ShouldContainSubstring, "count responses have no cache_synced_at")
+				} else {
+					So(description, ShouldContainSubstring, "bare list responses have no cache_synced_at")
+				}
+			}
+		})
+	})
+}
+
+func TestAvailabilityToolsF3Cancellation(t *testing.T) {
+	Convey("F3.2: cancellation before a remote call makes no request and returns no successful result", t, func() {
+		stub := newStubMLWH(t)
+		stub.respondJSONWithHeaders("/study/S1/latest-data", http.StatusOK, []wa.RecentDataRow{}, irodsPageHeaders("0", "-1"))
+		cs, cleanup := runMLWHServerWithClient(t, stub)
+		defer cleanup()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		result, err := cs.CallTool(ctx, &mcp.CallToolParams{
+			Name: "mlwh_latest_data_for_study", Arguments: map[string]any{"study_lims_id": "S1"},
 		})
 
-		Convey("C2.9: a slash file_type is left to upstream and mapped as a tool error", func() {
-			failures := countInvalidIRODSToolFailures(t, cs, stub, []string{"/"})
+		So(result, ShouldBeNil)
+		So(errors.Is(err, context.Canceled), ShouldBeTrue)
+		So(stub.requestCount(), ShouldEqual, 0)
+	})
 
-			So(failures, ShouldEqual, 0)
+	Convey("F3.2: cancellation during a remote call cancels its HTTP request without retry or a partial success", t, func() {
+		stub := newStubMLWH(t)
+		requestStarted := make(chan struct{})
+		stub.respondHandler("/study/S1/latest-data", func(_ http.ResponseWriter, request *http.Request) {
+			close(requestStarted)
+			<-request.Context().Done()
 		})
+		cs, cleanup := runMLWHServerWithClient(t, stub)
+		defer cleanup()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		type callOutcome struct {
+			result *mcp.CallToolResult
+			err    error
+		}
+		callDone := make(chan callOutcome, 1)
+		go func() {
+			result, err := cs.CallTool(ctx, &mcp.CallToolParams{
+				Name: "mlwh_latest_data_for_study", Arguments: map[string]any{"study_lims_id": "S1"},
+			})
+			callDone <- callOutcome{result: result, err: err}
+		}()
+
+		select {
+		case <-requestStarted:
+		case <-time.After(5 * time.Second):
+			t.Fatal("latest-data request did not reach the stub")
+		}
+		cancel()
+
+		var outcome callOutcome
+		select {
+		case outcome = <-callDone:
+		case <-time.After(5 * time.Second):
+			t.Fatal("cancelled latest-data request did not return")
+		}
+
+		So(outcome.result, ShouldBeNil)
+		So(errors.Is(outcome.err, context.Canceled), ShouldBeTrue)
+		So(stub.requestCount(), ShouldEqual, 1)
+	})
+}
+
+func TestAvailabilityToolsF3DateWindows(t *testing.T) {
+	Convey("F3.5: samples-with-data list and count receive the same exact RFC3339 window and return matching totals", t, func() {
+		stub := newStubMLWH(t)
+		stub.respondJSONWithHeaders("/study/S1/samples-with-data", http.StatusOK, []wa.SampleWithData{
+			{Sample: wa.Sample{IDSampleTmp: 1, Name: "S1-A"}, Platforms: []string{}},
+		}, irodsPageHeaders("1", "-1"))
+		stub.respondJSON("/study/S1/samples-with-data/count", http.StatusOK, wa.Count{Count: 1})
+		cs, cleanup := runMLWHServerWithClient(t, stub)
+		defer cleanup()
+
+		since := "2026-07-01T12:34:56Z"
+		until := "2026-07-08T12:34:56Z"
+		arguments := map[string]any{"study_lims_id": "S1", "since": since, "until": until}
+
+		list := structuredObject(callTool(t, cs, "mlwh_samples_with_data_for_study", arguments))
+		So(list["total"], ShouldEqual, 1)
+		listRequest, ok := stub.lastRequest()
+		So(ok, ShouldBeTrue)
+		So(listRequest.Query, ShouldResemble, url.Values{
+			"since": {since}, "until": {until}, "limit": {"100"}, "offset": {"0"},
+		})
+
+		count := structuredObject(callTool(t, cs, "mlwh_count_samples_with_data_for_study", arguments))
+		So(count["count"], ShouldEqual, list["total"])
+		countRequest, ok := stub.lastRequest()
+		So(ok, ShouldBeTrue)
+		So(countRequest.Query, ShouldResemble, url.Values{"since": {since}, "until": {until}})
+	})
+
+	Convey("F3.5: until without since remains an upstream bad request for both list and count", t, func() {
+		stub := newStubMLWH(t)
+		const upstreamMessage = "until requires since"
+		stub.respondError("/study/S1/samples-with-data", http.StatusBadRequest, "bad_request", upstreamMessage)
+		stub.respondError("/study/S1/samples-with-data/count", http.StatusBadRequest, "bad_request", upstreamMessage)
+		cs, cleanup := runMLWHServerWithClient(t, stub)
+		defer cleanup()
+
+		until := "2026-07-08T12:34:56Z"
+		arguments := map[string]any{"study_lims_id": "S1", "until": until}
+		for _, tool := range []string{
+			"mlwh_samples_with_data_for_study", "mlwh_count_samples_with_data_for_study",
+		} {
+			result := callTool(t, cs, tool, arguments)
+			So(result.IsError, ShouldBeTrue)
+			So(firstTextContent(result), ShouldContainSubstring, upstreamMessage)
+			request, ok := stub.lastRequest()
+			So(ok, ShouldBeTrue)
+			So(request.Query.Get("since"), ShouldBeEmpty)
+			So(request.Query.Get("until"), ShouldEqual, until)
+		}
+		So(stub.requestCount(), ShouldEqual, 2)
 	})
 }
 
@@ -402,6 +760,13 @@ func irodsPageHeaders(total, nextOffset string) http.Header {
 		"X-Total-Count": {total},
 		"X-Next-Offset": {nextOffset},
 	}
+}
+
+func assertLatestDataDescription(description string) {
+	lower := strings.ToLower(description)
+	So(lower, ShouldContainSubstring, "created")
+	So(lower, ShouldContainSubstring, "data-added")
+	So(lower, ShouldContainSubstring, "mlwh_freshness")
 }
 
 func countInvalidIRODSToolFailures(
@@ -462,7 +827,7 @@ func countInvalidIRODSToolFailures(
 	}
 
 	for _, tool := range tools {
-		stub.respondError(tool.path, http.StatusBadRequest, "upstream_impaired", "invalid file_type")
+		stub.respondError(tool.path, http.StatusBadRequest, "bad_request", "invalid file_type")
 	}
 
 	failures := 0
@@ -483,154 +848,11 @@ func countInvalidIRODSToolFailures(
 	return failures
 }
 
-func TestStudyManifestTools(t *testing.T) {
-	Convey("Given the MLWH server (stub-backed) with the study manifest tools", t, func() {
-		stub := newStubMLWH(t)
-		cs, cleanup := runMLWHServerWithClient(t, stub)
-		defer cleanup()
-
-		Convey("C3.1: mlwh_study_manifest flattens manifest metadata, rows, cache freshness, and page headers", func() {
-			stub.respondJSONWithHeaders("/study/S1/manifest", http.StatusOK, studyManifestS1("/irods/a.cram"), http.Header{
-				"X-Total-Count": {"3"},
-				"X-Next-Offset": {"-1"},
-			})
-
-			res := callTool(t, cs, "mlwh_study_manifest", map[string]any{
-				"study_lims_id": "S1",
-				"with_irods":    true,
-				"file_type":     "cram",
-			})
-
-			obj := structuredObject(res)
-			So(obj["id_study_lims"], ShouldEqual, "S1")
-			So(obj["name"], ShouldEqual, "Study S1")
-			So(obj["cache_synced_at"], ShouldEqual, "2026-06-30T09:00:00Z")
-			So(obj["total"], ShouldEqual, 3)
-			So(obj["next_offset"], ShouldEqual, -1)
-			_, wrapped := obj["study_manifest"]
-			So(wrapped, ShouldBeFalse)
-
-			rows, ok := obj["rows"].([]any)
-			So(ok, ShouldBeTrue)
-			So(len(rows), ShouldEqual, 1)
-
-			row, ok := rows[0].(map[string]any)
-			So(ok, ShouldBeTrue)
-			So(row["name"], ShouldEqual, "S1")
-			So(row["supplier_name"], ShouldEqual, "Supplier 1")
-			So(row["accession_number"], ShouldEqual, "ERS1")
-			So(row["sanger_sample_id"], ShouldEqual, "SANG1")
-			So(row["id_run"], ShouldEqual, 52553)
-			So(row["lane"], ShouldEqual, 1)
-			So(row["tag_index"], ShouldEqual, 2)
-			So(row["irods_path"], ShouldEqual, "/irods/a.cram")
-
-			req, ok := stub.lastRequest()
-			So(ok, ShouldBeTrue)
-			So(req.Path, ShouldEqual, "/study/S1/manifest")
-			So(req.Query.Get("with_irods"), ShouldEqual, "true")
-			So(req.Query.Get("file_type"), ShouldEqual, "cram")
-			So(req.Query.Get("limit"), ShouldEqual, "100")
-			So(req.Query.Get("offset"), ShouldEqual, "0")
-		})
-
-		Convey("C3.2: mlwh_count_study_manifest returns exactly the upstream count", func() {
-			stub.respondJSON("/study/S1/manifest/count", http.StatusOK, wa.Count{Count: 3})
-
-			res := callTool(t, cs, "mlwh_count_study_manifest", map[string]any{"study_lims_id": "S1"})
-
-			obj := structuredObject(res)
-			So(len(obj), ShouldEqual, 1)
-			So(obj["count"], ShouldEqual, 3)
-
-			req, ok := stub.lastRequest()
-			So(ok, ShouldBeTrue)
-			So(req.Path, ShouldEqual, "/study/S1/manifest/count")
-			So(req.Query.Encode(), ShouldEqual, "")
-		})
-
-		Convey("C3.3: with_irods=false omits with_irods and rows omit irods_path", func() {
-			stub.respondJSONWithHeaders("/study/S1/manifest", http.StatusOK, studyManifestS1(""), http.Header{
-				"X-Total-Count": {"1"},
-				"X-Next-Offset": {"-1"},
-			})
-
-			res := callTool(t, cs, "mlwh_study_manifest", map[string]any{
-				"study_lims_id": "S1",
-				"with_irods":    false,
-			})
-
-			obj := structuredObject(res)
-			rows := obj["rows"].([]any)
-			row := rows[0].(map[string]any)
-			_, hasIRODSPath := row["irods_path"]
-			So(hasIRODSPath, ShouldBeFalse)
-
-			req, ok := stub.lastRequest()
-			So(ok, ShouldBeTrue)
-			So(req.Query.Get("with_irods"), ShouldEqual, "")
-			So(req.Query.Get("file_type"), ShouldEqual, "")
-			So(req.Query.Get("limit"), ShouldEqual, "100")
-			So(req.Query.Get("offset"), ShouldEqual, "0")
-		})
-
-		Convey("C3.4: with_irods=true without file_type does not default to cram", func() {
-			stub.respondJSONWithHeaders("/study/S1/manifest", http.StatusOK, studyManifestS1("/irods/a.bam"), http.Header{
-				"X-Total-Count": {"1"},
-				"X-Next-Offset": {"-1"},
-			})
-
-			res := callTool(t, cs, "mlwh_study_manifest", map[string]any{
-				"study_lims_id": "S1",
-				"with_irods":    true,
-			})
-
-			obj := structuredObject(res)
-			rows := obj["rows"].([]any)
-			row := rows[0].(map[string]any)
-			So(row["irods_path"], ShouldEqual, "/irods/a.bam")
-
-			req, ok := stub.lastRequest()
-			So(ok, ShouldBeTrue)
-			So(req.Query.Get("with_irods"), ShouldEqual, "true")
-			So(req.Query.Get("file_type"), ShouldEqual, "")
-			So(req.Query.Encode(), ShouldNotContainSubstring, "file_type=cram")
-		})
-
-		Convey("A3/C3: mlwh_study_manifest rejects limit over 1000 before HTTP", func() {
-			before := stub.requestCount()
-
-			res := callTool(t, cs, "mlwh_study_manifest", map[string]any{
-				"study_lims_id": "S1",
-				"limit":         1001,
-			})
-
-			So(res.IsError, ShouldBeTrue)
-			So(firstTextContent(res), ShouldContainSubstring, "1000")
-			So(stub.requestCount(), ShouldEqual, before)
-		})
-	})
-}
-
-func studyManifestS1(irodsPath string) wa.StudyManifest {
-	return wa.StudyManifest{
-		IDStudyLims:     "S1",
-		Name:            "Study S1",
-		AccessionNumber: "EGAS1",
-		FacultySponsor:  "Faculty Sponsor",
-		DataAccessGroup: "dag1",
-		Rows: []wa.ManifestRow{
-			{
-				Name:            "S1",
-				SupplierName:    "Supplier 1",
-				AccessionNumber: "ERS1",
-				SangerSampleID:  "SANG1",
-				IDRun:           52553,
-				Position:        1,
-				TagIndex:        2,
-				IRODSPath:       irodsPath,
-			},
-		},
-		CacheSyncedAt: "2026-06-30T09:00:00Z",
-	}
+func assertIRODSDescription(description string) {
+	lower := strings.ToLower(description)
+	So(lower, ShouldContainSubstring, "created")
+	So(lower, ShouldContainSubstring, "data-added")
+	So(lower, ShouldContainSubstring, "approximates irods target=1")
+	So(lower, ShouldContainSubstring, "not is_spiked")
+	So(lower, ShouldContainSubstring, "mlwh_freshness")
 }

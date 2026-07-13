@@ -50,6 +50,7 @@ import (
 func TestRunVersionFlag(t *testing.T) {
 	Convey("Given --version and a captured stdout, with no MLWH_BASE_URL configured", t, func() {
 		t.Setenv("MLWH_BASE_URL", "")
+		So(wa.APIVersion, ShouldEqual, "1.8.0")
 
 		var stdout bytes.Buffer
 		coreFactoryCalls := 0
@@ -95,7 +96,7 @@ func TestRunVersionFlag(t *testing.T) {
 
 			out := stdout.String()
 			So(out, ShouldContainSubstring, core.ServerVersion)
-			So(out, ShouldContainSubstring, wa.APIVersion)
+			So(out, ShouldContainSubstring, "MLWH API version "+wa.APIVersion)
 		})
 
 		Convey("A1.4: it opens neither stdio nor HTTP serving", func() {
@@ -244,6 +245,25 @@ func TestServeDefaultsToStdio(t *testing.T) {
 	})
 }
 
+func waitForCommandSignal(t *testing.T, signal <-chan struct{}, timeout time.Duration, message string) {
+	t.Helper()
+
+	select {
+	case <-signal:
+	case <-time.After(timeout):
+		t.Fatal(message)
+	}
+}
+
+func waitForCommandResult(results <-chan error, timeout time.Duration) (error, bool) {
+	select {
+	case err := <-results:
+		return err, true
+	case <-time.After(timeout):
+		return nil, false
+	}
+}
+
 func TestServeSelectsHTTP(t *testing.T) {
 	Convey("A2.4: Given resolved HTTP address 127.0.0.1:0", t, func() {
 		t.Setenv("MLWH_HTTP_ADDR", "")
@@ -305,14 +325,6 @@ func TestServeSelectsHTTP(t *testing.T) {
 		So(stopCalls, ShouldEqual, 1)
 	})
 }
-
-type testCmdProvider struct{}
-
-func (testCmdProvider) Name() string { return "test" }
-
-func (testCmdProvider) APIVersion() string { return "test 1.0.0" }
-
-func (testCmdProvider) Register(context.Context, core.Registrar) error { return nil }
 
 // TestMaxToolResultBytesConfig exercises command wiring: the MLWH byte-limit
 // flag resolves into core.Options, and an invalid environment fallback aborts
@@ -380,6 +392,14 @@ func TestMaxToolResultBytesConfig(t *testing.T) {
 	})
 }
 
+type testCmdProvider struct{}
+
+func (testCmdProvider) Name() string { return "test" }
+
+func (testCmdProvider) APIVersion() string { return "test 1.0.0" }
+
+func (testCmdProvider) Register(context.Context, core.Registrar) error { return nil }
+
 type recordingHTTPCoreServer struct {
 	ctx     context.Context
 	opts    core.HTTPOptions
@@ -434,23 +454,4 @@ func TestServeHTTPUsesSignalNotifyContext(t *testing.T) {
 		So(err, ShouldBeNil)
 		So(stopCalls, ShouldEqual, 1)
 	})
-}
-
-func waitForCommandSignal(t *testing.T, signal <-chan struct{}, timeout time.Duration, message string) {
-	t.Helper()
-
-	select {
-	case <-signal:
-	case <-time.After(timeout):
-		t.Fatal(message)
-	}
-}
-
-func waitForCommandResult(results <-chan error, timeout time.Duration) (error, bool) {
-	select {
-	case err := <-results:
-		return err, true
-	case <-time.After(timeout):
-		return nil, false
-	}
 }

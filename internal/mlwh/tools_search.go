@@ -28,6 +28,9 @@ package mlwh
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"strconv"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	wa "github.com/wtsi-hgi/wa/mlwh"
@@ -35,21 +38,24 @@ import (
 	"github.com/wtsi-hgi/llm-knowledge-base/internal/core"
 )
 
-// searchTermMinLength mirrors the upstream searchPaginationParams contract:
-// both searches require at least three characters. Page bounds are shared with
-// other typed paged tools through boundedPagination.
+// searchTermMinLength mirrors the upstream free-text search contract. Study
+// searches and unfiltered sample searches require at least three characters;
+// exact sample filters make shorter terms valid.
 const searchTermMinLength = 3
 
 // searchSamplesDescription, searchStudiesDescription, countSamplesDescription,
 // countStudySearchDescription, and countStudiesDescription are the LLM-facing
 // tool descriptions. They convey the search/pagination/count semantics the spec
-// requires the agent to understand (word-prefix vs substring fields, the minimum
-// term length, the 100/1000 page bounds, and the 10000 count floor).
+// requires the agent to understand (sample literal/word-prefix modes, study
+// substring fields, exact filters, page bounds, and the 10000 count floor).
 const (
-	searchSamplesDescription = "Search samples by word prefix: returns samples having a word in " +
-		"name, supplier_name, common_name, or donor_id that starts with the term " +
-		"(case-insensitive word-prefix match, minimum 3 characters). So \"musculus\" " +
-		"and \"mus\" both match \"Mus Musculus\"; a substring inside a word does not. " +
+	searchSamplesDescription = "Search samples by case-insensitive literal whole-value prefix over " +
+		"name, supplier_name, common_name, and donor_id by default. Set words=true for the opt-in " +
+		"separator-agnostic word-prefix mode; mid-word substring matching is unsupported. Exact filters " +
+		"AND-combine and permit a term shorter than the usual 3-character minimum: organism matches " +
+		"whole-word common-name membership including subspecies, library type is exact, QC is the " +
+		"sample-level fail>pending>pass roll-up, and deliverables_only uses the upstream deliverable " +
+		"discriminator rather than is_spiked, with PacBio/ONT pass-through. " +
 		"Defaults to a page of 100 rows, maximum 1000 (a larger limit is rejected, not clamped); " +
 		"use offset to page." + bareListFreshnessNote
 
@@ -62,9 +68,12 @@ const (
 		"id_study_lims, name, study_title, programme, faculty_sponsor, and accession_number " +
 		"to disambiguate candidate study ids." + bareListFreshnessNote
 
-	countSamplesDescription = "Count samples matching a word-prefix search, the count counterpart of " +
-		"mlwh_search_samples (same case-insensitive word-prefix over name, supplier_name, " +
-		"common_name, donor_id; minimum 3 characters), without transferring rows. " +
+	countSamplesDescription = "Count samples matching mlwh_search_samples with identical options: the default " +
+		"is a case-insensitive literal whole-value prefix over name, supplier_name, common_name, and donor_id; " +
+		"words=true is opt-in separator-agnostic word-prefix mode and mid-word substring matching is unsupported. " +
+		"Exact filters AND-combine and permit a short term: organism is whole-word common-name membership, " +
+		"library type is exact, QC is the sample-level fail>pending>pass roll-up, and deliverables_only uses " +
+		"the upstream deliverable discriminator rather than is_spiked, with PacBio/ONT pass-through. " +
 		"The count is exact up to 10000; a returned count of exactly 10000 means \"at least 10000\" " +
 		"(a floor) for very common terms."
 
@@ -76,20 +85,75 @@ const (
 		"of mlwh_all_studies. Takes no input."
 )
 
-// searchInput is the shared input for the two paginated substring searches
-// (mlwh_search_samples, mlwh_search_studies). An omitted (zero) Limit becomes
-// searchDefaultLimit and an omitted Offset is 0; these defaults are applied by
-// the handler, not the schema, so a zero value is unambiguous for a search tool.
-type searchInput struct {
-	Term   string `json:"term" jsonschema:"the search term; minimum 3 characters"`
-	Limit  int    `json:"limit,omitempty" jsonschema:"maximum rows to return; defaults to 100, maximum 1000 (a larger limit is rejected, not clamped)"`
-	Offset int    `json:"offset,omitempty" jsonschema:"number of leading rows to skip before returning results; defaults to 0"`
+// sampleSearchInput is the input for mlwh_search_samples. Its option vocabulary
+// mirrors wa.SampleSearchOptions, while limit and offset control the bounded
+// header-aware page returned by the tool.
+type sampleSearchInput struct {
+	Term             string `json:"term" jsonschema:"the literal whole-value prefix term; minimum 3 characters unless an exact filter is supplied"`
+	Words            bool   `json:"words,omitempty" jsonschema:"opt into separator-agnostic word-prefix matching; false uses literal whole-value prefix"`
+	Organism         string `json:"organism,omitempty" jsonschema:"exact filter by whole-word common-name membership, including subspecies"`
+	LibraryType      string `json:"library_type,omitempty" jsonschema:"exact library type filter"`
+	QC               string `json:"qc,omitempty" jsonschema:"sample-level QC roll-up filter: fail, pending, or pass"`
+	DeliverablesOnly bool   `json:"deliverables_only,omitempty" jsonschema:"filter with the upstream deliverable discriminator, not is_spiked; PacBio and ONT pass through"`
+	Limit            int    `json:"limit,omitempty" jsonschema:"maximum rows to return; defaults to 100, maximum 1000 (a larger limit is rejected, not clamped)"`
+	Offset           int    `json:"offset,omitempty" jsonschema:"number of leading rows to skip before returning results; defaults to 0"`
 }
 
-// addSearchSamples registers mlwh_search_samples (Story A1). The handler rejects
-// a too-short term and an over-max limit before any HTTP call, defaults the page
-// to 100 and the offset to 0, then wraps the upstream []wa.Sample under
-// {"samples":[...]} so the structured result is the object MCP requires.
+func (in sampleSearchInput) query(limit, offset int) url.Values {
+	query := url.Values{
+		"limit":  {strconv.Itoa(limit)},
+		"offset": {strconv.Itoa(offset)},
+	}
+	addSampleSearchOptions(query, in.options())
+
+	return query
+}
+
+func addSampleSearchOptions(query url.Values, opts wa.SampleSearchOptions) {
+	if opts.Words {
+		query.Set("words", "true")
+	}
+	if hasSampleSearchTextOption(opts.Organism) {
+		query.Set("organism", opts.Organism)
+	}
+	if hasSampleSearchTextOption(opts.LibraryType) {
+		query.Set("library_type", opts.LibraryType)
+	}
+	if hasSampleSearchTextOption(opts.QC) {
+		query.Set("qc", opts.QC)
+	}
+	if opts.DeliverablesOnly {
+		query.Set("deliverables_only", "true")
+	}
+}
+
+func (in sampleSearchInput) options() wa.SampleSearchOptions {
+	return wa.SampleSearchOptions{
+		Words: in.Words, Organism: in.Organism, LibraryType: in.LibraryType,
+		QC: in.QC, DeliverablesOnly: in.DeliverablesOnly,
+	}
+}
+
+func (in sampleSearchInput) hasOptions() bool {
+	return hasSampleSearchOptions(in.options())
+}
+
+func hasSampleSearchOptions(opts wa.SampleSearchOptions) bool {
+	return opts.Words || hasSampleExactFilter(opts)
+}
+
+func (in sampleSearchInput) hasExactFilter() bool {
+	return hasSampleExactFilter(in.options())
+}
+
+func hasSampleExactFilter(opts wa.SampleSearchOptions) bool {
+	return hasSampleSearchTextOption(opts.Organism) || hasSampleSearchTextOption(opts.LibraryType) ||
+		hasSampleSearchTextOption(opts.QC) || opts.DeliverablesOnly
+}
+
+// addSearchSamples registers mlwh_search_samples. Free-text-only calls retain
+// the three-character guard and page helper. Optioned calls preserve the exact
+// query and page headers in one CallWithHeaders request.
 func (p *provider) addSearchSamples(r core.Registrar, outputSchema map[string]any) {
 	client := p.client
 
@@ -97,23 +161,146 @@ func (p *provider) addSearchSamples(r core.Registrar, outputSchema map[string]an
 		Name:         "mlwh_search_samples",
 		Description:  searchSamplesDescription,
 		OutputSchema: outputSchema,
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in searchInput) (*mcp.CallToolResult, pagedSamplesResult, error) {
-		limit, offset, err := guardSearch(in)
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in sampleSearchInput) (*mcp.CallToolResult, pagedSamplesResult, error) {
+		limit, offset, err := guardSampleSearch(in)
 		if err != nil {
 			return core.ToolError[pagedSamplesResult](err)
 		}
 
-		page, err := client.SearchSamplesPage(ctx, in.Term, limit, offset)
+		page, err := sampleSearchPage(ctx, client, in, limit, offset)
 		if err != nil {
 			return core.ToolError[pagedSamplesResult](mapToolError(err))
 		}
 
-		return nil, pagedSamplesResult{
-			Samples:    page.Items,
-			Total:      page.Total,
-			NextOffset: page.NextOffset,
-		}, nil
+		return nil, page, nil
 	})
+}
+
+func guardSampleSearch(in sampleSearchInput) (limit, offset int, err error) {
+	if err = guardSampleSearchTerm(in.Term, in.hasExactFilter()); err != nil {
+		return 0, 0, err
+	}
+
+	return boundedPagination(in.Limit, in.Offset)
+}
+
+func guardSampleSearchTerm(term string, hasExactFilter bool) error {
+	if strings.TrimSpace(term) == "" {
+		return fmt.Errorf("the search term %q must not be blank", term)
+	}
+	if hasExactFilter {
+		return nil
+	}
+
+	return guardTerm(term)
+}
+
+// guardTerm rejects a free-text-only search term shorter than the minimum
+// length before HTTP, with a message that names the minimum.
+func guardTerm(term string) error {
+	if len(term) < searchTermMinLength {
+		return fmt.Errorf("the search term %q is too short: a minimum of %d characters is required", term, searchTermMinLength)
+	}
+
+	return nil
+}
+
+func sampleSearchPage(
+	ctx context.Context,
+	client *wa.RemoteClient,
+	in sampleSearchInput,
+	limit, offset int,
+) (pagedSamplesResult, error) {
+	if !in.hasOptions() {
+		page, err := client.SearchSamplesPage(ctx, in.Term, limit, offset)
+
+		return pagedSamplesResult{Samples: page.Items, Total: page.Total, NextOffset: page.NextOffset}, err
+	}
+
+	decoded, headers, err := client.CallWithHeaders(ctx, "SearchSamples", []string{in.Term}, in.query(limit, offset))
+	if err != nil {
+		return pagedSamplesResult{}, err
+	}
+
+	samples, ok := decoded.(*[]wa.Sample)
+	if !ok {
+		return pagedSamplesResult{}, fmt.Errorf("%w: registry result for SearchSamples has type %T", wa.ErrUpstreamImpaired, decoded)
+	}
+
+	return pagedSamplesResult{
+		Samples: *samples, Total: headerInt(headers, "X-Total-Count", 0),
+		NextOffset: headerInt(headers, "X-Next-Offset", -1),
+	}, nil
+}
+
+// sampleSearchCountInput is the matching option vocabulary for
+// mlwh_count_samples. Pagination is deliberately list-only.
+type sampleSearchCountInput struct {
+	Term             string `json:"term" jsonschema:"the literal whole-value prefix term; minimum 3 characters unless an exact filter is supplied"`
+	Words            bool   `json:"words,omitempty" jsonschema:"opt into separator-agnostic word-prefix matching; false uses literal whole-value prefix"`
+	Organism         string `json:"organism,omitempty" jsonschema:"exact filter by whole-word common-name membership, including subspecies"`
+	LibraryType      string `json:"library_type,omitempty" jsonschema:"exact library type filter"`
+	QC               string `json:"qc,omitempty" jsonschema:"sample-level QC roll-up filter: fail, pending, or pass"`
+	DeliverablesOnly bool   `json:"deliverables_only,omitempty" jsonschema:"filter with the upstream deliverable discriminator, not is_spiked; PacBio and ONT pass through"`
+}
+
+func (in sampleSearchCountInput) guard() error {
+	return guardSampleSearchTerm(in.Term, in.hasExactFilter())
+}
+
+func (in sampleSearchCountInput) count(ctx context.Context, client *wa.RemoteClient) (wa.Count, error) {
+	opts := in.options()
+	if in.hasOptions() {
+		return client.CountSampleSearchWithOptions(ctx, in.Term, opts)
+	}
+
+	return client.CountSampleSearch(ctx, in.Term)
+}
+
+func (in sampleSearchCountInput) options() wa.SampleSearchOptions {
+	return wa.SampleSearchOptions{
+		Words: in.Words, Organism: in.Organism, LibraryType: in.LibraryType,
+		QC: in.QC, DeliverablesOnly: in.DeliverablesOnly,
+	}
+}
+
+func (in sampleSearchCountInput) hasOptions() bool {
+	return hasSampleSearchOptions(in.options())
+}
+
+func (in sampleSearchCountInput) hasExactFilter() bool {
+	return hasSampleExactFilter(in.options())
+}
+
+// addCountSamples registers mlwh_count_samples with the same modes, exact
+// filters, and conditional short-term guard as mlwh_search_samples.
+func (p *provider) addCountSamples(r core.Registrar, outputSchema map[string]any) {
+	client := p.client
+
+	mcp.AddTool(r.Server(), &mcp.Tool{
+		Name:         "mlwh_count_samples",
+		Description:  countSamplesDescription + countFreshnessNote,
+		OutputSchema: outputSchema,
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in sampleSearchCountInput) (*mcp.CallToolResult, wa.Count, error) {
+		if err := in.guard(); err != nil {
+			return core.ToolError[wa.Count](err)
+		}
+
+		count, err := in.count(ctx, client)
+		if err != nil {
+			return core.ToolError[wa.Count](mapToolError(err))
+		}
+
+		return nil, count, nil
+	})
+}
+
+// searchInput is the input for the paginated study substring search. An omitted
+// limit becomes the shared page default and an omitted offset is zero.
+type searchInput struct {
+	Term   string `json:"term" jsonschema:"the search term; minimum 3 characters"`
+	Limit  int    `json:"limit,omitempty" jsonschema:"maximum rows to return; defaults to 100, maximum 1000 (a larger limit is rejected, not clamped)"`
+	Offset int    `json:"offset,omitempty" jsonschema:"number of leading rows to skip before returning results; defaults to 0"`
 }
 
 // addSearchStudies registers mlwh_search_studies (Story A3/D1), mirroring
@@ -146,7 +333,7 @@ func (p *provider) addSearchStudies(r core.Registrar, outputSchema map[string]an
 	})
 }
 
-// guardSearch applies the cheap input bounds for a paginated search before any
+// guardSearch applies the cheap input bounds for the paginated study search before any
 // HTTP call: it rejects a term shorter than the minimum and a limit above the
 // maximum (matching the upstream, which rejects rather than clamps), then
 // resolves the effective limit (an omitted/zero limit becomes the default page)
@@ -160,15 +347,8 @@ func guardSearch(in searchInput) (limit, offset int, err error) {
 	return boundedPagination(in.Limit, in.Offset)
 }
 
-// guardTerm rejects a search term shorter than the minimum length before any
-// HTTP call, with a message that names the 3-character minimum so the agent can
-// fix the input immediately.
-func guardTerm(term string) error {
-	if len(term) < searchTermMinLength {
-		return fmt.Errorf("the search term %q is too short: a minimum of %d characters is required", term, searchTermMinLength)
-	}
-
-	return nil
+func hasSampleSearchTextOption(value string) bool {
+	return strings.TrimSpace(value) != ""
 }
 
 // registerSearchTools adds the sample/study search and count tools (Stories A1,
@@ -205,34 +385,9 @@ func (p *provider) registerSearchTools(r core.Registrar) error {
 	return nil
 }
 
-// termInput is the shared input for the term-only count tools
-// (mlwh_count_samples, mlwh_count_studies_search): a single search term subject
-// to the same minimum length as the search it sizes.
+// termInput is the input for the term-only study search count.
 type termInput struct {
 	Term string `json:"term" jsonschema:"the search term; minimum 3 characters"`
-}
-
-// addCountSamples registers mlwh_count_samples (Story A2): it rejects a
-// too-short term before the call, then returns the upstream Count unchanged.
-func (p *provider) addCountSamples(r core.Registrar, outputSchema map[string]any) {
-	client := p.client
-
-	mcp.AddTool(r.Server(), &mcp.Tool{
-		Name:         "mlwh_count_samples",
-		Description:  countSamplesDescription + countFreshnessNote,
-		OutputSchema: outputSchema,
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in termInput) (*mcp.CallToolResult, wa.Count, error) {
-		if err := guardTerm(in.Term); err != nil {
-			return core.ToolError[wa.Count](err)
-		}
-
-		count, err := client.CountSampleSearch(ctx, in.Term)
-		if err != nil {
-			return core.ToolError[wa.Count](mapToolError(err))
-		}
-
-		return nil, count, nil
-	})
 }
 
 // addCountStudiesSearch registers mlwh_count_studies_search (Story A4): it

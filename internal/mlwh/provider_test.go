@@ -28,6 +28,8 @@ package mlwh
 import (
 	"context"
 	"flag"
+	"maps"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -40,7 +42,7 @@ import (
 
 // fullSurfaceTools is the full set of typed MLWH tools the provider registers:
 // the original A-E tools plus the phase 5-8 overview/status, availability,
-// manifest, people, and count surfaces that F2 guards. I1.1 requires at least
+// availability, people, and count surfaces that F2 guards. I1.1 requires at least
 // the eight headline tools listed in the spec; this fuller set strengthens the
 // assertion so a dropped tool in any group fails the test, not just one of the
 // named headline tools.
@@ -94,8 +96,6 @@ var fullSurfaceTools = []string{
 	"mlwh_count_irods_paths_for_sample",
 	"mlwh_count_irods_paths_for_study",
 	"mlwh_count_irods_paths_for_run",
-	"mlwh_study_manifest",
-	"mlwh_count_study_manifest",
 	"mlwh_count_samples_for_study",
 	"mlwh_count_samples_for_run",
 	"mlwh_count_runs_for_study",
@@ -146,7 +146,6 @@ var f2HeadlineTools = []string{
 	"mlwh_sample_progress",
 	"mlwh_samples_with_data_for_study",
 	"mlwh_samples_without_data_for_study",
-	"mlwh_study_manifest",
 	"mlwh_irods_paths_for_run",
 	"mlwh_studies_for_user",
 	"mlwh_resolve_person",
@@ -217,13 +216,23 @@ func TestProviderNew(t *testing.T) {
 	})
 }
 
-func TestWAAPI17Contract(t *testing.T) {
-	Convey("Given the updated module, provider construction targets wa API 1.7.0", t, func() {
-		So(wa.APIVersion, ShouldEqual, "1.7.0")
+func TestWAAPI18Contract(t *testing.T) {
+	Convey("A1.1: Given the updated module, provider construction targets wa API 1.8.0", t, func() {
+		So(wa.APIVersion, ShouldEqual, "1.8.0")
 
 		provider, err := New(wa.RemoteConfig{BaseURL: "http://stub.example"})
 		So(err, ShouldBeNil)
-		So(provider.APIVersion(), ShouldEqual, "1.7.0")
+		So(provider.APIVersion(), ShouldEqual, wa.APIVersion)
+	})
+
+	Convey("A1.4: Given the v0.8.0 Registry, removed manifest APIs are not part of the compiled contract", t, func() {
+		_, hasStudyManifest := registryEntryByMethod("StudyManifest")
+		So(hasStudyManifest, ShouldBeFalse)
+
+		_, hasCountStudyManifest := registryEntryByMethod("CountStudyManifest")
+		So(hasCountStudyManifest, ShouldBeFalse)
+
+		So(wa.EndpointReference(), ShouldNotContainSubstring, "/manifest")
 	})
 
 	Convey("Given wa.Registry, the A1 methods expose upstream endpoint documentation", t, func() {
@@ -275,6 +284,104 @@ func TestWAAPI17Contract(t *testing.T) {
 	})
 }
 
+func TestF3ProviderGuardGuidanceAndHermeticHarness(t *testing.T) {
+	Convey("F3.4: provider size guidance names every actual continuation mechanism", t, func() {
+		guidance := strings.ToLower(ToolResultSizeGuidance)
+		So(guidance, ShouldContainSubstring, "smaller")
+		So(guidance, ShouldContainSubstring, "nextcursor")
+		So(guidance, ShouldContainSubstring, "offset")
+		So(guidance, ShouldContainSubstring, "next_offset")
+		So(guidance, ShouldContainSubstring, "last row")
+		So(guidance, ShouldContainSubstring, "cursor")
+	})
+
+	Convey("F3.6: the provider runs end-to-end against only its loopback httptest server", t, func() {
+		stub := newStubMLWH(t)
+		stub.respondJSON("/programmes", http.StatusOK, []wa.Programme{})
+		cs, cleanup := runMLWHServerWithClient(t, stub)
+		defer cleanup()
+
+		result := callTool(t, cs, "mlwh_programmes", map[string]any{})
+		So(result.IsError, ShouldBeFalse)
+		So(stub.server.URL, ShouldStartWith, "http://127.0.0.1:")
+		So(stub.requestCount(), ShouldEqual, 1)
+	})
+}
+
+type f3PagedToolCase struct {
+	name           string
+	path           string
+	arguments      map[string]any
+	body           any
+	defaultLimit   string
+	supportsOffset bool
+	headerPage     bool
+}
+
+func f3PagedToolCases() []f3PagedToolCase {
+	return []f3PagedToolCase{
+		{
+			name: "mlwh_samples_with_data_for_study", path: "/study/S1/samples-with-data",
+			arguments: map[string]any{"study_lims_id": "S1"}, body: []wa.SampleWithData{},
+			defaultLimit: "100", supportsOffset: true, headerPage: true,
+		},
+		{
+			name: "mlwh_samples_without_data_for_study", path: "/study/S1/samples-without-data",
+			arguments: map[string]any{"study_lims_id": "S1"}, body: []wa.SampleWithData{},
+			defaultLimit: "100", supportsOffset: true, headerPage: true,
+		},
+		{
+			name: "mlwh_irods_paths_for_sample", path: "/sample/S1/irods",
+			arguments: map[string]any{"sanger_name": "S1"}, body: []wa.IRODSPath{},
+			defaultLimit: "100", supportsOffset: true, headerPage: true,
+		},
+		{
+			name: "mlwh_irods_paths_for_study", path: "/study/S1/irods",
+			arguments: map[string]any{"study_lims_id": "S1"}, body: []wa.IRODSPath{},
+			defaultLimit: "100", supportsOffset: true, headerPage: true,
+		},
+		{
+			name: "mlwh_irods_paths_for_run", path: "/run/52553/irods",
+			arguments: map[string]any{"id_run": "52553"}, body: []wa.IRODSPath{},
+			defaultLimit: "100", supportsOffset: true, headerPage: true,
+		},
+		{
+			name: "mlwh_latest_data_for_study", path: "/study/S1/latest-data",
+			arguments: map[string]any{"study_lims_id": "S1"}, body: []wa.RecentDataRow{},
+			defaultLimit: "10", supportsOffset: true, headerPage: true,
+		},
+		{
+			name: "mlwh_latest_data_for_faculty_sponsor", path: "/latest-data/faculty-sponsor/Ada",
+			arguments: map[string]any{"faculty_sponsor": "Ada"}, body: []wa.RecentDataRow{},
+			defaultLimit: "10", supportsOffset: true, headerPage: true,
+		},
+		{
+			name: "mlwh_sample_crams_for_study", path: "/study/S1/sample-crams",
+			arguments: map[string]any{"study_lims_id": "S1"}, body: []wa.SampleCRAM{},
+			defaultLimit: "100", supportsOffset: true, headerPage: true,
+		},
+		{
+			name: "mlwh_runs_for_sample", path: "/sample/S1/runs",
+			arguments: map[string]any{"sanger_name": "S1"}, body: []wa.Run{},
+			defaultLimit: "100", supportsOffset: true, headerPage: true,
+		},
+		{
+			name: "mlwh_runs", path: "/runs", arguments: map[string]any{}, body: []wa.RunListingRow{},
+			defaultLimit: "100",
+		},
+		{
+			name: "mlwh_studies_for_programme", path: "/studies/programme/Cancer",
+			arguments: map[string]any{"programme": "Cancer"}, body: []wa.Study{},
+			defaultLimit: "100", supportsOffset: true, headerPage: true,
+		},
+		{
+			name: "mlwh_study_users", path: "/study/S1/users",
+			arguments: map[string]any{"study_lims_id": "S1"}, body: []wa.StudyUser{},
+			defaultLimit: "100", supportsOffset: true, headerPage: true,
+		},
+	}
+}
+
 // TestProviderFullSurface exercises Story I1: with only the MLWH provider
 // configured (pointed at a hermetic stub), a connected in-memory MCP client sees
 // every tool from stories A-E and both the mlwh://workflow and
@@ -288,8 +395,10 @@ func TestProviderFullSurface(t *testing.T) {
 		cs, cleanup := runMLWHServerWithClient(t, stub)
 		defer cleanup()
 
-		Convey("I1.1/F2.1: a tools listing includes the full MLWH surface", func() {
+		Convey("A1.2/I1.1/F2.1: a tools listing excludes manifests and includes every other existing tool", func() {
 			registered := listToolNames(t, cs)
+			So(registered, ShouldNotContainKey, "mlwh_study_manifest")
+			So(registered, ShouldNotContainKey, "mlwh_count_study_manifest")
 
 			for _, name := range i1HeadlineTools {
 				So(registered, ShouldContainKey, name)
@@ -312,26 +421,19 @@ func TestProviderFullSurface(t *testing.T) {
 			So(missing, ShouldBeEmpty)
 		})
 
-		Convey("F2.2: every Registry /count method is surfaced by one MCP count tool", func() {
+		Convey("A1.2: every surviving existing count tool remains Registry-backed", func() {
 			tools := listToolsByName(t, cs)
 			registered := toolNameSet(tools)
 			expected := registryCountToolNames()
 
-			missing := missingRegistryCountTools(registered, expected)
-			So(missing, ShouldBeEmpty)
-
-			extra := extraRegisteredCountTools(registered, expected)
-			So(extra, ShouldBeEmpty)
-
-			nonFindMethods := nonFindMethodsUsingCountFindSamples(expected)
-			So(nonFindMethods, ShouldBeEmpty)
+			failures := existingCountToolRegistryFailures(registered, expected)
+			So(failures, ShouldBeEmpty)
 		})
 
-		Convey("F2.3: paged availability and manifest schemas keep semantic fields plus required page metadata", func() {
+		Convey("F2.3: paged availability schemas keep semantic fields plus required page metadata", func() {
 			tools := listToolsByName(t, cs)
 
 			failures := pagedToolSchemaFailures(tools, "mlwh_samples_with_data_for_study", "samples")
-			failures = append(failures, pagedToolSchemaFailures(tools, "mlwh_study_manifest", "rows")...)
 
 			So(failures, ShouldBeEmpty)
 		})
@@ -453,48 +555,26 @@ func camelToSnake(value string) string {
 	return snaked
 }
 
-func missingRegistryCountTools(registered map[string]struct{}, expected map[string]string) []string {
-	var missing []string
-
-	for method, toolName := range expected {
-		if _, ok := registered[toolName]; !ok {
-			missing = append(missing, method+" -> "+toolName)
-		}
-	}
-
-	return missing
-}
-
-func extraRegisteredCountTools(registered map[string]struct{}, expected map[string]string) []string {
+func existingCountToolRegistryFailures(registered map[string]struct{}, expected map[string]string) []string {
 	expectedNames := map[string]struct{}{}
 	for _, name := range expected {
 		expectedNames[name] = struct{}{}
 	}
 
-	var extra []string
-
-	for name := range registered {
+	var failures []string
+	for _, name := range fullSurfaceTools {
 		if !strings.HasPrefix(name, "mlwh_count_") {
 			continue
 		}
+		if _, ok := registered[name]; !ok {
+			failures = append(failures, name+" is not registered")
+		}
 		if _, ok := expectedNames[name]; !ok {
-			extra = append(extra, name)
+			failures = append(failures, name+" has no Registry count method")
 		}
 	}
 
-	return extra
-}
-
-func nonFindMethodsUsingCountFindSamples(expected map[string]string) []string {
-	var methods []string
-
-	for method, toolName := range expected {
-		if toolName == "mlwh_count_find_samples" && !strings.HasPrefix(method, "CountFindSamplesBy") {
-			methods = append(methods, method)
-		}
-	}
-
-	return methods
+	return failures
 }
 
 func pagedToolSchemaFailures(tools map[string]*mcp.Tool, toolName, semanticField string) []string {
@@ -717,4 +797,68 @@ func clearMLWHEnv(t *testing.T) {
 	t.Setenv("MLWH_CA_CERT", "")
 	t.Setenv("MLWH_TIMEOUT", "")
 	t.Setenv("MLWH_MAX_TOOL_RESULT_BYTES", "")
+}
+
+func TestF3PaginationBoundaries(t *testing.T) {
+	Convey("F3.1: every new paged list applies its default and maximum and rejects invalid MCP-owned pagination before HTTP", t, func() {
+		for _, testCase := range f3PagedToolCases() {
+			Convey(testCase.name, func() {
+				stub := newStubMLWH(t)
+				if testCase.headerPage {
+					stub.respondJSONWithHeaders(testCase.path, http.StatusOK, testCase.body, http.Header{
+						"X-Total-Count": {"0"}, "X-Next-Offset": {"-1"},
+					})
+				} else {
+					stub.respondJSON(testCase.path, http.StatusOK, testCase.body)
+				}
+
+				cs, cleanup := runMLWHServerWithClient(t, stub)
+				defer cleanup()
+
+				result := callTool(t, cs, testCase.name, maps.Clone(testCase.arguments))
+				So(result.IsError, ShouldBeFalse)
+				request, ok := stub.lastRequest()
+				So(ok, ShouldBeTrue)
+				So(request.Path, ShouldEqual, testCase.path)
+				So(request.Query.Get("limit"), ShouldEqual, testCase.defaultLimit)
+				if testCase.supportsOffset {
+					So(request.Query.Get("offset"), ShouldEqual, "0")
+				}
+
+				beforeNegativeLimit := stub.requestCount()
+				negativeLimit := maps.Clone(testCase.arguments)
+				negativeLimit["limit"] = -1
+				result = callTool(t, cs, testCase.name, negativeLimit)
+				So(result.IsError, ShouldBeTrue)
+				So(firstTextContent(result), ShouldContainSubstring, "non-negative")
+				So(stub.requestCount(), ShouldEqual, beforeNegativeLimit)
+
+				if testCase.supportsOffset {
+					beforeNegativeOffset := stub.requestCount()
+					negativeOffset := maps.Clone(testCase.arguments)
+					negativeOffset["offset"] = -1
+					result = callTool(t, cs, testCase.name, negativeOffset)
+					So(result.IsError, ShouldBeTrue)
+					So(firstTextContent(result), ShouldContainSubstring, "non-negative")
+					So(stub.requestCount(), ShouldEqual, beforeNegativeOffset)
+				}
+
+				maximum := maps.Clone(testCase.arguments)
+				maximum["limit"] = 1000
+				result = callTool(t, cs, testCase.name, maximum)
+				So(result.IsError, ShouldBeFalse)
+				request, ok = stub.lastRequest()
+				So(ok, ShouldBeTrue)
+				So(request.Query.Get("limit"), ShouldEqual, "1000")
+
+				beforeOverMaximum := stub.requestCount()
+				overMaximum := maps.Clone(testCase.arguments)
+				overMaximum["limit"] = 1001
+				result = callTool(t, cs, testCase.name, overMaximum)
+				So(result.IsError, ShouldBeTrue)
+				So(firstTextContent(result), ShouldContainSubstring, "maximum of 1000")
+				So(stub.requestCount(), ShouldEqual, beforeOverMaximum)
+			})
+		}
+	})
 }

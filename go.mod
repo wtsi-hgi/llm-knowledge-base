@@ -3,10 +3,11 @@ module github.com/wtsi-hgi/llm-knowledge-base
 go 1.25.5
 
 require (
+	github.com/gin-gonic/gin v1.11.0
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/smartystreets/goconvey v1.8.1
 	github.com/wtsi-hgi/go-authserver v1.6.0
-	github.com/wtsi-hgi/wa v0.7.1
+	github.com/wtsi-hgi/wa v0.8.0
 )
 
 require (
@@ -21,7 +22,6 @@ require (
 	github.com/gabriel-vasile/mimetype v1.4.11 // indirect
 	github.com/gin-contrib/secure v1.1.2 // indirect
 	github.com/gin-contrib/sse v1.1.0 // indirect
-	github.com/gin-gonic/gin v1.11.0 // indirect
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/go-playground/validator/v10 v10.28.0 // indirect

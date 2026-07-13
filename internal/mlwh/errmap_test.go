@@ -192,20 +192,6 @@ func TestF1ToolErrorMapping(t *testing.T) {
 				},
 			},
 			{
-				name:    "F1.7: a new manifest tool advises retrying after cache or upstream recovery",
-				tool:    "mlwh_study_manifest",
-				args:    map[string]any{"study_lims_id": "S1", "with_irods": true, "file_type": "cram"},
-				path:    "/study/S1/manifest",
-				status:  http.StatusBadGateway,
-				code:    "upstream_impaired",
-				message: "cache/upstream impaired while building manifest",
-				substrings: []string{
-					"retry",
-					"cache",
-					"upstream recovery",
-				},
-			},
-			{
 				name:    "F1.8: a new person tool advises fixing input or retrying later",
 				tool:    "mlwh_studies_for_user",
 				args:    map[string]any{"person": "cwa"},
@@ -233,5 +219,73 @@ func TestF1ToolErrorMapping(t *testing.T) {
 				}
 			})
 		}
+	})
+}
+
+func TestF3NewToolErrorMapping(t *testing.T) {
+	Convey("F3.3: every upstream sentinel keeps its precedence, context, and actionable hint through a new tool", t, func() {
+		stub := newStubMLWH(t)
+		cs, cleanup := runMLWHServerWithClient(t, stub)
+		defer cleanup()
+
+		cases := []struct {
+			tool       string
+			path       string
+			arguments  map[string]any
+			status     int
+			code       string
+			message    string
+			substrings []string
+		}{
+			{
+				tool: "mlwh_latest_data_for_study", path: "/study/S1/latest-data",
+				arguments: map[string]any{"study_lims_id": "S1"}, status: http.StatusBadRequest,
+				code: "bad_request", message: "since must be RFC3339", substrings: []string{"since must be rfc3339", "fix the input"},
+			},
+			{
+				tool: "mlwh_sample_crams_for_study", path: "/study/MISSING/sample-crams",
+				arguments: map[string]any{"study_lims_id": "MISSING"}, status: http.StatusNotFound,
+				code: "not_found", message: "study MISSING is absent", substrings: []string{"study missing is absent", "not found"},
+			},
+			{
+				tool: "mlwh_studies_for_programme", path: "/studies/programme/Cancer",
+				arguments: map[string]any{"programme": "Cancer"}, status: http.StatusConflict,
+				code: "ambiguous", message: "programme matches multiple records", substrings: []string{"multiple records", "disambiguate"},
+			},
+			{
+				tool: "mlwh_runs", path: "/runs", arguments: map[string]any{}, status: http.StatusUnprocessableEntity,
+				code: "unsupported_identifier", message: "run cursor kind is unsupported", substrings: []string{"run cursor kind is unsupported", "not supported"},
+			},
+			{
+				tool: "mlwh_study_users", path: "/study/S1/users",
+				arguments: map[string]any{"study_lims_id": "S1"}, status: http.StatusBadGateway,
+				code: "upstream_impaired", message: "warehouse unavailable", substrings: []string{"warehouse unavailable", "retry later"},
+			},
+			{
+				tool: "mlwh_runs_for_sample", path: "/sample/S1/runs",
+				arguments: map[string]any{"sanger_name": "S1"}, status: http.StatusServiceUnavailable,
+				code: "cache_never_synced", message: "cache has never synced", substrings: []string{"never synced", "retry"},
+			},
+		}
+
+		for index, testCase := range cases {
+			stub.respondError(testCase.path, testCase.status, testCase.code, testCase.message)
+			result := callTool(t, cs, testCase.tool, testCase.arguments)
+			So(result.IsError, ShouldBeTrue)
+			text := strings.ToLower(firstTextContent(result))
+			for _, substring := range testCase.substrings {
+				So(text, ShouldContainSubstring, substring)
+			}
+			So(stub.requestCount(), ShouldEqual, index+1)
+		}
+	})
+
+	Convey("F3.3: cache-never-synced wins over a joined not-found sentinel without leaking the wrong remedy", t, func() {
+		err := mapToolError(fmt.Errorf("loading page: %w", errors.Join(wa.ErrNotFound, wa.ErrCacheNeverSynced)))
+		So(err, ShouldNotBeNil)
+		message := strings.ToLower(err.Error())
+		So(message, ShouldContainSubstring, "loading page")
+		So(message, ShouldContainSubstring, "never been synced")
+		So(message, ShouldNotContainSubstring, "not found")
 	})
 }

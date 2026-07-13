@@ -27,6 +27,9 @@ package mlwh
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -44,22 +47,77 @@ import (
 // tool.
 const callEndpointDescription = "Escape hatch: call any MLWH endpoint by its Registry Method name. " +
 	"Prefer the curated tools (search, resolve, detail, fan-out, freshness) where one exists; use this " +
-	"only to reach an endpoint that has no curated tool. Set method to the Registry Method name (e.g. " +
-	"\"ResolveStudy\", \"AllStudies\"); the mlwh://workflow resource lists every Method with its path and " +
-	"query parameters. Supply path_params in the endpoint's declared order and query_params (including " +
-	"limit/offset for paginated endpoints). Unknown methods and the wrong number of path params are " +
+	"only to reach an endpoint that has no curated tool. Choose method from the complete Registry-derived " +
+	"input enum (e.g. \"ResolveStudy\", \"AllStudies\", \"Export\"); the mlwh://workflow resource contains " +
+	"the EndpointReference catalogue with every endpoint's path and " +
+	"query parameters. Supply path_params in the endpoint's declared order and each query_params value as " +
+	"a string or ordered array of strings (including limit/offset for paginated endpoints). Unknown methods " +
+	"and the wrong number of path params are " +
 	"rejected. The decoded result is returned untyped (no per-endpoint output schema); dynamic calls with " +
 	"X-Total-Count or X-Next-Offset are wrapped as result, total, and next_offset. Responses with no " +
 	"cache_synced_at need mlwh_freshness for the cache as-of caveat."
+
+// QueryParameterValues holds the one or more ordered values for a query key.
+// It accepts both the original scalar string input and an array of strings.
+type QueryParameterValues []string
+
+// UnmarshalJSON accepts one query parameter as either a scalar string or an
+// ordered array of strings.
+func (values *QueryParameterValues) UnmarshalJSON(data []byte) error {
+	var scalar *string
+	if err := json.Unmarshal(data, &scalar); err == nil {
+		if scalar == nil {
+			return errors.New("query parameter must be a string or array of strings")
+		}
+
+		*values = []string{*scalar}
+
+		return nil
+	}
+
+	var repeated []*string
+	if err := json.Unmarshal(data, &repeated); err != nil {
+		return fmt.Errorf("query parameter must be a string or array of strings: %w", err)
+	}
+	if repeated == nil {
+		return errors.New("query parameter must be a string or array of strings")
+	}
+
+	decoded := make([]string, len(repeated))
+	for i, value := range repeated {
+		if value == nil {
+			return errors.New("query parameter must be a string or array of strings")
+		}
+
+		decoded[i] = *value
+	}
+
+	*values = decoded
+
+	return nil
+}
+
+// queryValues converts the input's scalar or repeated query parameters to the
+// url.Values the remote client's Call expects, preserving value order. A nil or
+// empty map yields empty url.Values, so an endpoint with no query parameters is
+// called with no query string.
+func queryValues(params map[string]QueryParameterValues) url.Values {
+	values := make(url.Values, len(params))
+	for key, parameterValues := range params {
+		values[key] = append([]string(nil), parameterValues...)
+	}
+
+	return values
+}
 
 // CallInput is the input for mlwh_call_endpoint: a Registry Method name, the
 // endpoint's path parameters in declaration order, and its query parameters. The
 // Method and the path-param arity are validated by (*RemoteClient).Call itself,
 // so the handler passes them through without a pre-check against the Registry.
 type CallInput struct {
-	Method      string            `json:"method" jsonschema:"the Registry Method name to dispatch, e.g. ResolveStudy or AllStudies (see the mlwh://workflow resource)"`
-	PathParams  []string          `json:"path_params,omitempty" jsonschema:"the endpoint's path parameters, in the order the Registry declares them"`
-	QueryParams map[string]string `json:"query_params,omitempty" jsonschema:"the endpoint's query parameters (including limit/offset for paginated endpoints)"`
+	Method      string                          `json:"method" jsonschema:"the Registry Method name to dispatch, e.g. ResolveStudy or AllStudies (see the mlwh://workflow resource)"`
+	PathParams  []string                        `json:"path_params,omitempty" jsonschema:"the endpoint's path parameters, in the order the Registry declares them"`
+	QueryParams map[string]QueryParameterValues `json:"query_params,omitempty" jsonschema:"the endpoint's query parameters; each value is a string or ordered array of strings"`
 }
 
 // registerCallTool adds the generic mlwh_call_endpoint escape-hatch tool (Story
@@ -75,6 +133,7 @@ func (p *provider) registerCallTool(r core.Registrar) error {
 	mcp.AddTool(r.Server(), &mcp.Tool{
 		Name:        "mlwh_call_endpoint",
 		Description: callEndpointDescription,
+		InputSchema: callEndpointInputSchema(),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in CallInput) (*mcp.CallToolResult, any, error) {
 		return callEndpoint(ctx, client, in)
 	})
@@ -97,19 +156,6 @@ func callEndpoint(ctx context.Context, client caller, in CallInput) (*mcp.CallTo
 	}
 
 	return nil, dynamicResult(decoded, headers), nil
-}
-
-// queryValues converts the input's query parameters (a flat string map) to the
-// url.Values the remote client's Call expects, giving each key a single value.
-// A nil or empty map yields empty url.Values, so an endpoint with no query
-// parameters is called with no query string.
-func queryValues(params map[string]string) url.Values {
-	values := make(url.Values, len(params))
-	for key, value := range params {
-		values.Set(key, value)
-	}
-
-	return values
 }
 
 func dynamicResult(decoded any, headers http.Header) any {

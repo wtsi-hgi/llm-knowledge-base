@@ -60,6 +60,33 @@ func TestWorkflowResource(t *testing.T) {
 			So(contents.Text, ShouldContainSubstring, wa.EndpointReference())
 		})
 
+		Convey("A1.3: the workflow guidance and Registry catalogue contain no removed manifest API", func() {
+			So(contents.Text, ShouldNotContainSubstring, "StudyManifest")
+			So(contents.Text, ShouldNotContainSubstring, "CountStudyManifest")
+			So(contents.Text, ShouldNotContainSubstring, "/manifest")
+			So(contents.Text, ShouldNotContainSubstring, "mlwh_study_manifest")
+			So(contents.Text, ShouldNotContainSubstring, "mlwh_count_study_manifest")
+		})
+
+		Convey("A2.4: Registry and EndpointReference catalogue include Export and exclude manifests", func() {
+			registryMethods := make(map[string]bool, len(wa.Registry))
+			for _, entry := range wa.Registry {
+				registryMethods[entry.Method] = true
+			}
+
+			So(registryMethods["Export"], ShouldBeTrue)
+			So(registryMethods["StudyManifest"], ShouldBeFalse)
+			So(registryMethods["CountStudyManifest"], ShouldBeFalse)
+
+			catalogue := wa.EndpointReference()
+			So(contents.Text, ShouldEqual, workflowGuidance+catalogue)
+			So(catalogue, ShouldContainSubstring, "`GET /export/:children/:parent_kind/:parent_id`")
+			So(catalogue, ShouldContainSubstring, "ExportResult")
+			So(catalogue, ShouldNotContainSubstring, "StudyManifest")
+			So(catalogue, ShouldNotContainSubstring, "CountStudyManifest")
+			So(catalogue, ShouldNotContainSubstring, "/manifest")
+		})
+
 		Convey("G1.2: the resource's MIMEType is text/markdown", func() {
 			So(contents.MIMEType, ShouldEqual, "text/markdown")
 		})
@@ -77,7 +104,6 @@ func TestWorkflowResource(t *testing.T) {
 			So(guidance, ShouldContainSubstring, "mlwh_study_status_breakdown")
 			So(guidance, ShouldContainSubstring, "mlwh_sample_progress")
 			So(guidance, ShouldContainSubstring, "mlwh_run_status")
-			So(guidance, ShouldContainSubstring, "mlwh_study_manifest")
 			So(guidance, ShouldContainSubstring, "file_type=cram")
 			So(guidance, ShouldContainSubstring, "mlwh_resolve_person")
 		})
@@ -129,6 +155,72 @@ func TestWorkflowResource(t *testing.T) {
 			So(guidance, ShouldContainSubstring, "mlwh_run_status")
 			So(guidance, ShouldContainSubstring, "mlwh_call_endpoint")
 			So(guidance, ShouldContainSubstring, "without cache_synced_at")
+		})
+
+		Convey("F1.1: target questions route to their curated tool and critical options", func() {
+			guidance := workflowGuidancePrefix(t, contents.Text)
+
+			So(guidance, ShouldContainSubstring, "mlwh_export(children=products,parent_kind=study")
+			So(guidance, ShouldContainSubstring, "mlwh_export(children=irods,parent_kind=study|sample|run")
+			So(guidance, ShouldContainSubstring, "mlwh_sample_crams_for_study")
+			So(guidance, ShouldContainSubstring, "mlwh_search_samples")
+			So(guidance, ShouldContainSubstring, "organism`, `library_type`, `qc`, and `deliverables_only")
+			So(guidance, ShouldContainSubstring, "mlwh_latest_data_for_study")
+			So(guidance, ShouldContainSubstring, "mlwh_latest_data_for_faculty_sponsor")
+			So(guidance, ShouldContainSubstring, "order_by=created_desc")
+			So(guidance, ShouldContainSubstring, "mlwh_runs_for_sample")
+			So(guidance, ShouldContainSubstring, "mlwh_monthly_run_counts")
+			So(guidance, ShouldContainSubstring, "mlwh_sequencing_aggregate")
+			So(guidance, ShouldContainSubstring, "mlwh_studies_for_programme")
+			So(guidance, ShouldContainSubstring, "mlwh_programmes")
+			So(guidance, ShouldContainSubstring, "mlwh_study_users")
+		})
+
+		Convey("F1.2: product rows and actual-file exports have distinct semantics", func() {
+			guidance := workflowGuidancePrefix(t, contents.Text)
+
+			So(guidance, ShouldContainSubstring, "Products without files remain rows")
+			So(guidance, ShouldContainSubstring, "`file_type` only narrows an attachment")
+			So(guidance, ShouldContainSubstring, "children=irods")
+		})
+
+		Convey("F1.3: sample CRAM and sample-prefix searches use their exact surfaces", func() {
+			guidance := workflowGuidancePrefix(t, contents.Text)
+
+			So(guidance, ShouldContainSubstring, "mlwh_sample_crams_for_study")
+			So(guidance, ShouldContainSubstring, "merged-aware")
+			So(guidance, ShouldContainSubstring, "Literal whole-value prefix is the default")
+			So(guidance, ShouldContainSubstring, "`words=true` is opt-in")
+			So(guidance, ShouldContainSubstring, "separator-agnostic word-prefix")
+			So(guidance, ShouldContainSubstring, "There is no substring mode")
+		})
+
+		Convey("F1.4: recency wording separates data-added, source-mutation, and cache times", func() {
+			guidance := workflowGuidancePrefix(t, contents.Text)
+
+			So(guidance, ShouldContainSubstring, "added to iRODS")
+			So(guidance, ShouldContainSubstring, "iRODS `created`")
+			So(guidance, ShouldContainSubstring, "`last_changed` and `last_updated` are source-row mutation times")
+			So(guidance, ShouldContainSubstring, "`cache_synced_at` and `mlwh_freshness` describe cache completeness/as-of state")
+		})
+
+		Convey("F1.5: run, aggregate, sponsor, programme, and study-role meanings remain distinct", func() {
+			guidance := workflowGuidancePrefix(t, contents.Text)
+
+			So(guidance, ShouldContainSubstring, "Run grain is one native run identifier")
+			So(guidance, ShouldContainSubstring, "`date_basis`")
+			So(guidance, ShouldContainSubstring, "`group_by`")
+			So(guidance, ShouldContainSubstring, "`unit=runs|samples|products`")
+			So(guidance, ShouldContainSubstring, "ONT uses warehouse load time, not a true sequencing date")
+			So(guidance, ShouldContainSubstring, "faculty sponsor is a separate Study field")
+			So(guidance, ShouldContainSubstring, "programme is exact study membership")
+			So(guidance, ShouldContainSubstring, "study-user roles are owner, manager, data_access_contact, follower")
+		})
+
+		Convey("F1.6: workflow text does not advertise removed or nonexistent tools", func() {
+			So(contents.Text, ShouldNotContainSubstring, "mlwh_study_manifest")
+			So(contents.Text, ShouldNotContainSubstring, "mlwh_count_study_manifest")
+			So(contents.Text, ShouldNotContainSubstring, "mlwh_count_export")
 		})
 	})
 }
