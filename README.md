@@ -464,7 +464,7 @@ using the same Makefile targets.
 
 See [`.docs/mcp/spec.md`](.docs/mcp/spec.md) for the original MCP server
 specification, and [`.docs/realworld3/spec.md`](.docs/realworld3/spec.md) for
-the MLWH API 1.8.1 expansion reviewed here.
+the MLWH API 1.8.0 expansion reviewed here.
 
 ## Architecture
 
