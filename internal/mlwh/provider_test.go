@@ -217,8 +217,8 @@ func TestProviderNew(t *testing.T) {
 }
 
 func TestWAAPI18Contract(t *testing.T) {
-	Convey("A1.1: Given the updated module, provider construction targets wa API 1.8.0", t, func() {
-		So(wa.APIVersion, ShouldEqual, "1.8.0")
+	Convey("A1.1: Given the updated module, provider construction targets wa API 1.8.1", t, func() {
+		So(wa.APIVersion, ShouldEqual, "1.8.1")
 
 		provider, err := New(wa.RemoteConfig{BaseURL: "http://stub.example"})
 		So(err, ShouldBeNil)

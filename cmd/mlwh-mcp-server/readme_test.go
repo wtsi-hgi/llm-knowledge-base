@@ -106,7 +106,7 @@ func TestREADMEHTTPDocs(t *testing.T) {
 }
 
 func TestREADMEAPIEighteenDocs(t *testing.T) {
-	Convey("Given the complete public README for MLWH API 1.8.0", t, func() {
+	Convey("Given the complete public README for MLWH API 1.8.1", t, func() {
 		readmeBytes, err := os.ReadFile("../../README.md")
 		So(err, ShouldBeNil)
 
@@ -137,9 +137,9 @@ func TestREADMEAPIEighteenDocs(t *testing.T) {
 			So(readme, ShouldNotContainSubstring, "manifest")
 		})
 
-		Convey("F2.2: version prose and the version example use API 1.8.0 only", func() {
-			So(prose, ShouldContainSubstring, "currently mlwh api 1.8.0")
-			So(readme, ShouldContainSubstring, "# mlwh api version 1.8.0")
+		Convey("F2.2: version prose and the version example use API 1.8.1 only", func() {
+			So(prose, ShouldContainSubstring, "currently mlwh api 1.8.1")
+			So(readme, ShouldContainSubstring, "# mlwh api version 1.8.1")
 			So(readme, ShouldNotContainSubstring, "1.7.0")
 		})
 
@@ -158,7 +158,7 @@ func TestREADMEAPIEighteenDocs(t *testing.T) {
 			So(prose, ShouldContainSubstring, "not a substring mode")
 		})
 
-		Convey("F2.5: the catalogue names every curated tool added for API 1.8.0", func() {
+		Convey("F2.5: the catalogue names every curated tool added for API 1.8.1", func() {
 			tools := []string{
 				"mlwh_export",
 				"mlwh_latest_data_for_study",
@@ -207,7 +207,7 @@ func TestREADMEAPIEighteenDocs(t *testing.T) {
 			So(caveats, ShouldContainSubstring, "`mlwh_freshness` is the cache as-of source")
 		})
 
-		Convey("the prompt cookbook covers every new API 1.8.0 question family", func() {
+		Convey("the prompt cookbook covers every new API 1.8.1 question family", func() {
 			examples := []string{
 				"find deliverable wgs mouse samples",
 				"export users and their roles",

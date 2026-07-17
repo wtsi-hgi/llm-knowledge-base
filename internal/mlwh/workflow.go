@@ -121,7 +121,10 @@ const workflowGuidance = "# MLWH workflows\n\n" +
 	"- Export pagination: " + exportContinuationGuidance + "\n" +
 	"- Freshness: use response `cache_synced_at` when present; use `mlwh_freshness` for " +
 	"bare lists, counts, `mlwh_run_status`, and `mlwh_call_endpoint` responses without " +
-	"cache_synced_at.\n\n" +
+	"cache_synced_at. From `mlwh_freshness` use per-table `last_run` (the oldest relevant " +
+	"across tables) for cache currency and as-of caveats; `high_water` is only a " +
+	"source-progress watermark that can lag when the source is unchanged, so never report " +
+	"it as \"synced through\" or treat it as refresh currency.\n\n" +
 	"Use `mlwh_call_endpoint` only when no curated workflow covers the question. The full, " +
 	"always-current `wa.EndpointReference()` catalogue follows; choose a Registry Method " +
 	"from the generic tool's input enum, then use the catalogue for its path and query " +

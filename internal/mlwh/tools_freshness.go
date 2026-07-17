@@ -36,15 +36,23 @@ import (
 )
 
 // freshnessDescription is the LLM-facing description for mlwh_freshness. It tells
-// the agent the tool reports, per mirrored sync table, the high-water mark and
-// last-run timestamps plus the ever_synced flag, and that it SUCCEEDS even on a
-// never-synced cache (every table then reporting ever_synced=false with empty
-// timestamps) so an answer can be caveated rather than failing outright.
+// the agent the tool reports, per mirrored sync table, the last_run and
+// high_water timestamps plus the ever_synced flag, and crucially that last_run
+// (not high_water) is the cache-currency signal for "as of" caveats. high_water
+// is only wa's sync-mode-specific source-progress watermark and may stay old
+// when the source is unchanged, so it must never be phrased as "synced through".
+// It also SUCCEEDS even on a never-synced cache (every table then reporting
+// ever_synced=false with empty timestamps) so an answer can be caveated rather
+// than failing outright.
 const freshnessDescription = "Report MLWH cache freshness: for each mirrored sync table, returns its " +
-	"high_water mark and last_run timestamp (UTC RFC3339, empty if never synced) and an ever_synced flag. " +
-	"Use it to caveat answers about data staleness and to detect a never-synced cache. Takes no input. " +
-	"This SUCCEEDS even on a never-synced cache: every table then reports ever_synced=false with empty " +
-	"timestamps (the never-synced state), so it is not an error."
+	"last_run and high_water timestamps (UTC RFC3339, empty if never synced) and an ever_synced flag. " +
+	"last_run is that table's cache sync/refresh time: use it for cache-currentness and \"as of\" caveats, " +
+	"and for a multi-table answer use the oldest relevant last_run. high_water is ONLY wa's " +
+	"sync-mode-specific source-progress watermark: it may be a source-change time, a full-refresh snapshot " +
+	"time, or empty, and it may stay old when the source data is unchanged, so never phrase it as \"synced " +
+	"through\" and never use it to judge when the cache was refreshed. Also use last_run to detect a " +
+	"never-synced cache. Takes no input. This SUCCEEDS even on a never-synced cache: every table then " +
+	"reports ever_synced=false with empty timestamps (the never-synced state), so it is not an error."
 
 // registerFreshnessTool adds the mlwh_freshness tool (Story D1) to the server
 // through the Registrar. It pre-sets the OpenAPI-sourced output schema for
