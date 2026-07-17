@@ -133,6 +133,51 @@ func TestFreshnessTool(t *testing.T) {
 			So(tool.Description, ShouldContainSubstring, "ever_synced")
 			So(tool.Description, ShouldContainSubstring, "never-synced")
 		})
+
+		Convey("D1.4: an old unchanged-source high_water coexists with a recent last_run and stays distinct in StructuredContent", func() {
+			stub.respondJSON("/freshness", 200, unchangedSourceFreshness())
+
+			res := callTool(t, cs, "mlwh_freshness", map[string]any{})
+			So(res.IsError, ShouldBeFalse)
+
+			obj := structuredObject(res)
+
+			tables, ok := obj["tables"].([]any)
+			So(ok, ShouldBeTrue)
+			So(len(tables), ShouldEqual, 1)
+
+			entry, ok := tables[0].(map[string]any)
+			So(ok, ShouldBeTrue)
+
+			highWater, _ := entry["high_water"].(string)
+			lastRun, _ := entry["last_run"].(string)
+
+			// The old source-progress watermark and the recent cache refresh time must
+			// round-trip as two distinct values: an unchanged source leaves high_water
+			// old while last_run advances, so they must not be conflated.
+			So(highWater, ShouldEqual, "2026-07-10T09:30:57Z")
+			So(lastRun, ShouldEqual, "2026-07-17T02:10:21Z")
+			So(highWater, ShouldNotEqual, lastRun)
+			So(highWater, ShouldBeLessThan, lastRun)
+		})
+
+		Convey("D1.5: the description ties cache currency to last_run and forbids treating high_water as refresh currency", func() {
+			tool, ok := toolByName(t, cs, "mlwh_freshness")
+			So(ok, ShouldBeTrue)
+
+			// last_run is the cache-currency signal for as-of caveats.
+			So(tool.Description, ShouldContainSubstring, "cache-currentness")
+			So(tool.Description, ShouldContainSubstring, "oldest relevant last_run")
+
+			// high_water is only a source-progress watermark and must never be phrased
+			// as "synced through" or used to judge cache refresh currency.
+			So(tool.Description, ShouldContainSubstring, "source-progress watermark")
+			So(tool.Description, ShouldContainSubstring, `never phrase it as "synced through"`)
+
+			// The old, buggy interchangeable phrasing must not return.
+			So(tool.Description, ShouldNotContainSubstring, "high_water mark and last_run timestamp")
+			So(tool.Description, ShouldNotContainSubstring, "caveat answers about data staleness")
+		})
 	})
 }
 
@@ -167,4 +212,17 @@ func neverSyncedFreshness() wa.Freshness {
 	}
 
 	return wa.Freshness{Tables: tables}
+}
+
+// unchangedSourceFreshness is a canned Freshness for a single synced table whose
+// source data has not changed: its high_water source-progress watermark stays at
+// an old time while last_run reflects a recent cache refresh. It backs D1.4,
+// proving an old high_water does NOT imply a stale cache when last_run is recent.
+func unchangedSourceFreshness() wa.Freshness {
+	return wa.Freshness{Tables: []wa.TableFreshness{{
+		Table:      "study",
+		HighWater:  "2026-07-10T09:30:57Z",
+		LastRun:    "2026-07-17T02:10:21Z",
+		EverSynced: true,
+	}}}
 }

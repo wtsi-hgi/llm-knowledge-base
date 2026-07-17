@@ -157,6 +157,15 @@ func TestWorkflowResource(t *testing.T) {
 			So(guidance, ShouldContainSubstring, "without cache_synced_at")
 		})
 
+		Convey("E3.7: freshness guidance uses last_run for currency and warns high_water can lag", func() {
+			guidance := workflowGuidancePrefix(t, contents.Text)
+
+			So(guidance, ShouldContainSubstring, "per-table `last_run` (the oldest relevant")
+			So(guidance, ShouldContainSubstring, "`high_water` is only a source-progress watermark")
+			So(guidance, ShouldContainSubstring, "can lag when the source is unchanged")
+			So(guidance, ShouldContainSubstring, `never report it as "synced through"`)
+		})
+
 		Convey("F1.1: target questions route to their curated tool and critical options", func() {
 			guidance := workflowGuidancePrefix(t, contents.Text)
 

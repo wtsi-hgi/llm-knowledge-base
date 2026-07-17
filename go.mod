@@ -7,7 +7,7 @@ require (
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/smartystreets/goconvey v1.8.1
 	github.com/wtsi-hgi/go-authserver v1.6.0
-	github.com/wtsi-hgi/wa v0.8.0
+	github.com/wtsi-hgi/wa v0.9.1
 )
 
 require (

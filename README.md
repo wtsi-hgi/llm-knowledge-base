@@ -15,7 +15,7 @@ server is a thin, well-described bridge whose value is making those endpoints
 ergonomic and correctly usable by an LLM, not re-implementing them: it imports
 `github.com/wtsi-hgi/wa/mlwh` and reuses its typed client, response types,
 registry, and OpenAPI document directly, so there is no type drift and the server
-is compile-time-locked to the upstream API version (currently MLWH API 1.8.0).
+is compile-time-locked to the upstream API version (currently MLWH API 1.8.1).
 
 The MLWH provider serves over the **stdio** transport by default, so it can run
 as a local subprocess launched per user by an agent CLI. It can also run in
@@ -46,7 +46,7 @@ below. Check the build and the versions it targets:
 ```bash
 mlwh-mcp-server --version
 # mlwh-mcp-server version <build version>
-# MLWH API version 1.8.0
+# MLWH API version 1.8.1
 ```
 
 ## Configuration
@@ -370,7 +370,10 @@ Notes for interpreting answers:
   programme values accepted by programme filters.
 - `mlwh_freshness` is the cache as-of source. Count and bare-list responses have
   no `cache_synced_at`; rows that do carry it are only complete through that
-  synchronization state.
+  synchronization state. Use per-table `last_run` (the oldest relevant across
+  tables) or an endpoint's `cache_synced_at` for cache currency and "as of"
+  caveats; `high_water` is only wa's source-progress watermark that may stay old
+  when the source data is unchanged, so never read it as "synced through".
 
 ## What the server exposes
 
