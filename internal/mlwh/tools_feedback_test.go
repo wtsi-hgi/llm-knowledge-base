@@ -381,7 +381,8 @@ func TestFeedbackToolB3StructuredErrors(t *testing.T) {
 			text := firstTextContent(res)
 			So(text, ShouldStartWith, "feedback_disabled: ")
 			So(text, ShouldContainSubstring, "feedback is disabled on this server")
-			So(text, ShouldContainSubstring, "do not retry")
+			So(text, ShouldEndWith, " (feedback is disabled on the wa server; "+
+				"tell the user it could not be reported; do not retry)")
 		})
 
 		Convey("B3.2: a 404 text body is feedback_unsupported naming MLWH API 1.9.0", func() {
@@ -389,7 +390,8 @@ func TestFeedbackToolB3StructuredErrors(t *testing.T) {
 
 			text := feedbackErrorText(t, cs)
 			So(text, ShouldStartWith, "feedback_unsupported: ")
-			So(text, ShouldContainSubstring, "1.9.0")
+			So(text, ShouldEndWith, " (the wa server has no feedback endpoint at this URL: "+
+				"it predates MLWH API 1.9.0 or is secured; tell the user; do not retry)")
 		})
 
 		Convey("B3.3: a 401 is feedback_unauthorized ending with its parenthesised do not retry next step", func() {
@@ -408,7 +410,7 @@ func TestFeedbackToolB3StructuredErrors(t *testing.T) {
 			text := feedbackErrorText(t, cs)
 			So(text, ShouldStartWith, "feedback_too_large: ")
 			So(text, ShouldContainSubstring, "description exceeds 16384 bytes")
-			So(text, ShouldContainSubstring, "resubmit once")
+			So(text, ShouldEndWith, " (shorten description, user_request, or tools_tried and resubmit once)")
 		})
 
 		Convey("B3.5: a 400 bad_request envelope is feedback_invalid keeping wa's message and asking to resubmit once", func() {
@@ -417,7 +419,7 @@ func TestFeedbackToolB3StructuredErrors(t *testing.T) {
 			text := feedbackErrorText(t, cs)
 			So(text, ShouldStartWith, "feedback_invalid: ")
 			So(text, ShouldContainSubstring, "description is required")
-			So(text, ShouldContainSubstring, "resubmit once")
+			So(text, ShouldEndWith, " (fix category or description and resubmit once)")
 		})
 
 		Convey("B3.5: a 400 without a wa envelope is feedback_unavailable", func() {
