@@ -288,6 +288,21 @@ func runMLWHServerWithClientOptions(
 ) (*mcp.ClientSession, func()) {
 	t.Helper()
 
+	return runMLWHServerWithClientImplementation(t, stub,
+		&mcp.Implementation{Name: "test-client", Version: "0.0.0"}, opts, providerOpts...)
+}
+
+// runMLWHServerWithClientImplementation is runMLWHServerWithClientOptions with
+// the client's handshake Implementation (its name and version) set explicitly.
+func runMLWHServerWithClientImplementation(
+	t *testing.T,
+	stub *stubMLWH,
+	clientImpl *mcp.Implementation,
+	opts core.Options,
+	providerOpts ...Option,
+) (*mcp.ClientSession, func()) {
+	t.Helper()
+
 	provider, err := New(wa.RemoteConfig{BaseURL: stub.server.URL}, providerOpts...)
 	if err != nil {
 		t.Fatalf("mlwh.New() returned error: %v", err)
@@ -311,7 +326,7 @@ func runMLWHServerWithClientOptions(
 		runErr <- srv.Run(ctx, serverTransport)
 	}()
 
-	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "0.0.0"}, nil)
+	client := mcp.NewClient(clientImpl, nil)
 
 	clientSession, err := client.Connect(ctx, clientTransport, nil)
 	if err != nil {

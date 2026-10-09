@@ -48,6 +48,11 @@ const (
 	feedbackToolName  = "mlwh_provide_feedback"
 	feedbackPath      = "/feedback"
 	feedbackCreatedAt = "2026-10-01T12:00:00Z"
+
+	// feedbackPaddedDescription and feedbackPaddedUserRequest carry leading and
+	// trailing whitespace that must reach wa unmodified.
+	feedbackPaddedDescription = "  No consent endpoint.\n"
+	feedbackPaddedUserRequest = "\tWhich samples withdrew consent?  "
 )
 
 func TestFeedbackToolB1Registration(t *testing.T) {
@@ -170,8 +175,8 @@ func TestFeedbackToolB2Submission(t *testing.T) {
 		Convey("When the tool is called with every agent field", func() {
 			res := callTool(t, cs, feedbackToolName, map[string]any{
 				"category":     "no_endpoint",
-				"description":  "No consent endpoint.",
-				"user_request": "Which samples withdrew consent?",
+				"description":  feedbackPaddedDescription,
+				"user_request": feedbackPaddedUserRequest,
 				"tools_tried":  []any{"mlwh_search_samples"},
 			})
 
@@ -193,12 +198,12 @@ func TestFeedbackToolB2Submission(t *testing.T) {
 				So(req.Header.Get("Content-Type"), ShouldEqual, "application/json")
 			})
 
-			Convey("B2.2: the body carries the agent fields and the stdio session metadata", func() {
+			Convey("B2.2: the body carries the agent fields byte for byte and the stdio session metadata", func() {
 				body := lastFeedbackBody(t, stub)
 
 				So(body["category"], ShouldEqual, "no_endpoint")
-				So(body["description"], ShouldEqual, "No consent endpoint.")
-				So(body["user_request"], ShouldEqual, "Which samples withdrew consent?")
+				So(body["description"], ShouldEqual, feedbackPaddedDescription)
+				So(body["user_request"], ShouldEqual, feedbackPaddedUserRequest)
 				So(body["tools_tried"], ShouldResemble, []any{"mlwh_search_samples"})
 				So(body["wa_api_version"], ShouldEqual, wa.APIVersion)
 				So(body["transport"], ShouldEqual, "stdio")
@@ -250,6 +255,38 @@ func TestFeedbackToolB2Submission(t *testing.T) {
 		submitMinimalFeedback(t, cs)
 
 		So(lastFeedbackBody(t, stub)["mcp_server_version"], ShouldEqual, version[:wa.FeedbackMaxMetaBytes])
+	})
+
+	Convey("B2.7: a server version of exactly 256 bytes passes through unchanged", t, func() {
+		stub := newStubMLWH(t)
+		respondFeedbackReceipt(stub)
+
+		version := strings.Repeat("v", wa.FeedbackMaxMetaBytes)
+		cs, cleanup := runMLWHServerWithClientOptions(t, stub, core.Options{}, WithServerInfo(version, "stdio"))
+		defer cleanup()
+
+		submitMinimalFeedback(t, cs)
+
+		So(lastFeedbackBody(t, stub)["mcp_server_version"], ShouldEqual, version)
+	})
+
+	Convey("B2.7: a 300-byte transport, client name, and client version are each cut to 256 bytes", t, func() {
+		stub := newStubMLWH(t)
+		respondFeedbackReceipt(stub)
+
+		transport := strings.Repeat("t", 300)
+		name := strings.Repeat("n", 300)
+		version := strings.Repeat("c", 300)
+		cs, cleanup := runMLWHServerWithClientImplementation(t, stub,
+			&mcp.Implementation{Name: name, Version: version}, core.Options{}, WithServerInfo("v", transport))
+		defer cleanup()
+
+		submitMinimalFeedback(t, cs)
+
+		body := lastFeedbackBody(t, stub)
+		So(body["transport"], ShouldEqual, transport[:wa.FeedbackMaxMetaBytes])
+		So(body["client_name"], ShouldEqual, name[:wa.FeedbackMaxMetaBytes])
+		So(body["client_version"], ShouldEqual, version[:wa.FeedbackMaxMetaBytes])
 	})
 
 	Convey("B2.8: feedbackSubmission tolerates a request without session or HTTP extras", t, func() {
