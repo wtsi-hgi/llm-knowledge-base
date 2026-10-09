@@ -9,6 +9,10 @@ tables, page through iRODS paths and global runs, query sequencing aggregates,
 discover programmes and study users, select merged-aware sample CRAMs, and
 report data freshness.
 
+Every tool is read-only except `mlwh_provide_feedback`, the one tool that sends
+data upstream: it lets an agent report a problem with a request to the server
+admin (see [What the server exposes](#what-the-server-exposes)).
+
 The MLWH read API is provided by the separate upstream
 [`wa`](https://github.com/wtsi-hgi/wa) project (its `wa mlwh serve` command). This
 server is a thin, well-described bridge whose value is making those endpoints
@@ -432,6 +436,23 @@ A curated, LLM-ergonomic tool surface generated from the MLWH endpoint registry
   `mlwh_count_resolve_person`.
 - **Freshness**: `mlwh_freshness` reports per-table sync state so answers can be
   caveated; it succeeds even against a never-synced cache.
+- **Feedback**: `mlwh_provide_feedback` is the only tool that writes upstream.
+  Agents call it on their own initiative to report a problem with the current
+  request (`could_not_answer`, `agent_mistake`, `no_endpoint`, `user_unhappy`,
+  or `other`), at most once per problem. It POSTs one report to wa's
+  `/feedback` route: the category, the agent's description of what went wrong,
+  and optionally the user's original request and the tools tried. The server
+  attaches its own version, the MLWH API version, the transport, and the agent
+  application's name and version (stdio) or User-Agent (HTTP). wa records the
+  MCP host address, meaning the network address of the machine running this
+  server, not the end user's. It returns the report's `id` and `created_at`.
+  It requires wa `v0.10.0`+ with feedback enabled
+  (`wa mlwh serve --feedback-db <path>`); otherwise it fails with
+  `feedback_disabled` or `feedback_unsupported`. It does not work against a
+  secured wa, because this server sends no auth token; depending on
+  `MLWH_BASE_URL` it fails with `feedback_unavailable`, `feedback_unsupported`,
+  or `feedback_unauthorized`.
+  Admins read reports on wa's `/feedback` page.
 - **Escape hatch**: `mlwh_call_endpoint` dispatches any upstream Registry method
   by name. If the upstream response includes pagination headers, the tool returns
   `result`, `total`, and `next_offset`; otherwise it returns the decoded result

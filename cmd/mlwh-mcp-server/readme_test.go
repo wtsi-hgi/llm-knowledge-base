@@ -227,6 +227,37 @@ func TestREADMEAPIEighteenDocs(t *testing.T) {
 	})
 }
 
+func TestREADMEFeedbackDocs(t *testing.T) {
+	Convey("Given the README contents for the feedback tool", t, func() {
+		readmeBytes, err := os.ReadFile("../../README.md")
+		So(err, ShouldBeNil)
+
+		readme := string(readmeBytes)
+		exposes := singleSpaced(readmeSection(readme, "## What the server exposes", "## Development"))
+		intro := singleSpaced(readmeSection(readme, "# MLWH MCP Server", "## Requirements"))
+
+		So(exposes, ShouldNotBeEmpty)
+		So(intro, ShouldNotBeEmpty)
+
+		Convey("C2.1: the exposed surface names the tool, its wa flag, admin page, and minimum wa version", func() {
+			So(exposes, ShouldContainSubstring, "mlwh_provide_feedback")
+			So(exposes, ShouldContainSubstring, "--feedback-db")
+			So(exposes, ShouldContainSubstring, "/feedback")
+			So(exposes, ShouldContainSubstring, "v0.10.0")
+		})
+
+		Convey("C2.2: the exposed surface states its limits, that it writes upstream, and what wa records", func() {
+			So(exposes, ShouldContainSubstring, "does not work against a secured")
+			So(exposes, ShouldContainSubstring, "the only tool that writes upstream")
+			So(exposes, ShouldContainSubstring, "wa records the MCP host address")
+		})
+
+		Convey("C2.3: the intro names the feedback tool as the one that sends data upstream", func() {
+			So(intro, ShouldContainSubstring, "mlwh_provide_feedback")
+		})
+	})
+}
+
 func singleSpaced(text string) string {
 	return strings.Join(strings.Fields(text), " ")
 }

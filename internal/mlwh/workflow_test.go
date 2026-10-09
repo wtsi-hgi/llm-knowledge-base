@@ -231,6 +231,44 @@ func TestWorkflowResource(t *testing.T) {
 			So(contents.Text, ShouldNotContainSubstring, "mlwh_count_study_manifest")
 			So(contents.Text, ShouldNotContainSubstring, "mlwh_count_export")
 		})
+
+		Convey("C1.1: the workflow guidance explains when and how to provide feedback", func() {
+			guidance := workflowGuidancePrefix(t, contents.Text)
+
+			for _, want := range []string{
+				"mlwh_provide_feedback",
+				"could_not_answer",
+				"agent_mistake",
+				"no_endpoint",
+				"user_unhappy",
+				"`other`",
+				"without asking the user",
+				"at most one report per distinct problem",
+				"tell the user briefly",
+				"server admin",
+				"do not retry",
+				"feedback_disabled",
+				"feedback_unsupported",
+				"feedback_unauthorized",
+			} {
+				So(guidance, ShouldContainSubstring, want)
+			}
+		})
+
+		Convey("C1.2: the feedback paragraph appears before the mlwh_call_endpoint paragraph", func() {
+			guidance := workflowGuidancePrefix(t, contents.Text)
+
+			feedbackAt := strings.Index(guidance, "Feedback:")
+			callEndpointAt := strings.Index(guidance, "Use `mlwh_call_endpoint` only when")
+
+			So(feedbackAt, ShouldBeGreaterThanOrEqualTo, 0)
+			So(callEndpointAt, ShouldBeGreaterThan, feedbackAt)
+		})
+
+		Convey("C1.4: the opening sentence names mlwh_provide_feedback as the only non-read-only tool", func() {
+			So(contents.Text, ShouldContainSubstring, "read-only except `mlwh_provide_feedback`")
+			So(contents.Text, ShouldNotContainSubstring, "bridges the read-only")
+		})
 	})
 }
 

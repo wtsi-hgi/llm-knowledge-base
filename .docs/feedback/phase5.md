@@ -33,8 +33,8 @@ spec's text and add a `Feedback:` paragraph to `workflowGuidance` before the
 `mlwh_call_endpoint` paragraph. Add assertions to
 `internal/mlwh/workflow_test.go`. Covers all 4 acceptance tests from C1.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 #### Item 5.2: C2 - README [parallel with 5.1]
 
@@ -46,8 +46,8 @@ the one tool that sends data upstream. Add assertions to
 `cmd/mlwh-mcp-server/readme_test.go`. Covers all 3 acceptance tests from
 C2.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 For parallel batch items, use separate subagents per item.
 Launch review subagents using the `go-reviewer` skill
