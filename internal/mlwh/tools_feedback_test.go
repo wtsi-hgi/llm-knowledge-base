@@ -132,6 +132,7 @@ func TestFeedbackToolB1Registration(t *testing.T) {
 		Convey("B1.5: the tool description gives the when, how often, and after-success guidance", func() {
 			So(tool.Description, ShouldContainSubstring, "without asking the user")
 			So(tool.Description, ShouldContainSubstring, "at most one report per distinct problem")
+			So(tool.Description, ShouldContainSubstring, "never resubmit a report that succeeded")
 			So(tool.Description, ShouldContainSubstring, "tell the user briefly")
 			So(tool.Description, ShouldContainSubstring, "server admin")
 
