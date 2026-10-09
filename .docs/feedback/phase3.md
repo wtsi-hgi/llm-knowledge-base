@@ -36,8 +36,8 @@ constants), the `outputSchemaFor("FeedbackReceipt")` output schema,
 `fullSurfaceTools` in `internal/mlwh/provider_test.go`. Covers all 7
 acceptance tests from B1.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 ### Item 3.2: B2 - Submit and return the receipt
 
@@ -56,8 +56,8 @@ metadata in the stub body). The `feedback_too_large: ` assertion of B2 test 6
 needs `mapFeedbackError`, so it is written in item 3.3. Depends on items 2.1,
 2.2, and 3.1.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 ### Item 3.3: B3 - Structured errors
 
@@ -71,5 +71,5 @@ through `core.ToolError`. Covers all 8 acceptance tests from B3, including the
 cancellation test that mirrors `TestAvailabilityToolsF3Cancellation` F3.2,
 plus the `feedback_too_large: ` assertion of B2 test 6.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed

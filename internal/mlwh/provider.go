@@ -214,7 +214,8 @@ func (p *provider) APIVersion() string {
 // the global keyset run tools via registerRunTools, and the generic escape-hatch
 // tool via registerCallTool. The phase 6 availability tools are added by
 // registerAvailabilityTools. The phase 7 people tools are added by
-// registerPeopleTools. The workflow / endpoint-catalogue resource (Story G1) is
+// registerPeopleTools. The feedback tool (Story B1) is added by
+// registerFeedbackTool. The workflow / endpoint-catalogue resource (Story G1) is
 // added by registerWorkflowResource.
 func (p *provider) Register(_ context.Context, r core.Registrar) error {
 	if err := p.registerExportTool(r); err != nil {
@@ -250,6 +251,10 @@ func (p *provider) Register(_ context.Context, r core.Registrar) error {
 	}
 
 	if err := p.registerFreshnessTool(r); err != nil {
+		return err
+	}
+
+	if err := p.registerFeedbackTool(r); err != nil {
 		return err
 	}
 

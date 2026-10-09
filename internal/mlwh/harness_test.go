@@ -278,14 +278,17 @@ func runMLWHServerWithClient(t *testing.T, stub *stubMLWH) (*mcp.ClientSession, 
 	return runMLWHServerWithClientOptions(t, stub, core.Options{})
 }
 
+// runMLWHServerWithClientOptions is runMLWHServerWithClient with explicit core
+// options and optional provider options (e.g. WithServerInfo).
 func runMLWHServerWithClientOptions(
 	t *testing.T,
 	stub *stubMLWH,
 	opts core.Options,
+	providerOpts ...Option,
 ) (*mcp.ClientSession, func()) {
 	t.Helper()
 
-	provider, err := New(wa.RemoteConfig{BaseURL: stub.server.URL})
+	provider, err := New(wa.RemoteConfig{BaseURL: stub.server.URL}, providerOpts...)
 	if err != nil {
 		t.Fatalf("mlwh.New() returned error: %v", err)
 	}
