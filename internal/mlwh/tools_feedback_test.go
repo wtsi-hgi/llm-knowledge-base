@@ -34,6 +34,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -492,12 +493,25 @@ func TestFeedbackToolB3StructuredErrors(t *testing.T) {
 	Convey("B3.8: cancellation during the feedback call cancels its HTTP request without retry or a result", t, func() {
 		stub := newStubMLWH(t)
 		requestStarted := make(chan struct{})
+
+		var firstRequest sync.Once
+
 		stub.respondHandler(feedbackPath, func(_ http.ResponseWriter, request *http.Request) {
-			close(requestStarted)
-			<-request.Context().Done()
+			blocked := false
+
+			firstRequest.Do(func() {
+				close(requestStarted)
+
+				blocked = true
+			})
+
+			if blocked {
+				<-request.Context().Done()
+			}
 		})
 		cs, cleanup := runMLWHServerWithClient(t, stub)
-		defer cleanup()
+		stopServer := sync.OnceFunc(cleanup)
+		defer stopServer()
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -533,6 +547,11 @@ func TestFeedbackToolB3StructuredErrors(t *testing.T) {
 
 		So(outcome.result, ShouldBeNil)
 		So(errors.Is(outcome.err, context.Canceled), ShouldBeTrue)
+
+		// CallTool returns as soon as the client is cancelled, while the tool
+		// handler may still be running. Stopping the server waits for in-flight
+		// handlers to return, so any retry has reached the stub before counting.
+		stopServer()
 		So(stub.requestCount(), ShouldEqual, 1)
 
 		req, ok := stub.lastRequest()
