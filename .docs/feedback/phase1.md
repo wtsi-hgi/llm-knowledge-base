@@ -44,5 +44,5 @@ and `README.md` (prose and `--version` example) to `1.9.0`. Confirm the
 Registry has no `/feedback` entry and the `mlwh_call_endpoint` parity tests
 pass unchanged. Covers all 4 acceptance tests from A1.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
