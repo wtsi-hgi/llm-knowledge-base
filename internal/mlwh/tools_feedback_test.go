@@ -377,10 +377,13 @@ func TestFeedbackToolB3StructuredErrors(t *testing.T) {
 			So(text, ShouldContainSubstring, "1.9.0")
 		})
 
-		Convey("B3.3: a 401 is feedback_unauthorized", func() {
+		Convey("B3.3: a 401 is feedback_unauthorized ending with its parenthesised do not retry next step", func() {
 			respondFeedbackText(stub, http.StatusUnauthorized, "unauthorized")
 
-			So(feedbackErrorText(t, cs), ShouldStartWith, "feedback_unauthorized: ")
+			text := feedbackErrorText(t, cs)
+			So(text, ShouldStartWith, "feedback_unauthorized: ")
+			So(text, ShouldEndWith, " (the wa server requires authentication, which this MCP server does not support; "+
+				"tell the user; do not retry)")
 		})
 
 		Convey("B3.4: a 413 is feedback_too_large keeping wa's message and asking to resubmit once", func() {
@@ -393,12 +396,13 @@ func TestFeedbackToolB3StructuredErrors(t *testing.T) {
 			So(text, ShouldContainSubstring, "resubmit once")
 		})
 
-		Convey("B3.5: a 400 bad_request envelope is feedback_invalid keeping wa's message", func() {
+		Convey("B3.5: a 400 bad_request envelope is feedback_invalid keeping wa's message and asking to resubmit once", func() {
 			stub.respondError(feedbackPath, http.StatusBadRequest, "bad_request", "description is required")
 
 			text := feedbackErrorText(t, cs)
 			So(text, ShouldStartWith, "feedback_invalid: ")
 			So(text, ShouldContainSubstring, "description is required")
+			So(text, ShouldContainSubstring, "resubmit once")
 		})
 
 		Convey("B3.5: a 400 without a wa envelope is feedback_unavailable", func() {
@@ -407,10 +411,12 @@ func TestFeedbackToolB3StructuredErrors(t *testing.T) {
 			So(feedbackErrorText(t, cs), ShouldStartWith, "feedback_unavailable: ")
 		})
 
-		Convey("B3.6: a 500 internal_error envelope is feedback_unavailable", func() {
+		Convey("B3.6: a 500 internal_error envelope is feedback_unavailable with do not retry repeatedly", func() {
 			stub.respondError(feedbackPath, http.StatusInternalServerError, "internal_error", "could not store feedback")
 
-			So(feedbackErrorText(t, cs), ShouldStartWith, "feedback_unavailable: ")
+			text := feedbackErrorText(t, cs)
+			So(text, ShouldStartWith, "feedback_unavailable: ")
+			So(text, ShouldContainSubstring, "do not retry repeatedly")
 		})
 
 		Convey("B3.6: a 503 cache_never_synced envelope is feedback_unavailable keeping wa's message", func() {
