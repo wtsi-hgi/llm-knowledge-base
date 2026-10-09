@@ -264,6 +264,33 @@ func TestFeedbackToolB2Submission(t *testing.T) {
 			body := lastFeedbackBody(t, stub)
 			So(body["description"], ShouldEqual, description)
 		})
+
+		Convey("B2.6: an oversized user_request and tools_tried reach wa unmodified", func() {
+			stub.respondError(feedbackPath, http.StatusRequestEntityTooLarge,
+				"payload_too_large", "user_request exceeds 16384 bytes")
+
+			userRequest := strings.Repeat("u", 20000)
+			toolsTried := make([]any, wa.FeedbackMaxToolsTried+1)
+
+			for i := range toolsTried {
+				toolsTried[i] = fmt.Sprintf("mlwh_tool_%d", i)
+			}
+
+			toolsTried[1] = strings.Repeat("t", 200)
+
+			res := callTool(t, cs, feedbackToolName, map[string]any{
+				"category":     "agent_mistake",
+				"description":  "x",
+				"user_request": userRequest,
+				"tools_tried":  toolsTried,
+			})
+			So(res.IsError, ShouldBeTrue)
+			So(firstTextContent(res), ShouldStartWith, "feedback_too_large: ")
+
+			body := lastFeedbackBody(t, stub)
+			So(body["user_request"], ShouldEqual, userRequest)
+			So(body["tools_tried"], ShouldResemble, toolsTried)
+		})
 	})
 
 	Convey("B2.7: a 300-byte server version is truncated to its first 256 bytes", t, func() {
