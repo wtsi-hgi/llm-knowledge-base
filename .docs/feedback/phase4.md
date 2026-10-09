@@ -35,5 +35,5 @@ real `core.New`, call the tool over in-memory transports, and assert
 `transport` and `mcp_server_version` in the stub body. Covers A2 acceptance
 test 3; tests 1 and 2 are covered in item 3.2.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed

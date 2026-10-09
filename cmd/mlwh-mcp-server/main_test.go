@@ -28,6 +28,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"sync"
 	"testing"
@@ -40,6 +44,8 @@ import (
 
 	. "github.com/smartystreets/goconvey/convey"
 )
+
+var errCapturedCoreOptions = errors.New("core options captured")
 
 // TestRunVersionFlag exercises Story G4: `mlwh-mcp-server --version` prints the
 // server version and the targeted MLWH API version to stdout and exits 0 without
@@ -392,6 +398,45 @@ func TestMaxToolResultBytesConfig(t *testing.T) {
 	})
 }
 
+// callMinimalFeedbackThrough runs a real core server built from opts over
+// in-memory transports and calls mlwh_provide_feedback with only the required
+// fields, failing the test unless the call succeeds.
+func callMinimalFeedbackThrough(t *testing.T, opts core.Options) {
+	t.Helper()
+
+	srv, err := core.New(opts)
+	if err != nil {
+		t.Fatalf("core.New() returned error: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+
+	go func() { _ = srv.Run(ctx, serverTransport) }()
+
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "0.0.0"}, nil)
+
+	session, err := client.Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatalf("client Connect() returned error: %v", err)
+	}
+	defer func() { _ = session.Close() }()
+
+	res, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "mlwh_provide_feedback",
+		Arguments: map[string]any{"category": "other", "description": "x"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool() returned error: %v", err)
+	}
+
+	if res.IsError {
+		t.Fatalf("feedback call failed: %+v", res.Content)
+	}
+}
+
 type testCmdProvider struct{}
 
 func (testCmdProvider) Name() string { return "test" }
@@ -453,5 +498,76 @@ func TestServeHTTPUsesSignalNotifyContext(t *testing.T) {
 		So(settled, ShouldBeTrue)
 		So(err, ShouldBeNil)
 		So(stopCalls, ShouldEqual, 1)
+	})
+}
+
+// TestServeWiresServerInfo exercises A2 acceptance test 3: serve builds the
+// MLWH provider with the server version and the resolved transport, so a
+// feedback report submitted through it carries both.
+func TestServeWiresServerInfo(t *testing.T) {
+	Convey("Given a stub MLWH that stores feedback", t, func() {
+		bodies := make(chan map[string]any, 1)
+		stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var body map[string]any
+			if r.Method != http.MethodPost || r.URL.Path != "/feedback" ||
+				json.NewDecoder(r.Body).Decode(&body) != nil {
+				http.NotFound(w, r)
+
+				return
+			}
+
+			bodies <- body
+
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(wa.FeedbackReceipt{ID: 7, CreatedAt: "2026-10-01T12:00:00Z"})
+		}))
+
+		t.Setenv("MLWH_BASE_URL", stub.URL)
+		t.Setenv("MLWH_HTTP_ADDR", "")
+
+		var captured core.Options
+		previousNewCoreServer := newCoreServer
+		newCoreServer = func(opts core.Options) (coreServer, error) {
+			captured = opts
+
+			return nil, errCapturedCoreOptions
+		}
+
+		Reset(func() {
+			newCoreServer = previousNewCoreServer
+			stub.Close()
+		})
+
+		submit := func(args []string) map[string]any {
+			cfg, _, err := parseArgs(args)
+			So(err, ShouldBeNil)
+			So(serve(cfg), ShouldEqual, errCapturedCoreOptions)
+
+			callMinimalFeedbackThrough(t, captured)
+
+			select {
+			case body := <-bodies:
+				return body
+			case <-time.After(3 * time.Second):
+				t.Fatal("stub received no feedback")
+
+				return nil
+			}
+		}
+
+		Convey("A2.3: with --http 127.0.0.1:0 the report carries transport http and the server version", func() {
+			body := submit([]string{"--http", "127.0.0.1:0"})
+
+			So(body["transport"], ShouldEqual, "http")
+			So(body["mcp_server_version"], ShouldEqual, core.ServerVersion)
+		})
+
+		Convey("A2.3: without --http the report carries transport stdio and the server version", func() {
+			body := submit(nil)
+
+			So(body["transport"], ShouldEqual, "stdio")
+			So(body["mcp_server_version"], ShouldEqual, core.ServerVersion)
+		})
 	})
 }
