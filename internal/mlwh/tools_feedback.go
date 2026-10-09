@@ -237,7 +237,7 @@ func (p *provider) provideFeedback(
 	return nil, receipt, nil
 }
 
-// feedbackSubmission copies in and attaches the metadata below.
+// feedbackSubmission copies in and attaches the server's metadata.
 //
 // The agent fields pass through unmodified, so wa alone enforces their caps.
 // The attached server version, MLWH API version, transport, handshake client
