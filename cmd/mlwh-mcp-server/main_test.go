@@ -534,8 +534,12 @@ func TestServeWiresServerInfo(t *testing.T) {
 			return nil, errCapturedCoreOptions
 		}
 
+		previousServerVersion := core.ServerVersion
+		core.ServerVersion = "9.9.9-test"
+
 		Reset(func() {
 			newCoreServer = previousNewCoreServer
+			core.ServerVersion = previousServerVersion
 			stub.Close()
 		})
 
@@ -560,14 +564,14 @@ func TestServeWiresServerInfo(t *testing.T) {
 			body := submit([]string{"--http", "127.0.0.1:0"})
 
 			So(body["transport"], ShouldEqual, "http")
-			So(body["mcp_server_version"], ShouldEqual, core.ServerVersion)
+			So(body["mcp_server_version"], ShouldEqual, "9.9.9-test")
 		})
 
 		Convey("A2.3: without --http the report carries transport stdio and the server version", func() {
 			body := submit(nil)
 
 			So(body["transport"], ShouldEqual, "stdio")
-			So(body["mcp_server_version"], ShouldEqual, core.ServerVersion)
+			So(body["mcp_server_version"], ShouldEqual, "9.9.9-test")
 		})
 	})
 }
