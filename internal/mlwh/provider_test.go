@@ -38,6 +38,8 @@ import (
 	wa "github.com/wtsi-hgi/wa/mlwh"
 
 	. "github.com/smartystreets/goconvey/convey"
+
+	"github.com/wtsi-hgi/llm-knowledge-base/internal/core"
 )
 
 // fullSurfaceTools is the full set of typed MLWH tools the provider registers:
@@ -212,6 +214,40 @@ func TestProviderNew(t *testing.T) {
 				_, ok := toolByName(t, cs, "mlwh_search_samples")
 				So(ok, ShouldBeTrue)
 			})
+		})
+	})
+
+	Convey("A2: New records the server info later attached to feedback reports", t, func() {
+		cfg := wa.RemoteConfig{BaseURL: "http://stub.example"}
+
+		Convey("with no options it defaults to core.ServerVersion as read at construction and stdio", func() {
+			original := core.ServerVersion
+			core.ServerVersion = "9.9.9-test"
+			defer func() { core.ServerVersion = original }()
+
+			built, err := New(cfg)
+			So(err, ShouldBeNil)
+
+			p, ok := built.(*provider)
+			So(ok, ShouldBeTrue)
+			So(p.serverVersion, ShouldEqual, "9.9.9-test")
+			So(p.transport, ShouldEqual, "stdio")
+		})
+
+		Convey("WithServerInfo overrides both the server version and the transport", func() {
+			built, err := New(cfg, WithServerInfo("0.4.0", "http"))
+			So(err, ShouldBeNil)
+
+			p, ok := built.(*provider)
+			So(ok, ShouldBeTrue)
+			So(p.serverVersion, ShouldEqual, "0.4.0")
+			So(p.transport, ShouldEqual, "http")
+		})
+
+		Convey("options do not bypass the base URL requirement", func() {
+			built, err := New(wa.RemoteConfig{}, WithServerInfo("0.4.0", "http"))
+			So(err, ShouldEqual, ErrBaseURLRequired)
+			So(built, ShouldBeNil)
 		})
 	})
 }

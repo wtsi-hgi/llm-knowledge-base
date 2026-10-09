@@ -36,8 +36,8 @@ fields, defaulting to `core.ServerVersion` and `"stdio"`. Change `New` to
 compile unchanged. A2 acceptance tests 1 and 2 need the tool to submit, so
 they are written in item 3.2. Test 3 (main wiring) is phase 4.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 #### Item 2.2: B2 - Harness request recording [parallel with 2.1]
 
@@ -48,8 +48,8 @@ Extend `recordedRequest` in `internal/mlwh/harness_test.go` with
 request the stub receives. Existing tests must pass unchanged. The B2
 acceptance tests that use these fields are written in item 3.2.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 For parallel batch items, use separate subagents per item.
 Launch review subagents using the `go-reviewer` skill
