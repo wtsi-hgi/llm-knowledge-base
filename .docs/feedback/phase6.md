@@ -31,5 +31,5 @@ Fix any lint finding or failure at its root cause. Confirm `go.mod` still
 requires `github.com/wtsi-hgi/wa v0.10.0` with no replace directive and
 that `internal/core/` has no changes on this branch.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
