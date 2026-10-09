@@ -79,7 +79,7 @@ func TestFeedbackToolB1Registration(t *testing.T) {
 			So(missing, ShouldBeEmpty)
 		})
 
-		Convey("B1.2: the input schema requires category and description, is closed, and enumerates wa's categories in order", func() {
+		Convey("B1.2: the input schema requires category and description, is closed, enumerates wa's categories in order, and states wa's caps", func() {
 			schema, ok := tool.InputSchema.(map[string]any)
 			So(ok, ShouldBeTrue)
 			So(schema["type"], ShouldEqual, "object")
@@ -93,6 +93,17 @@ func TestFeedbackToolB1Registration(t *testing.T) {
 			category, ok := properties["category"].(map[string]any)
 			So(ok, ShouldBeTrue)
 			So(category["enum"], ShouldResemble, feedbackCategoryStrings())
+
+			So(propertyDescription(properties, "description"), ShouldContainSubstring,
+				fmt.Sprintf("at most %d bytes", wa.FeedbackMaxDescriptionBytes))
+
+			userRequest := propertyDescription(properties, "user_request")
+			So(userRequest, ShouldContainSubstring, "verbatim")
+			So(userRequest, ShouldContainSubstring, fmt.Sprintf("at most %d bytes", wa.FeedbackMaxUserRequestBytes))
+
+			So(propertyDescription(properties, "tools_tried"), ShouldContainSubstring,
+				fmt.Sprintf("at most %d items of at most %d bytes each",
+					wa.FeedbackMaxToolsTried, wa.FeedbackMaxToolNameBytes))
 		})
 
 		Convey("B1.3: the category description lists each value with wa's description", func() {
@@ -163,6 +174,15 @@ func feedbackCategoryStrings() []any {
 	}
 
 	return values
+}
+
+// propertyDescription returns the description of the named input schema
+// property, or "" if it has none.
+func propertyDescription(properties map[string]any, name string) string {
+	property, _ := properties[name].(map[string]any)
+	description, _ := property["description"].(string)
+
+	return description
 }
 
 func TestFeedbackToolB2Submission(t *testing.T) {
