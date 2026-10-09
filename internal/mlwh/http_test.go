@@ -174,6 +174,16 @@ func TestMLWHHTTPFeedbackUserAgent(t *testing.T) {
 			So(utf8.ValidString(got), ShouldBeTrue)
 			So(got, ShouldEqual, userAgent[:255])
 		})
+
+		Convey("B2.5: a 200-byte User-Agent of invalid UTF-8 reaches wa as valid UTF-8 within 256 bytes", func() {
+			userAgent := strings.Repeat("\xe9", 200)
+
+			got, ok := submitWithUserAgent(userAgent)["client_user_agent"].(string)
+			So(ok, ShouldBeTrue)
+			So(utf8.ValidString(got), ShouldBeTrue)
+			So(len(got), ShouldBeLessThanOrEqualTo, wa.FeedbackMaxMetaBytes)
+			So(got, ShouldStartWith, "�")
+		})
 	})
 }
 

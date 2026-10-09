@@ -148,9 +148,14 @@ func feedbackInputSchema() map[string]any {
 	}
 }
 
-// truncateFeedbackMeta returns s cut to at most wa.FeedbackMaxMetaBytes bytes,
-// backing off to the start of a UTF-8 rune so a multi-byte rune is never split.
+// truncateFeedbackMeta returns s as valid UTF-8 cut to at most
+// wa.FeedbackMaxMetaBytes bytes. Each run of invalid bytes (such as Latin-1
+// obs-text in an HTTP User-Agent) first becomes one U+FFFD, as JSON encoding
+// would otherwise expand every invalid byte to a 3-byte U+FFFD after the cut.
+// The cut then backs off to the start of a rune so a multi-byte rune is never
+// split, so the string wa decodes is never over its cap.
 func truncateFeedbackMeta(s string) string {
+	s = strings.ToValidUTF8(s, "\uFFFD")
 	if len(s) <= wa.FeedbackMaxMetaBytes {
 		return s
 	}
@@ -237,9 +242,9 @@ func (p *provider) provideFeedback(
 // The agent fields pass through unmodified, so wa alone enforces their caps.
 // The attached server version, MLWH API version, transport, handshake client
 // name/version (stdio), and HTTP User-Agent are each truncated to
-// wa.FeedbackMaxMetaBytes, so the server's own context never causes a 413. A
-// request without a session, initialize params, client info, or HTTP extras
-// leaves the matching client fields empty.
+// wa.FeedbackMaxMetaBytes after invalid UTF-8 is replaced, so the server's own
+// context never causes a 413. A request without a session, initialize params,
+// client info, or HTTP extras leaves the matching client fields empty.
 func (p *provider) feedbackSubmission(req *mcp.CallToolRequest, in provideFeedbackInput) wa.FeedbackSubmission {
 	sub := wa.FeedbackSubmission{
 		Category:         wa.FeedbackCategory(in.Category),
