@@ -332,6 +332,21 @@ func TestFeedbackToolA2ServerInfo(t *testing.T) {
 			So(body["transport"], ShouldEqual, "stdio")
 		})
 
+		Convey("A2.1: New(cfg) with no options reports a non-default core.ServerVersion", func() {
+			original := core.ServerVersion
+			core.ServerVersion = "9.9.9-test"
+			defer func() { core.ServerVersion = original }()
+
+			cs, cleanup := runMLWHServerWithClient(t, stub)
+			defer cleanup()
+
+			submitMinimalFeedback(t, cs)
+
+			body := lastFeedbackBody(t, stub)
+			So(body["mcp_server_version"], ShouldEqual, "9.9.9-test")
+			So(body["transport"], ShouldEqual, "stdio")
+		})
+
 		Convey("A2.2: WithServerInfo sets the reported server version and transport", func() {
 			cs, cleanup := runMLWHServerWithClientOptions(t, stub, core.Options{}, WithServerInfo("0.4.0", "http"))
 			defer cleanup()
