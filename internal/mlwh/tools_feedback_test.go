@@ -432,6 +432,7 @@ func TestFeedbackToolB3StructuredErrors(t *testing.T) {
 			So(text, ShouldContainSubstring, "feedback is disabled on this server")
 			So(text, ShouldEndWith, " (feedback is disabled on the wa server; "+
 				"tell the user it could not be reported; do not retry)")
+			So(stub.requestCount(), ShouldEqual, 1)
 		})
 
 		Convey("B3.2: a 404 text body is feedback_unsupported naming MLWH API 1.9.0", func() {
@@ -441,6 +442,7 @@ func TestFeedbackToolB3StructuredErrors(t *testing.T) {
 			So(text, ShouldStartWith, "feedback_unsupported: ")
 			So(text, ShouldEndWith, " (the wa server has no feedback endpoint at this URL: "+
 				"it predates MLWH API 1.9.0 or is secured; tell the user; do not retry)")
+			So(stub.requestCount(), ShouldEqual, 1)
 		})
 
 		Convey("B3.3: a 401 is feedback_unauthorized ending with its parenthesised do not retry next step", func() {
@@ -450,6 +452,7 @@ func TestFeedbackToolB3StructuredErrors(t *testing.T) {
 			So(text, ShouldStartWith, "feedback_unauthorized: ")
 			So(text, ShouldEndWith, " (the wa server requires authentication, which this MCP server does not support; "+
 				"tell the user; do not retry)")
+			So(stub.requestCount(), ShouldEqual, 1)
 		})
 
 		Convey("B3.4: a 413 is feedback_too_large keeping wa's message and asking to resubmit once", func() {
@@ -460,6 +463,7 @@ func TestFeedbackToolB3StructuredErrors(t *testing.T) {
 			So(text, ShouldStartWith, "feedback_too_large: ")
 			So(text, ShouldContainSubstring, "description exceeds 16384 bytes")
 			So(text, ShouldEndWith, " (shorten description, user_request, or tools_tried and resubmit once)")
+			So(stub.requestCount(), ShouldEqual, 1)
 		})
 
 		Convey("B3.5: a 400 bad_request envelope is feedback_invalid keeping wa's message and asking to resubmit once", func() {
@@ -469,12 +473,14 @@ func TestFeedbackToolB3StructuredErrors(t *testing.T) {
 			So(text, ShouldStartWith, "feedback_invalid: ")
 			So(text, ShouldContainSubstring, "description is required")
 			So(text, ShouldEndWith, " (fix category or description and resubmit once)")
+			So(stub.requestCount(), ShouldEqual, 1)
 		})
 
 		Convey("B3.5: a 400 without a wa envelope is feedback_unavailable", func() {
 			respondFeedbackText(stub, http.StatusBadRequest, "Client sent an HTTP request to an HTTPS server.\n")
 
 			So(feedbackErrorText(t, cs), ShouldStartWith, "feedback_unavailable: ")
+			So(stub.requestCount(), ShouldEqual, 1)
 		})
 
 		Convey("B3.6: a 500 internal_error envelope is feedback_unavailable with do not retry repeatedly", func() {
@@ -483,6 +489,7 @@ func TestFeedbackToolB3StructuredErrors(t *testing.T) {
 			text := feedbackErrorText(t, cs)
 			So(text, ShouldStartWith, "feedback_unavailable: ")
 			So(text, ShouldContainSubstring, "do not retry repeatedly")
+			So(stub.requestCount(), ShouldEqual, 1)
 		})
 
 		Convey("B3.6: a 503 cache_never_synced envelope is feedback_unavailable keeping wa's message", func() {
@@ -491,12 +498,14 @@ func TestFeedbackToolB3StructuredErrors(t *testing.T) {
 			text := feedbackErrorText(t, cs)
 			So(text, ShouldStartWith, "feedback_unavailable: ")
 			So(text, ShouldContainSubstring, "cache never synced")
+			So(stub.requestCount(), ShouldEqual, 1)
 		})
 
 		Convey("B3.6: a 201 whose body is not JSON is feedback_unavailable", func() {
 			respondFeedbackText(stub, http.StatusCreated, "not json")
 
 			So(feedbackErrorText(t, cs), ShouldStartWith, "feedback_unavailable: ")
+			So(stub.requestCount(), ShouldEqual, 1)
 		})
 
 		Convey("B3.6: an unreachable wa server is feedback_unavailable", func() {
