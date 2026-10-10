@@ -64,10 +64,10 @@ gives `feedback_unavailable` with no wa needed.
   (`$STATE_HOME/.wa-mlwh-server.token` in verify-wa's `stack.env`).
 - Ids keep counting within one wa launch. Find reports by receipt id, never
   by position.
-- wa v0.10.0's error detail repeats the sentinel text
-  (`mlwh: feedback is disabled on this server: feedback is disabled on this
-  server: mlwh: feedback is disabled on this server`). That comes from wa's
-  `RemoteClient`, not this server; match on substrings.
+- The error detail comes from the wa module's `RemoteClient`, not this
+  server. Since wa v0.10.1 it states `feedback is disabled on this server`
+  once and no feedback error mentions `upstream database impaired`; a
+  repeated sentinel means an older wa module is required in `go.mod`.
 - `remote_addr` is the MCP server's address, so always 127.0.0.1 here.
 - A feedback-off serve that dies silently: see verify-wa's
   `mlwh-feedback-submit.md` gotchas (exit 1 with empty stderr).

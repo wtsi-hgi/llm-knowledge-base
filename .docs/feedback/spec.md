@@ -26,7 +26,9 @@ two disagree, the wa spec wins.
 ### Authority and dependency
 
 - `go.mod` and `go.sum` require `github.com/wtsi-hgi/wa v0.10.0`, with no
-  replace directive. `wa.APIVersion` is `1.9.0`.
+  replace directive. `wa.APIVersion` is `1.9.0`. The repo has since moved to
+  `v0.10.1` (same API version), whose `SubmitFeedback` errors state each
+  sentinel once and never wrap `ErrUpstreamImpaired`.
 - Release order: wa tags `v0.10.0` first, then this repo bumps.
 - Upstream symbols used (package `github.com/wtsi-hgi/wa/mlwh`, imported as
   `wa`):
@@ -69,12 +71,12 @@ var wa.ErrFeedbackDisabled, wa.ErrFeedbackInvalid, wa.ErrFeedbackTooLarge,
 | ------------------------------------------------------------------- | ------------------------------------------------- |
 | 201                                                                 | none (receipt)                                    |
 | 400 with wa envelope code `bad_request`                             | `ErrFeedbackInvalid`                              |
-| 400 without it (e.g. plain-text 400 from `http://` to a secured wa) | `ErrUpstreamImpaired`                             |
+| 400 without it (e.g. plain-text 400 from `http://` to a secured wa) | none                                              |
 | 401 (secured wa, base URL ends `/rest/v1/auth`)                     | `ErrFeedbackUnauthorized`                         |
 | 404 (wa older than API 1.9.0, or secured wa at its root URL)        | `ErrFeedbackUnsupported`                          |
 | 413 (any body)                                                      | `ErrFeedbackTooLarge`                             |
 | 503 `feedback_disabled` (no feedback DB)                            | `ErrFeedbackDisabled`                             |
-| other status, transport failure, bad JSON                           | `ErrUpstreamImpaired` or unwrapped envelope error |
+| other status, transport failure, bad JSON                           | none (unwrapped envelope or decode error)         |
 
 - The feedback route is not a `wa.Registry` entry. `mlwh_call_endpoint`, its
   method enum, and the Registry/OpenAPI parity tests are unchanged.
@@ -97,7 +99,7 @@ var wa.ErrFeedbackDisabled, wa.ErrFeedbackInvalid, wa.ErrFeedbackTooLarge,
 ### Files
 
 ```text
-go.mod, go.sum                        wa v0.10.0
+go.mod, go.sum                        wa v0.10.0 (now v0.10.1)
 internal/mlwh/provider.go             Option, WithServerInfo, provider fields
 internal/mlwh/tools_feedback.go       tool, input schema, metadata, errors
 internal/mlwh/workflow.go             feedback guidance
@@ -398,8 +400,10 @@ table. It returns nil for nil.
 
 1. Given the stub replying 503 `{"code":"feedback_disabled","message":
    "feedback is disabled on this server"}`, then `IsError == true` and the
-   text starts with `feedback_disabled: ` and contains
-   `feedback is disabled on this server` and `do not retry`.
+   text starts with `feedback_disabled: `, contains
+   `feedback is disabled on this server` exactly once, and contains
+   `do not retry`. No text in tests 1 to 6 (except the closed stub) contains
+   `upstream database impaired`.
 2. Given 404 with text body `404 page not found`, then the text starts with
    `feedback_unsupported: ` and contains `1.9.0`.
 3. Given 401 with any body, then it starts with `feedback_unauthorized: `.
@@ -414,12 +418,12 @@ table. It returns nil for nil.
 6. Given 500 `{"code":"internal_error","message":"could not store
    feedback"}`, or 503 `{"code":"cache_never_synced","message":"cache never
    synced"}` (no feedback sentinel, wa C1.8), or 201 with body `not json`
-   (wa C1.10 maps it to `ErrUpstreamImpaired`), or a stub closed before the
-   call, then it starts with `feedback_unavailable: `. The 503 text also
-   contains `cache never synced`.
-7. Given `mapFeedbackError(nil)`, then nil. Given an error wrapping both
-   `ErrFeedbackDisabled` and `ErrUpstreamImpaired`, then the code is
-   `feedback_disabled`.
+   (a wa decode error), or a stub closed before the call, then it starts
+   with `feedback_unavailable: `. The 503 text also contains `cache never
+   synced`.
+7. Given `mapFeedbackError(nil)`, then nil. Given a hand-built error
+   wrapping both `ErrFeedbackDisabled` and `ErrUpstreamImpaired` (wa never
+   produces one), then the code is `feedback_disabled`.
 8. Given a stub `/feedback` handler that signals it started and blocks on
    `request.Context().Done()`, when the client ctx is cancelled after the
    signal, then `CallTool` returns within 5s with a nil result and
