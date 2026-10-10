@@ -35,9 +35,11 @@ import (
 	"net"
 	"net/http"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	. "github.com/smartystreets/goconvey/convey"
@@ -113,6 +115,106 @@ func callAllStudiesConcurrently(sessions ...*mcp.ClientSession) []allStudiesCall
 	}
 
 	return got
+}
+
+// userAgentRoundTripper sends every request through http.DefaultTransport with
+// its User-Agent replaced, standing in for an agent application's HTTP client.
+type userAgentRoundTripper struct {
+	userAgent string
+}
+
+func (rt userAgentRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	clone := req.Clone(req.Context())
+	clone.Header.Set("User-Agent", rt.userAgent)
+
+	return http.DefaultTransport.RoundTrip(clone)
+}
+
+func TestMLWHHTTPFeedbackUserAgent(t *testing.T) {
+	Convey("Given an HTTP MLWH server and a stub that stores feedback", t, func() {
+		stub := newStubMLWH(t)
+		respondFeedbackReceipt(stub)
+
+		endpoint, serverCleanup := runMLWHHTTPServer(t, stub)
+		defer serverCleanup()
+
+		submitWithUserAgent := func(userAgent string) map[string]any {
+			session, sessionCleanup := connectMLWHHTTPClientWith(t, endpoint, &http.Client{
+				Transport: userAgentRoundTripper{userAgent: userAgent},
+			})
+			defer sessionCleanup()
+
+			submitMinimalFeedback(t, session)
+
+			return lastFeedbackBody(t, stub)
+		}
+
+		Convey("B2.4: the client's User-Agent is the identity and no handshake client info is sent", func() {
+			body := submitWithUserAgent("agent-cli/1.2")
+
+			So(body["client_user_agent"], ShouldEqual, "agent-cli/1.2")
+			So(body, ShouldNotContainKey, "client_name")
+			So(body, ShouldNotContainKey, "client_version")
+		})
+
+		Convey("B2.5: a 300-byte ASCII User-Agent is cut to its first 256 bytes", func() {
+			userAgent := strings.Repeat("a", 300)
+			body := submitWithUserAgent(userAgent)
+
+			So(body["client_user_agent"], ShouldEqual, userAgent[:wa.FeedbackMaxMetaBytes])
+		})
+
+		Convey("B2.5: a 300-byte User-Agent of 3-byte runes is cut to 255 bytes of valid UTF-8", func() {
+			userAgent := strings.Repeat("€", 100)
+			So(len(userAgent), ShouldEqual, 300)
+
+			got, ok := submitWithUserAgent(userAgent)["client_user_agent"].(string)
+			So(ok, ShouldBeTrue)
+			So(len(got), ShouldEqual, 255)
+			So(utf8.ValidString(got), ShouldBeTrue)
+			So(got, ShouldEqual, userAgent[:255])
+		})
+
+		Convey("B2.5: a 200-byte User-Agent of invalid UTF-8 reaches wa as valid UTF-8 within 256 bytes", func() {
+			userAgent := strings.Repeat("\xe9", 200)
+
+			got, ok := submitWithUserAgent(userAgent)["client_user_agent"].(string)
+			So(ok, ShouldBeTrue)
+			So(utf8.ValidString(got), ShouldBeTrue)
+			So(len(got), ShouldBeLessThanOrEqualTo, wa.FeedbackMaxMetaBytes)
+			So(got, ShouldStartWith, "�")
+		})
+	})
+}
+
+// connectMLWHHTTPClientWith connects an MCP client to endpoint using
+// httpClient for every HTTP request; nil uses the SDK's default client.
+func connectMLWHHTTPClientWith(
+	t *testing.T,
+	endpoint string,
+	httpClient *http.Client,
+) (*mcp.ClientSession, func()) {
+	t.Helper()
+
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "0.0.0"}, nil)
+	transport := &mcp.StreamableClientTransport{
+		Endpoint:             endpoint,
+		HTTPClient:           httpClient,
+		DisableStandaloneSSE: true,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	session, err := client.Connect(ctx, transport, nil)
+	cancel()
+	if err != nil {
+		t.Fatalf("client Connect() returned error: %v", err)
+	}
+
+	cleanup := func() {
+		_ = session.Close()
+	}
+
+	return session, cleanup
 }
 
 func TestMLWHHTTPSurfaceMatchesInMemoryHarness(t *testing.T) {
@@ -378,24 +480,7 @@ func waitForMLWHHTTPStatus(t *testing.T, url string, status int, runErr <-chan e
 func connectMLWHHTTPClient(t *testing.T, endpoint string) (*mcp.ClientSession, func()) {
 	t.Helper()
 
-	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "0.0.0"}, nil)
-	transport := &mcp.StreamableClientTransport{
-		Endpoint:             endpoint,
-		DisableStandaloneSSE: true,
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	session, err := client.Connect(ctx, transport, nil)
-	cancel()
-	if err != nil {
-		t.Fatalf("client Connect() returned error: %v", err)
-	}
-
-	cleanup := func() {
-		_ = session.Close()
-	}
-
-	return session, cleanup
+	return connectMLWHHTTPClientWith(t, endpoint, nil)
 }
 
 func sortedToolMetadata(t *testing.T, cs *mcp.ClientSession) []*mcp.Tool {

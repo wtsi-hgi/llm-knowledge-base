@@ -184,7 +184,7 @@ func serve(cfg commandConfig) error {
 		return err
 	}
 
-	provider, err := mlwh.New(remoteCfg)
+	provider, err := mlwh.New(remoteCfg, mlwh.WithServerInfo(core.ServerVersion, string(cfg.Transport)))
 	if err != nil {
 		return err
 	}

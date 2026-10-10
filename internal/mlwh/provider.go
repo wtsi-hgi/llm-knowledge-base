@@ -185,7 +185,9 @@ func (c Config) ResolveMaxToolResultBytes(getenv func(string) string) (int, erro
 // provider is the MLWH core.Provider. It owns the remote client the tools
 // (added in later phases) query through; the core sees only the Provider seam.
 type provider struct {
-	client *wa.RemoteClient
+	client        *wa.RemoteClient
+	serverVersion string // default core.ServerVersion
+	transport     string // default "stdio"
 }
 
 // Name returns the stable provider identifier "mlwh", which keys this provider's
@@ -212,7 +214,8 @@ func (p *provider) APIVersion() string {
 // the global keyset run tools via registerRunTools, and the generic escape-hatch
 // tool via registerCallTool. The phase 6 availability tools are added by
 // registerAvailabilityTools. The phase 7 people tools are added by
-// registerPeopleTools. The workflow / endpoint-catalogue resource (Story G1) is
+// registerPeopleTools. The feedback tool (Story B1) is added by
+// registerFeedbackTool. The workflow / endpoint-catalogue resource (Story G1) is
 // added by registerWorkflowResource.
 func (p *provider) Register(_ context.Context, r core.Registrar) error {
 	if err := p.registerExportTool(r); err != nil {
@@ -251,6 +254,10 @@ func (p *provider) Register(_ context.Context, r core.Registrar) error {
 		return err
 	}
 
+	if err := p.registerFeedbackTool(r); err != nil {
+		return err
+	}
+
 	if err := p.registerCallTool(r); err != nil {
 		return err
 	}
@@ -265,8 +272,10 @@ func (p *provider) Register(_ context.Context, r core.Registrar) error {
 // New builds the MLWH provider from a resolved RemoteConfig (see Config.Resolve)
 // and returns it as a core.Provider. It is an error, ErrBaseURLRequired, for the
 // base URL to be empty. The wa remote client is constructed here but contacts no
-// server until a tool is invoked, so New performs no network I/O.
-func New(cfg wa.RemoteConfig) (core.Provider, error) {
+// server until a tool is invoked, so New performs no network I/O. Without
+// options the server version defaults to core.ServerVersion and the transport
+// to "stdio"; WithServerInfo overrides both.
+func New(cfg wa.RemoteConfig, opts ...Option) (core.Provider, error) {
 	if cfg.BaseURL == "" {
 		return nil, ErrBaseURLRequired
 	}
@@ -276,5 +285,27 @@ func New(cfg wa.RemoteConfig) (core.Provider, error) {
 		return nil, fmt.Errorf("mlwh: build remote client: %w", err)
 	}
 
-	return &provider{client: client}, nil
+	p := &provider{
+		client:        client,
+		serverVersion: core.ServerVersion,
+		transport:     "stdio",
+	}
+
+	for _, opt := range opts {
+		opt(p)
+	}
+
+	return p, nil
+}
+
+// Option configures the provider at construction.
+type Option func(*provider)
+
+// WithServerInfo sets the MCP server build version and transport name
+// ("stdio" or "http") attached to feedback reports.
+func WithServerInfo(serverVersion, transport string) Option {
+	return func(p *provider) {
+		p.serverVersion = serverVersion
+		p.transport = transport
+	}
 }

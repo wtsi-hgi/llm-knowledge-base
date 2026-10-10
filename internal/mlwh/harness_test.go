@@ -26,9 +26,11 @@
 package mlwh
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -52,14 +54,24 @@ import (
 // are hermetic: the stub is the only "server"; a live warehouse is never used.
 
 // recordedRequest captures one HTTP request the stub received, so a test can
-// assert the exact path and query parameters wa's RemoteClient sent (e.g. that
-// limit=5/offset=10 reached the stub) or assert that NO request was made.
+// assert the exact method, path, query parameters, headers, and body wa's
+// RemoteClient sent (e.g. that limit=5/offset=10 reached the stub, or that a
+// POST carried a JSON body) or assert that NO request was made.
 type recordedRequest struct {
+	// Method is the HTTP method, e.g. "GET" or "POST".
+	Method string
+
 	// Path is the request URL path, e.g. "/search/sample/mus".
 	Path string
 
 	// Query holds the decoded query parameters, e.g. {"limit":["5"]}.
 	Query url.Values
+
+	// Header is a copy of the request headers, e.g. Content-Type.
+	Header http.Header
+
+	// Body is the full request body; empty for requests without one.
+	Body []byte
 }
 
 // stubResponse is the canned reply the stub returns for one exact path. A
@@ -154,8 +166,16 @@ func (s *stubMLWH) respondError(path string, status int, code, msg string) {
 // test that wrongly expects a request still sees a clear failure rather than a
 // hang.
 func (s *stubMLWH) handle(w http.ResponseWriter, r *http.Request) {
+	body := s.readBody(r)
+
 	s.mu.Lock()
-	s.requests = append(s.requests, recordedRequest{Path: r.URL.Path, Query: r.URL.Query()})
+	s.requests = append(s.requests, recordedRequest{
+		Method: r.Method,
+		Path:   r.URL.Path,
+		Query:  r.URL.Query(),
+		Header: r.Header.Clone(),
+		Body:   body,
+	})
 	resp, ok := s.routes[r.URL.Path]
 	if !ok {
 		s.unmatched = append(s.unmatched, r.URL.Path)
@@ -189,6 +209,21 @@ func (s *stubMLWH) handle(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(resp.status)
 	_ = json.NewEncoder(w).Encode(resp.body)
+}
+
+// readBody reads the whole request body for recording and replaces r.Body with
+// a fresh reader over the same bytes, so a respondHandler route can still read
+// it. A read failure is reported as a test error rather than silently recording
+// a truncated body.
+func (s *stubMLWH) readBody(r *http.Request) []byte {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		s.t.Errorf("stub: reading request body for %s: %v", r.URL.Path, err)
+	}
+
+	r.Body = io.NopCloser(bytes.NewReader(body))
+
+	return body
 }
 
 func copyHeaders(dst, src http.Header) {
@@ -243,14 +278,32 @@ func runMLWHServerWithClient(t *testing.T, stub *stubMLWH) (*mcp.ClientSession, 
 	return runMLWHServerWithClientOptions(t, stub, core.Options{})
 }
 
+// runMLWHServerWithClientOptions is runMLWHServerWithClient with explicit core
+// options and optional provider options (e.g. WithServerInfo).
 func runMLWHServerWithClientOptions(
 	t *testing.T,
 	stub *stubMLWH,
 	opts core.Options,
+	providerOpts ...Option,
 ) (*mcp.ClientSession, func()) {
 	t.Helper()
 
-	provider, err := New(wa.RemoteConfig{BaseURL: stub.server.URL})
+	return runMLWHServerWithClientImplementation(t, stub,
+		&mcp.Implementation{Name: "test-client", Version: "0.0.0"}, opts, providerOpts...)
+}
+
+// runMLWHServerWithClientImplementation is runMLWHServerWithClientOptions with
+// the client's handshake Implementation (its name and version) set explicitly.
+func runMLWHServerWithClientImplementation(
+	t *testing.T,
+	stub *stubMLWH,
+	clientImpl *mcp.Implementation,
+	opts core.Options,
+	providerOpts ...Option,
+) (*mcp.ClientSession, func()) {
+	t.Helper()
+
+	provider, err := New(wa.RemoteConfig{BaseURL: stub.server.URL}, providerOpts...)
 	if err != nil {
 		t.Fatalf("mlwh.New() returned error: %v", err)
 	}
@@ -273,7 +326,7 @@ func runMLWHServerWithClientOptions(
 		runErr <- srv.Run(ctx, serverTransport)
 	}()
 
-	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "0.0.0"}, nil)
+	client := mcp.NewClient(clientImpl, nil)
 
 	clientSession, err := client.Connect(ctx, clientTransport, nil)
 	if err != nil {

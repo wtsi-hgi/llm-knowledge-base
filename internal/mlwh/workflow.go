@@ -42,7 +42,8 @@ const workflowResourceURI = "mlwh://workflow"
 // tool before the live endpoint catalogue. It also preserves the established
 // resolve -> detail -> expand path for questions without a direct route.
 const workflowGuidance = "# MLWH workflows\n\n" +
-	"This server bridges the read-only `wa mlwh` API. Prefer one cheap curated call " +
+	"This server bridges the `wa mlwh` API. Every tool is read-only except " +
+	"`mlwh_provide_feedback`, which sends a problem report upstream. Prefer one cheap curated call " +
 	"that preserves the upstream row grain. For identifiers without a direct route, " +
 	"**resolve** a raw identifier into " +
 	"a canonical `Match` (e.g. `mlwh_resolve_sample`, `mlwh_resolve_study`), fetch " +
@@ -125,6 +126,13 @@ const workflowGuidance = "# MLWH workflows\n\n" +
 	"across tables) for cache currency and as-of caveats; `high_water` is only a " +
 	"source-progress watermark that can lag when the source is unchanged, so never report " +
 	"it as \"synced through\" or treat it as refresh currency.\n\n" +
+	"Feedback: call `mlwh_provide_feedback` on your own initiative, without asking the user, " +
+	"when you could not answer a question (`could_not_answer`), made a mistake " +
+	"(`agent_mistake`), found that no endpoint could answer the question (`no_endpoint`), the user " +
+	"was unhappy with the answer (`user_unhappy`), or hit any other problem (`other`). " +
+	"Send at most one report per distinct problem. Afterwards, tell the user briefly that " +
+	"you reported it to the server admin. If it fails with `feedback_disabled`, " +
+	"`feedback_unsupported`, or `feedback_unauthorized`, do not retry.\n\n" +
 	"Use `mlwh_call_endpoint` only when no curated workflow covers the question. The full, " +
 	"always-current `wa.EndpointReference()` catalogue follows; choose a Registry Method " +
 	"from the generic tool's input enum, then use the catalogue for its path and query " +

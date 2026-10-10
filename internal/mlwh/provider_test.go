@@ -119,6 +119,9 @@ var fullSurfaceTools = []string{
 
 	// E: generic escape hatch (1).
 	"mlwh_call_endpoint",
+
+	// Feedback B1: problem reports to the server admin (1).
+	"mlwh_provide_feedback",
 }
 
 // i1HeadlineTools are the eight tools spec story I1.1 explicitly names. They are
@@ -214,11 +217,17 @@ func TestProviderNew(t *testing.T) {
 			})
 		})
 	})
+
+	Convey("A2: provider options do not bypass the base URL requirement", t, func() {
+		built, err := New(wa.RemoteConfig{}, WithServerInfo("0.4.0", "http"))
+		So(err, ShouldEqual, ErrBaseURLRequired)
+		So(built, ShouldBeNil)
+	})
 }
 
-func TestWAAPI18Contract(t *testing.T) {
-	Convey("A1.1: Given the updated module, provider construction targets wa API 1.8.1", t, func() {
-		So(wa.APIVersion, ShouldEqual, "1.8.1")
+func TestWAAPI19Contract(t *testing.T) {
+	Convey("A1.1: Given the updated module, provider construction targets wa API 1.9.0", t, func() {
+		So(wa.APIVersion, ShouldEqual, "1.9.0")
 
 		provider, err := New(wa.RemoteConfig{BaseURL: "http://stub.example"})
 		So(err, ShouldBeNil)
@@ -233,6 +242,18 @@ func TestWAAPI18Contract(t *testing.T) {
 		So(hasCountStudyManifest, ShouldBeFalse)
 
 		So(wa.EndpointReference(), ShouldNotContainSubstring, "/manifest")
+	})
+
+	Convey("A1.3: Given wa.Registry, the write-only feedback endpoint is not a Registry entry", t, func() {
+		feedbackEntries := 0
+
+		for _, entry := range wa.Registry {
+			if entry.Path == "/feedback" {
+				feedbackEntries++
+			}
+		}
+
+		So(feedbackEntries, ShouldEqual, 0)
 	})
 
 	Convey("Given wa.Registry, the A1 methods expose upstream endpoint documentation", t, func() {

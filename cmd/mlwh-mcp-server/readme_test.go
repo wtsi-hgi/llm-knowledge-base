@@ -106,7 +106,7 @@ func TestREADMEHTTPDocs(t *testing.T) {
 }
 
 func TestREADMEAPIEighteenDocs(t *testing.T) {
-	Convey("Given the complete public README for MLWH API 1.8.1", t, func() {
+	Convey("Given the complete public README for MLWH API 1.9.0", t, func() {
 		readmeBytes, err := os.ReadFile("../../README.md")
 		So(err, ShouldBeNil)
 
@@ -137,9 +137,10 @@ func TestREADMEAPIEighteenDocs(t *testing.T) {
 			So(readme, ShouldNotContainSubstring, "manifest")
 		})
 
-		Convey("F2.2: version prose and the version example use API 1.8.1 only", func() {
-			So(prose, ShouldContainSubstring, "currently mlwh api 1.8.1")
-			So(readme, ShouldContainSubstring, "# mlwh api version 1.8.1")
+		Convey("F2.2: version prose and the version example use API 1.9.0 only", func() {
+			So(prose, ShouldContainSubstring, "currently mlwh api 1.9.0")
+			So(readme, ShouldContainSubstring, "# mlwh api version 1.9.0")
+			So(readme, ShouldNotContainSubstring, "1.8.1")
 			So(readme, ShouldNotContainSubstring, "1.7.0")
 		})
 
@@ -158,7 +159,7 @@ func TestREADMEAPIEighteenDocs(t *testing.T) {
 			So(prose, ShouldContainSubstring, "not a substring mode")
 		})
 
-		Convey("F2.5: the catalogue names every curated tool added for API 1.8.1", func() {
+		Convey("F2.5: the catalogue names every curated tool added for API 1.8", func() {
 			tools := []string{
 				"mlwh_export",
 				"mlwh_latest_data_for_study",
@@ -207,7 +208,7 @@ func TestREADMEAPIEighteenDocs(t *testing.T) {
 			So(caveats, ShouldContainSubstring, "`mlwh_freshness` is the cache as-of source")
 		})
 
-		Convey("the prompt cookbook covers every new API 1.8.1 question family", func() {
+		Convey("the prompt cookbook covers every new API 1.8 question family", func() {
 			examples := []string{
 				"find deliverable wgs mouse samples",
 				"export users and their roles",
@@ -222,6 +223,37 @@ func TestREADMEAPIEighteenDocs(t *testing.T) {
 			}
 
 			So(missingREADMETerms(questions, examples), ShouldBeEmpty)
+		})
+	})
+}
+
+func TestREADMEFeedbackDocs(t *testing.T) {
+	Convey("Given the README contents for the feedback tool", t, func() {
+		readmeBytes, err := os.ReadFile("../../README.md")
+		So(err, ShouldBeNil)
+
+		readme := string(readmeBytes)
+		exposes := singleSpaced(readmeSection(readme, "## What the server exposes", "## Development"))
+		intro := singleSpaced(readmeSection(readme, "# MLWH MCP Server", "## Requirements"))
+
+		So(exposes, ShouldNotBeEmpty)
+		So(intro, ShouldNotBeEmpty)
+
+		Convey("C2.1: the exposed surface names the tool, its wa flag, admin page, and minimum wa version", func() {
+			So(exposes, ShouldContainSubstring, "mlwh_provide_feedback")
+			So(exposes, ShouldContainSubstring, "--feedback-db")
+			So(exposes, ShouldContainSubstring, "/feedback")
+			So(exposes, ShouldContainSubstring, "v0.10.0")
+		})
+
+		Convey("C2.2: the exposed surface states its limits, that it writes upstream, and what wa records", func() {
+			So(exposes, ShouldContainSubstring, "does not work against a secured")
+			So(exposes, ShouldContainSubstring, "the only tool that writes upstream")
+			So(exposes, ShouldContainSubstring, "wa records the MCP host address")
+		})
+
+		Convey("C2.3: the intro names the feedback tool as the one that sends data upstream", func() {
+			So(intro, ShouldContainSubstring, "mlwh_provide_feedback")
 		})
 	})
 }
