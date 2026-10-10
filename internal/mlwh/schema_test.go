@@ -264,7 +264,7 @@ func TestOutputSchemaFor(t *testing.T) {
 }
 
 func TestOpenAPIComponentSchemaParity(t *testing.T) {
-	Convey("A2.3: every v0.8.0 OpenAPI component builds an object MCP schema with descriptions and no refs", t, func() {
+	Convey("A2.3: every component in the pinned wa OpenAPI document builds an object MCP schema with descriptions and no refs", t, func() {
 		schemas, err := componentSchemas()
 		So(err, ShouldBeNil)
 
