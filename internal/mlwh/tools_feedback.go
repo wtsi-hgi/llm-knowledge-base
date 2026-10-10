@@ -72,8 +72,10 @@ type feedbackErrorCode struct {
 }
 
 // feedbackErrorCodes lists the feedback sentinels in mapping-precedence order.
-// Many feedback errors also wrap wa.ErrUpstreamImpaired, so the feedback
-// sentinels are checked first and anything else is feedback_unavailable.
+// wa's SubmitFeedback wraps at most one of them, and never
+// wa.ErrUpstreamImpaired, so the order only makes the mapping deterministic
+// should an error ever wrap more than one. Anything else is
+// feedback_unavailable.
 var feedbackErrorCodes = []feedbackErrorCode{
 	{
 		sentinel: wa.ErrFeedbackDisabled,

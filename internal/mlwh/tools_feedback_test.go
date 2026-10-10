@@ -429,7 +429,8 @@ func TestFeedbackToolB3StructuredErrors(t *testing.T) {
 
 			text := firstTextContent(res)
 			So(text, ShouldStartWith, "feedback_disabled: ")
-			So(text, ShouldContainSubstring, "feedback is disabled on this server")
+			So(strings.Count(text, "feedback is disabled on this server"), ShouldEqual, 1)
+			So(text, ShouldNotContainSubstring, wa.ErrUpstreamImpaired.Error())
 			So(text, ShouldEndWith, " (feedback is disabled on the wa server; "+
 				"tell the user it could not be reported; do not retry)")
 			So(stub.requestCount(), ShouldEqual, 1)
@@ -440,6 +441,7 @@ func TestFeedbackToolB3StructuredErrors(t *testing.T) {
 
 			text := feedbackErrorText(t, cs)
 			So(text, ShouldStartWith, "feedback_unsupported: ")
+			So(text, ShouldNotContainSubstring, wa.ErrUpstreamImpaired.Error())
 			So(text, ShouldEndWith, " (the wa server has no feedback endpoint at this URL: "+
 				"it predates MLWH API 1.9.0 or is secured; tell the user; do not retry)")
 			So(stub.requestCount(), ShouldEqual, 1)
@@ -450,6 +452,7 @@ func TestFeedbackToolB3StructuredErrors(t *testing.T) {
 
 			text := feedbackErrorText(t, cs)
 			So(text, ShouldStartWith, "feedback_unauthorized: ")
+			So(text, ShouldNotContainSubstring, wa.ErrUpstreamImpaired.Error())
 			So(text, ShouldEndWith, " (the wa server requires authentication, which this MCP server does not support; "+
 				"tell the user; do not retry)")
 			So(stub.requestCount(), ShouldEqual, 1)
@@ -461,6 +464,7 @@ func TestFeedbackToolB3StructuredErrors(t *testing.T) {
 
 			text := feedbackErrorText(t, cs)
 			So(text, ShouldStartWith, "feedback_too_large: ")
+			So(text, ShouldNotContainSubstring, wa.ErrUpstreamImpaired.Error())
 			So(text, ShouldContainSubstring, "description exceeds 16384 bytes")
 			So(text, ShouldEndWith, " (shorten description, user_request, or tools_tried and resubmit once)")
 			So(stub.requestCount(), ShouldEqual, 1)
@@ -471,6 +475,7 @@ func TestFeedbackToolB3StructuredErrors(t *testing.T) {
 
 			text := feedbackErrorText(t, cs)
 			So(text, ShouldStartWith, "feedback_invalid: ")
+			So(text, ShouldNotContainSubstring, wa.ErrUpstreamImpaired.Error())
 			So(text, ShouldContainSubstring, "description is required")
 			So(text, ShouldEndWith, " (fix category or description and resubmit once)")
 			So(stub.requestCount(), ShouldEqual, 1)
@@ -479,7 +484,9 @@ func TestFeedbackToolB3StructuredErrors(t *testing.T) {
 		Convey("B3.5: a 400 without a wa envelope is feedback_unavailable", func() {
 			respondFeedbackText(stub, http.StatusBadRequest, "Client sent an HTTP request to an HTTPS server.\n")
 
-			So(feedbackErrorText(t, cs), ShouldStartWith, "feedback_unavailable: ")
+			text := feedbackErrorText(t, cs)
+			So(text, ShouldStartWith, "feedback_unavailable: ")
+			So(text, ShouldNotContainSubstring, wa.ErrUpstreamImpaired.Error())
 			So(stub.requestCount(), ShouldEqual, 1)
 		})
 
@@ -489,6 +496,7 @@ func TestFeedbackToolB3StructuredErrors(t *testing.T) {
 			text := feedbackErrorText(t, cs)
 			So(text, ShouldStartWith, "feedback_unavailable: ")
 			So(text, ShouldContainSubstring, "do not retry repeatedly")
+			So(text, ShouldNotContainSubstring, wa.ErrUpstreamImpaired.Error())
 			So(stub.requestCount(), ShouldEqual, 1)
 		})
 
@@ -498,13 +506,16 @@ func TestFeedbackToolB3StructuredErrors(t *testing.T) {
 			text := feedbackErrorText(t, cs)
 			So(text, ShouldStartWith, "feedback_unavailable: ")
 			So(text, ShouldContainSubstring, "cache never synced")
+			So(text, ShouldNotContainSubstring, wa.ErrUpstreamImpaired.Error())
 			So(stub.requestCount(), ShouldEqual, 1)
 		})
 
 		Convey("B3.6: a 201 whose body is not JSON is feedback_unavailable", func() {
 			respondFeedbackText(stub, http.StatusCreated, "not json")
 
-			So(feedbackErrorText(t, cs), ShouldStartWith, "feedback_unavailable: ")
+			text := feedbackErrorText(t, cs)
+			So(text, ShouldStartWith, "feedback_unavailable: ")
+			So(text, ShouldNotContainSubstring, wa.ErrUpstreamImpaired.Error())
 			So(stub.requestCount(), ShouldEqual, 1)
 		})
 
@@ -519,7 +530,8 @@ func TestFeedbackToolB3StructuredErrors(t *testing.T) {
 		So(mapFeedbackError(nil), ShouldBeNil)
 	})
 
-	Convey("B3.7: an error wrapping both ErrFeedbackDisabled and ErrUpstreamImpaired is feedback_disabled", t, func() {
+	Convey("B3.7: feedback sentinels take precedence, so a hand-built error wrapping both ErrUpstreamImpaired and "+
+		"ErrFeedbackDisabled (wa itself never wraps both) is feedback_disabled", t, func() {
 		err := mapFeedbackError(fmt.Errorf("%w: %w", wa.ErrUpstreamImpaired, wa.ErrFeedbackDisabled))
 
 		So(err, ShouldNotBeNil)
