@@ -105,7 +105,7 @@ func TestREADMEHTTPDocs(t *testing.T) {
 	})
 }
 
-func TestREADMEAPIEighteenDocs(t *testing.T) {
+func TestREADMEPublicAPIDocs(t *testing.T) {
 	Convey("Given the complete public README for MLWH API 1.9.0", t, func() {
 		readmeBytes, err := os.ReadFile("../../README.md")
 		So(err, ShouldBeNil)

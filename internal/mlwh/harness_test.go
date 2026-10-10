@@ -150,6 +150,32 @@ func (s *stubMLWH) respondHandler(path string, handler http.HandlerFunc) {
 	s.routes[path] = stubResponse{handler: handler}
 }
 
+// respondBlockingFirst makes the first request to exactly this path close the
+// returned channel and stay in flight until its context ends, for cancellation
+// tests. Any later request (such as a regression retry) returns at once instead
+// of blocking or re-closing the channel, so the test can count it.
+func (s *stubMLWH) respondBlockingFirst(path string) <-chan struct{} {
+	requestStarted := make(chan struct{})
+
+	var firstRequest sync.Once
+
+	s.respondHandler(path, func(_ http.ResponseWriter, request *http.Request) {
+		blocked := false
+
+		firstRequest.Do(func() {
+			close(requestStarted)
+
+			blocked = true
+		})
+
+		if blocked {
+			<-request.Context().Done()
+		}
+	})
+
+	return requestStarted
+}
+
 // respondError makes the stub reply with the given non-2xx status and wa error
 // envelope ({"code","message"}) for requests to exactly this path, so the
 // remote client maps the documented code (e.g. "not_found"->404->ErrNotFound)

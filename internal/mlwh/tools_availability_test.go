@@ -31,6 +31,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -659,13 +660,10 @@ func TestAvailabilityToolsF3Cancellation(t *testing.T) {
 
 	Convey("F3.2: cancellation during a remote call cancels its HTTP request without retry or a partial success", t, func() {
 		stub := newStubMLWH(t)
-		requestStarted := make(chan struct{})
-		stub.respondHandler("/study/S1/latest-data", func(_ http.ResponseWriter, request *http.Request) {
-			close(requestStarted)
-			<-request.Context().Done()
-		})
+		requestStarted := stub.respondBlockingFirst("/study/S1/latest-data")
 		cs, cleanup := runMLWHServerWithClient(t, stub)
-		defer cleanup()
+		stopServer := sync.OnceFunc(cleanup)
+		defer stopServer()
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -697,6 +695,11 @@ func TestAvailabilityToolsF3Cancellation(t *testing.T) {
 
 		So(outcome.result, ShouldBeNil)
 		So(errors.Is(outcome.err, context.Canceled), ShouldBeTrue)
+
+		// CallTool returns as soon as the client is cancelled, while the tool
+		// handler may still be running. Stopping the server waits for in-flight
+		// handlers to return, so any retry has reached the stub before counting.
+		stopServer()
 		So(stub.requestCount(), ShouldEqual, 1)
 	})
 }

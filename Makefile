@@ -52,7 +52,7 @@ format:
 	@if command -v cleanorder >/dev/null 2>&1; then git ls-files '*.go' | xargs -r cleanorder -min-diff; fi
 
 test:
-	go test -count=1 ./...
+	CGO_ENABLED=1 go test -tags netgo --count 1 ./...
 
 config:
 	@if [ -f .env ]; then \

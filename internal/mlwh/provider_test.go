@@ -234,7 +234,7 @@ func TestWAAPI19Contract(t *testing.T) {
 		So(provider.APIVersion(), ShouldEqual, wa.APIVersion)
 	})
 
-	Convey("A1.4: Given the v0.8.0 Registry, removed manifest APIs are not part of the compiled contract", t, func() {
+	Convey("A1.4: Given the pinned wa Registry, the upstream-removed manifest APIs are not part of the compiled contract", t, func() {
 		_, hasStudyManifest := registryEntryByMethod("StudyManifest")
 		So(hasStudyManifest, ShouldBeFalse)
 

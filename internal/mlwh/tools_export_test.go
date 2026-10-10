@@ -875,7 +875,7 @@ func TestExportToolDeliverablesOnlyTriStateB1(t *testing.T) {
 }
 
 func TestExportToolRequestPropagationB1(t *testing.T) {
-	Convey("B1.4: Given every supported relationship and option, mlwh_export sends exact v0.8.0 paths and query values", t, func() {
+	Convey("B1.4: Given every supported relationship and option, mlwh_export sends the pinned wa module's exact paths and query values", t, func() {
 		stub := newStubMLWH(t)
 		relationships := exportRelationshipCasesForTest()
 		for _, relationship := range relationships {

@@ -767,7 +767,7 @@ func runDetail52553NonLean() wa.RunDetail {
 }
 
 // studyDetailS1NonLean is a de-duplicated non-lean StudyDetail with the real
-// object-valued lookup tables returned by wa v0.8.0.
+// object-valued lookup tables returned by the pinned wa module.
 func studyDetailS1NonLean() wa.StudyDetail {
 	study := wa.Study{IDStudyLims: "S1", Name: "Study One"}
 	library := wa.Library{

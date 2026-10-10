@@ -249,7 +249,7 @@ func studyMatch() wa.Match {
 // upstream Registry-driven dispatcher. Each route returns that entry's own
 // zero result shape, so successful calls also prove generic result decoding.
 func TestCallToolRegistryParity(t *testing.T) {
-	Convey("A2.1: Given every v0.8.0 Registry entry, all 90 methods are advertised and dispatchable", t, func() {
+	Convey("A2.1: Given every pinned wa Registry entry, all 90 methods are advertised and dispatchable", t, func() {
 		stub := newStubMLWH(t)
 		for _, entry := range wa.Registry {
 			path, _ := registryTestCall(entry)
