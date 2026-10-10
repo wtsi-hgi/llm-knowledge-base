@@ -528,23 +528,7 @@ func TestFeedbackToolB3StructuredErrors(t *testing.T) {
 
 	Convey("B3.8: cancellation during the feedback call cancels its HTTP request without retry or a result", t, func() {
 		stub := newStubMLWH(t)
-		requestStarted := make(chan struct{})
-
-		var firstRequest sync.Once
-
-		stub.respondHandler(feedbackPath, func(_ http.ResponseWriter, request *http.Request) {
-			blocked := false
-
-			firstRequest.Do(func() {
-				close(requestStarted)
-
-				blocked = true
-			})
-
-			if blocked {
-				<-request.Context().Done()
-			}
-		})
+		requestStarted := stub.respondBlockingFirst(feedbackPath)
 		cs, cleanup := runMLWHServerWithClient(t, stub)
 		stopServer := sync.OnceFunc(cleanup)
 		defer stopServer()
