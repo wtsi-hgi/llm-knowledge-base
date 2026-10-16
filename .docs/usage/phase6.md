@@ -43,5 +43,5 @@ it normally does not bite. Prove the recipe by launching a stack, passing
 Doctor, and running `drive-usage.sh` to a clean exit. Covers the 1
 acceptance test from C3.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed

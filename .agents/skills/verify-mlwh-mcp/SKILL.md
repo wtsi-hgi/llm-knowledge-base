@@ -1,6 +1,6 @@
 ---
 name: verify-mlwh-mcp
-description: "Verify user-visible mlwh-mcp-server changes end to end: launch a real wa mlwh serve test stack, drive the server over stdio and streamable HTTP with a real MCP client, and capture evidence for mlwh_provide_feedback (through to wa's admin /feedback page), tool and resource listing, and read tools. Use when proving an MCP server change works or reproducing an MCP server bug against a real wa."
+description: "Verify user-visible mlwh-mcp-server changes end to end: launch a real wa mlwh serve test stack, drive the server over stdio and streamable HTTP with a real MCP client, and capture evidence for mlwh_provide_feedback (through to wa's admin /feedback page), usage identification (MCP traffic counted in wa's admin /usage summary), tool and resource listing, and read tools. Use when proving an MCP server change works or reproducing an MCP server bug against a real wa."
 ---
 
 # Verify mlwh-mcp-server
@@ -95,9 +95,9 @@ repo's go-sdk version.
 ## Evidence
 
 Everything lands in `$RUN/evidence/`, numbered by drive (`2x` basics,
-`3x`/`4x` feedback, `5x` feedback-off). It survives Cleanup; leave it
-uncommitted. wa's test-mode feedback DB is deleted on shutdown, so the drive
-scripts copy rows out before Cleanup.
+`3x`/`4x` feedback, `5x` feedback-off, `6x` usage). It survives Cleanup;
+leave it uncommitted. wa's test-mode feedback DB is deleted on shutdown, so
+the drive scripts copy rows out before Cleanup.
 
 Record per check: expected, observed, tested revision (`$RUN/revision.txt`),
 verdict, and evidence paths.
