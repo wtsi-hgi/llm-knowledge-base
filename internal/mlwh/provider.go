@@ -216,8 +216,12 @@ func (p *provider) APIVersion() string {
 // registerAvailabilityTools. The phase 7 people tools are added by
 // registerPeopleTools. The feedback tool (Story B1) is added by
 // registerFeedbackTool. The workflow / endpoint-catalogue resource (Story G1) is
-// added by registerWorkflowResource.
+// added by registerWorkflowResource. Before any of these, it adds the
+// receiving middleware that gives each tools/call's wa requests that call's
+// client ID, agent, and tool identity.
 func (p *provider) Register(_ context.Context, r core.Registrar) error {
+	r.Server().AddReceivingMiddleware(clientIdentityMiddleware())
+
 	if err := p.registerExportTool(r); err != nil {
 		return err
 	}

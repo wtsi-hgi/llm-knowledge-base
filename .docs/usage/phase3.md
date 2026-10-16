@@ -33,8 +33,8 @@ spec's Architecture section "Identity functions". `callIdentity` must not
 panic on nil `Session`, `Params`, or `Extra`. Covers all 5 acceptance
 tests from B1.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 ### Item 3.2: B2 - tools/call middleware
 
@@ -50,5 +50,5 @@ tests with `runMLWHServerWithClientOptions` or
 `runMLWHServerWithClientImplementation` and `WithServerInfo("0.4.0",
 "stdio")`. Covers all 8 acceptance tests from B2. Depends on item 3.1.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed

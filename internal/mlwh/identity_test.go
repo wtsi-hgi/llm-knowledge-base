@@ -27,11 +27,14 @@ package mlwh
 
 import (
 	"errors"
+	"net/http"
 	"os"
 	"os/user"
+	"regexp"
 	"testing"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	. "github.com/smartystreets/goconvey/convey"
 	wa "github.com/wtsi-hgi/wa/mlwh"
 
@@ -96,6 +99,59 @@ func TestLocalUsername(t *testing.T) {
 	})
 }
 
+func TestSessionClientID(t *testing.T) {
+	Convey("B1.1: sessionClientID hashes a session ID to a 32-hex SHA-256 prefix", t, func() {
+		So(sessionClientID("abc"), ShouldEqual, "ba7816bf8f01cfea414140de5dae2223")
+	})
+
+	Convey("B1.2: sessionClientID of an empty ID is the stable per-process ID", t, func() {
+		first := sessionClientID("")
+		second := sessionClientID("")
+
+		So(first, ShouldEqual, processClientID())
+		So(second, ShouldEqual, processClientID())
+		So(regexp.MustCompile(`^[0-9a-f]{32}$`).MatchString(processClientID()), ShouldBeTrue)
+	})
+}
+
+func TestAgentIdentity(t *testing.T) {
+	Convey("B1.3: agentIdentity prefers named clientInfo, then the HTTP User-Agent", t, func() {
+		uaX := http.Header{"User-Agent": {"x/1"}}
+
+		So(agentIdentity(&mcp.Implementation{Name: "claude-code", Version: "2.1.0"}, nil),
+			ShouldEqual, "claude-code/2.1.0")
+		So(agentIdentity(&mcp.Implementation{Name: "claude-code"}, nil), ShouldEqual, "claude-code")
+		So(agentIdentity(&mcp.Implementation{Version: "1"}, uaX), ShouldEqual, "x/1")
+		So(agentIdentity(nil, http.Header{"User-Agent": {"agent-cli/1.2"}}), ShouldEqual, "agent-cli/1.2")
+		So(agentIdentity(&mcp.Implementation{Name: "claude-code", Version: "2.1.0"}, uaX),
+			ShouldEqual, "claude-code/2.1.0")
+		So(agentIdentity(nil, nil), ShouldEqual, "")
+	})
+}
+
+func TestCallIdentity(t *testing.T) {
+	Convey("B1.4: callIdentity of an empty request gives only the process client ID", t, func() {
+		var got wa.ClientIdentity
+
+		So(func() { got = callIdentity(&mcp.CallToolRequest{}) }, ShouldNotPanic)
+		So(got, ShouldResemble, wa.ClientIdentity{ClientID: processClientID()})
+	})
+
+	Convey("B1.5: callIdentity combines session, header agent, and tool name", t, func() {
+		got := callIdentity(&mcp.CallToolRequest{
+			Session: &mcp.ServerSession{},
+			Params:  &mcp.CallToolParamsRaw{Name: "mlwh_freshness"},
+			Extra:   &mcp.RequestExtra{Header: http.Header{"User-Agent": {"a/1"}}},
+		})
+
+		So(got, ShouldResemble, wa.ClientIdentity{
+			ClientID: processClientID(),
+			MCPAgent: "a/1",
+			MCPTool:  "mlwh_freshness",
+		})
+	})
+}
+
 // TestClientLevelIdentity covers Story A2 through the real MCP path: the
 // provider's wa client sends the configured product, version, transport, and
 // (stdio only) user headers on its upstream request.
@@ -133,6 +189,123 @@ func TestClientLevelIdentity(t *testing.T) {
 			} else {
 				So(req.Header.Get(wa.HeaderClientUser), ShouldEqual, u)
 			}
+		})
+	})
+}
+
+// TestToolsCallIdentity covers Story B2 through the real MCP path: every
+// upstream wa request made inside a tools/call carries that call's tool,
+// agent, and client ID, while protocol traffic and pre-upstream rejections
+// reach wa not at all.
+func TestToolsCallIdentity(t *testing.T) {
+	Convey("Given a stub MLWH serving a synced /freshness", t, func() {
+		stub := newStubMLWH(t)
+		stub.respondJSON("/freshness", http.StatusOK, syncedFreshness())
+
+		stdio := WithServerInfo("0.4.0", "stdio")
+
+		Convey("B2.1: mlwh_freshness sends its tool, clientInfo agent, process client ID, and transport", func() {
+			req := freshnessRequest(t, stub, stdio)
+
+			So(req.Header.Get(wa.HeaderMCPTool), ShouldEqual, "mlwh_freshness")
+			So(req.Header.Get(wa.HeaderMCPAgent), ShouldEqual, "test-client/0.0.0")
+			So(req.Header.Get(wa.HeaderClientID), ShouldEqual, processClientID())
+			So(req.Header.Get(wa.HeaderMCPTransport), ShouldEqual, "stdio")
+		})
+
+		Convey("B2.2: two tools in one session send their own tool names and one client ID", func() {
+			cs, cleanup := runMLWHServerWithClientOptions(t, stub, core.Options{}, stdio)
+			defer cleanup()
+
+			So(callTool(t, cs, "mlwh_freshness", map[string]any{}).IsError, ShouldBeFalse)
+			So(callTool(t, cs, "mlwh_call_endpoint", map[string]any{"method": "Freshness"}).IsError, ShouldBeFalse)
+
+			reqs := stub.recordedRequests()
+			So(reqs, ShouldHaveLength, 2)
+			So(reqs[0].Path, ShouldEqual, "/freshness")
+			So(reqs[1].Path, ShouldEqual, "/freshness")
+			So(reqs[0].Header.Get(wa.HeaderMCPTool), ShouldEqual, "mlwh_freshness")
+			So(reqs[1].Header.Get(wa.HeaderMCPTool), ShouldEqual, "mlwh_call_endpoint")
+			So(reqs[0].Header.Get(wa.HeaderClientID), ShouldNotBeEmpty)
+			So(reqs[1].Header.Get(wa.HeaderClientID), ShouldEqual, reqs[0].Header.Get(wa.HeaderClientID))
+		})
+
+		Convey("B2.3: two harness servers in one process share the stdio client ID", func() {
+			first := freshnessRequest(t, stub, stdio)
+
+			other := newStubMLWH(t)
+			other.respondJSON("/freshness", http.StatusOK, syncedFreshness())
+			second := freshnessRequest(t, other, stdio)
+
+			So(first.Header.Get(wa.HeaderClientID), ShouldNotBeEmpty)
+			So(second.Header.Get(wa.HeaderClientID), ShouldEqual, first.Header.Get(wa.HeaderClientID))
+		})
+
+		Convey("B2.4: mlwh_provide_feedback sends identity headers and keeps its client body fields", func() {
+			respondFeedbackReceipt(stub)
+
+			cs, cleanup := runMLWHServerWithClientOptions(t, stub, core.Options{}, stdio)
+			defer cleanup()
+
+			submitMinimalFeedback(t, cs)
+
+			req, ok := stub.lastRequest()
+			So(ok, ShouldBeTrue)
+			So(req.Method, ShouldEqual, http.MethodPost)
+			So(req.Path, ShouldEqual, feedbackPath)
+			So(req.Header.Get(wa.HeaderMCPTool), ShouldEqual, feedbackToolName)
+			So(req.Header.Get(wa.HeaderMCPAgent), ShouldEqual, "test-client/0.0.0")
+			So(req.Header.Get(wa.HeaderClientID), ShouldEqual, processClientID())
+
+			body := lastFeedbackBody(t, stub)
+			So(body["client_name"], ShouldEqual, "test-client")
+			So(body["client_version"], ShouldEqual, "0.0.0")
+		})
+
+		Convey("B2.5: a client with no version is identified by its name alone", func() {
+			cs, cleanup := runMLWHServerWithClientImplementation(t, stub,
+				&mcp.Implementation{Name: "claude-code", Version: ""}, core.Options{}, stdio)
+			defer cleanup()
+
+			So(callTool(t, cs, "mlwh_freshness", map[string]any{}).IsError, ShouldBeFalse)
+
+			req, ok := stub.lastRequest()
+			So(ok, ShouldBeTrue)
+			So(req.Header.Get(wa.HeaderMCPAgent), ShouldEqual, "claude-code")
+		})
+	})
+
+	Convey("Given a stub MLWH with no routes", t, func() {
+		stub := newStubMLWH(t)
+
+		cs, cleanup := runMLWHServerWithClientOptions(t, stub, core.Options{}, WithServerInfo("0.4.0", "stdio"))
+		defer cleanup()
+
+		Convey("B2.6: a failed upstream request still carries the tool name", func() {
+			res := callTool(t, cs, "mlwh_freshness", map[string]any{})
+			So(res.IsError, ShouldBeTrue)
+
+			req, ok := stub.lastRequest()
+			So(ok, ShouldBeTrue)
+			So(req.Path, ShouldEqual, "/freshness")
+			So(req.Header.Get(wa.HeaderMCPTool), ShouldEqual, "mlwh_freshness")
+		})
+
+		Convey("B2.7: listing tools and reading resources makes no upstream request", func() {
+			_, found := toolByName(t, cs, "mlwh_freshness")
+			So(found, ShouldBeTrue)
+
+			readResource(t, cs, "mlwh://workflow")
+			readResource(t, cs, "mcp-server://version")
+
+			So(stub.requestCount(), ShouldEqual, 0)
+		})
+
+		Convey("B2.8: a feedback call rejected before upstream makes no request", func() {
+			res := callTool(t, cs, feedbackToolName, map[string]any{"category": "bogus", "description": "x"})
+
+			So(res.IsError, ShouldBeTrue)
+			So(stub.requestCount(), ShouldEqual, 0)
 		})
 	})
 }
