@@ -20,7 +20,7 @@ Pick features from [features/README.md](features/README.md).
 
 ## Requirements
 
-- A wa checkout at v0.10.0+ (agent feedback) that contains
+- A wa checkout at v0.11.0+ (agent feedback and usage metrics) that contains
   `.agents/skills/verify-wa/`. Pass it as `WA_CHECKOUT`; the default is
   `<this repo>/../wa`. verify-wa's scripts act on, and write runtime files
   under, that checkout's gitignored `.tmp/`. Read its `SKILL.md` for the wa

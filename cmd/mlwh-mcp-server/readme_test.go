@@ -106,7 +106,7 @@ func TestREADMEHTTPDocs(t *testing.T) {
 }
 
 func TestREADMEPublicAPIDocs(t *testing.T) {
-	Convey("Given the complete public README for MLWH API 1.9.0", t, func() {
+	Convey("Given the complete public README for MLWH API 1.10.0", t, func() {
 		readmeBytes, err := os.ReadFile("../../README.md")
 		So(err, ShouldBeNil)
 
@@ -137,9 +137,10 @@ func TestREADMEPublicAPIDocs(t *testing.T) {
 			So(readme, ShouldNotContainSubstring, "manifest")
 		})
 
-		Convey("F2.2: version prose and the version example use API 1.9.0 only", func() {
-			So(prose, ShouldContainSubstring, "currently mlwh api 1.9.0")
-			So(readme, ShouldContainSubstring, "# mlwh api version 1.9.0")
+		Convey("F2.2: version prose and the version example use API 1.10.0 only", func() {
+			So(prose, ShouldContainSubstring, "currently mlwh api 1.10.0")
+			So(readme, ShouldContainSubstring, "# mlwh api version 1.10.0")
+			So(prose, ShouldNotContainSubstring, "currently mlwh api 1.9.0")
 			So(readme, ShouldNotContainSubstring, "1.8.1")
 			So(readme, ShouldNotContainSubstring, "1.7.0")
 		})

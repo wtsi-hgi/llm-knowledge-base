@@ -19,7 +19,7 @@ server is a thin, well-described bridge whose value is making those endpoints
 ergonomic and correctly usable by an LLM, not re-implementing them: it imports
 `github.com/wtsi-hgi/wa/mlwh` and reuses its typed client, response types,
 registry, and OpenAPI document directly, so there is no type drift and the server
-is compile-time-locked to the upstream API version (currently MLWH API 1.9.0).
+is compile-time-locked to the upstream API version (currently MLWH API 1.10.0).
 
 The MLWH provider serves over the **stdio** transport by default, so it can run
 as a local subprocess launched per user by an agent CLI. It can also run in
@@ -50,7 +50,7 @@ below. Check the build and the versions it targets:
 ```bash
 mlwh-mcp-server --version
 # mlwh-mcp-server version <build version>
-# MLWH API version 1.9.0
+# MLWH API version 1.10.0
 ```
 
 ## Configuration

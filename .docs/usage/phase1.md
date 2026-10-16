@@ -53,5 +53,5 @@ v0.10.0+ checkout") to say `v0.11.0`+, consistent with SKILL.md. Leave the
 history statements the spec lists unchanged. Covers all 4 acceptance tests
 from A1.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
