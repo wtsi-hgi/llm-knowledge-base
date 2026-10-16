@@ -38,8 +38,8 @@ connecting through
 User-Agent) or `connectMLWHHTTPClient`. `TestMLWHHTTPFeedbackUserAgent`
 must pass unchanged. Covers all 5 acceptance tests from B3.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 #### Item 4.2: A3 - Main wiring [parallel with 4.1]
 
@@ -51,8 +51,8 @@ stub captures the `/feedback` request headers, and assert `User-Agent`,
 `X-WA-MCP-Transport`, `X-WA-MCP-Tool`, and the absence of
 `X-WA-Client-User` in HTTP mode. Covers both acceptance tests from A3.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 For parallel batch items, use separate subagents per item under the
 `subagents` skill's shared concurrency limits.

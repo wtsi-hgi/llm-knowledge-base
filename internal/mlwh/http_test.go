@@ -384,10 +384,12 @@ func runMLWHHTTPServerWithClient(t *testing.T, stub *stubMLWH) (*mcp.ClientSessi
 	return session, endpoint, cleanup
 }
 
-func runMLWHHTTPServer(t *testing.T, stub *stubMLWH) (string, func()) {
+// runMLWHHTTPServer serves a core server over streamable HTTP with an MLWH
+// provider built against stub with providerOpts, and returns its MCP endpoint.
+func runMLWHHTTPServer(t *testing.T, stub *stubMLWH, providerOpts ...Option) (string, func()) {
 	t.Helper()
 
-	provider, err := New(wa.RemoteConfig{BaseURL: stub.server.URL})
+	provider, err := New(wa.RemoteConfig{BaseURL: stub.server.URL}, providerOpts...)
 	if err != nil {
 		t.Fatalf("mlwh.New() returned error: %v", err)
 	}

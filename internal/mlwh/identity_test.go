@@ -26,11 +26,13 @@
 package mlwh
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"os"
 	"os/user"
 	"regexp"
+	"sync"
 	"testing"
 	"time"
 
@@ -40,6 +42,8 @@ import (
 
 	"github.com/wtsi-hgi/llm-knowledge-base/internal/core"
 )
+
+var errFreshnessToolError = errors.New("mlwh_freshness returned a tool error")
 
 func TestIdentityRemoteConfig(t *testing.T) {
 	Convey("A2.4: identityRemoteConfig keeps other fields and replaces UserAgent and Identity", t, func() {
@@ -327,4 +331,151 @@ func freshnessRequest(t *testing.T, stub *stubMLWH, providerOpts ...Option) reco
 	So(req.Path, ShouldEqual, "/freshness")
 
 	return req
+}
+
+// TestHTTPModeIdentity covers Story B3 through a real streamable HTTP server:
+// each HTTP session is told apart by a hash of its MCP session ID, its agent is
+// its HTTP User-Agent, and no username is ever sent.
+func TestHTTPModeIdentity(t *testing.T) {
+	Convey("Given an HTTP MLWH server versioned 0.5.0 and a stub serving a synced /freshness", t, func() {
+		stub := newStubMLWH(t)
+		stub.respondJSON("/freshness", http.StatusOK, syncedFreshness())
+
+		endpoint, serverCleanup := runMLWHHTTPServer(t, stub, WithServerInfo("0.5.0", "http"))
+		defer serverCleanup()
+
+		Convey("B3.1: one session's calls carry server, transport, agent, tool, and session client ID", func() {
+			cs, cleanup := connectMLWHHTTPClientWithUserAgent(t, endpoint, "agent-cli/1.2")
+			defer cleanup()
+
+			So(callTool(t, cs, "mlwh_freshness", map[string]any{}).IsError, ShouldBeFalse)
+			So(callTool(t, cs, "mlwh_freshness", map[string]any{}).IsError, ShouldBeFalse)
+
+			So(cs.ID(), ShouldNotBeEmpty)
+
+			reqs := stub.recordedRequests()
+			So(reqs, ShouldHaveLength, 2)
+
+			for _, req := range reqs {
+				So(req.Header.Get("User-Agent"), ShouldEqual, "mlwh-mcp-server/0.5.0")
+				So(req.Header.Get(wa.HeaderMCPTransport), ShouldEqual, "http")
+				So(req.Header.Get(wa.HeaderMCPAgent), ShouldEqual, "agent-cli/1.2")
+				So(req.Header.Get(wa.HeaderMCPTool), ShouldEqual, "mlwh_freshness")
+				So(req.Header.Get(wa.HeaderClientID), ShouldEqual, sessionClientID(cs.ID()))
+				So(req.Header.Values(wa.HeaderClientUser), ShouldBeEmpty)
+			}
+		})
+
+		Convey("B3.2: two sessions send different 32-hex client IDs", func() {
+			first, firstCleanup := connectMLWHHTTPClient(t, endpoint)
+			defer firstCleanup()
+
+			second, secondCleanup := connectMLWHHTTPClient(t, endpoint)
+			defer secondCleanup()
+
+			So(callTool(t, first, "mlwh_freshness", map[string]any{}).IsError, ShouldBeFalse)
+			So(callTool(t, second, "mlwh_freshness", map[string]any{}).IsError, ShouldBeFalse)
+
+			reqs := stub.recordedRequests()
+			So(reqs, ShouldHaveLength, 2)
+
+			firstID := reqs[0].Header.Get(wa.HeaderClientID)
+			secondID := reqs[1].Header.Get(wa.HeaderClientID)
+			hex32 := regexp.MustCompile(`^[0-9a-f]{32}$`)
+
+			So(firstID, ShouldNotEqual, secondID)
+			So(hex32.MatchString(firstID), ShouldBeTrue)
+			So(hex32.MatchString(secondID), ShouldBeTrue)
+			So(firstID, ShouldEqual, sessionClientID(first.ID()))
+			So(secondID, ShouldEqual, sessionClientID(second.ID()))
+		})
+
+		Convey("B3.3: a session with no HTTPClient is identified by Go's default User-Agent", func() {
+			cs, cleanup := connectMLWHHTTPClient(t, endpoint)
+			defer cleanup()
+
+			So(callTool(t, cs, "mlwh_freshness", map[string]any{}).IsError, ShouldBeFalse)
+
+			req, ok := stub.lastRequest()
+			So(ok, ShouldBeTrue)
+			So(req.Header.Get(wa.HeaderMCPAgent), ShouldEqual, "Go-http-client/1.1")
+		})
+
+		Convey("B3.4: concurrent sessions each send their own agent with their own client ID", func() {
+			sessionA, cleanupA := connectMLWHHTTPClientWithUserAgent(t, endpoint, "agent-a/1")
+			defer cleanupA()
+
+			sessionB, cleanupB := connectMLWHHTTPClientWithUserAgent(t, endpoint, "agent-b/1")
+			defer cleanupB()
+
+			errs := callFreshnessConcurrently(sessionA, sessionB)
+			So(errs, ShouldResemble, []error{nil, nil})
+
+			reqs := stub.recordedRequests()
+			So(reqs, ShouldHaveLength, 2)
+
+			agentByClientID := map[string]string{}
+			for _, req := range reqs {
+				agentByClientID[req.Header.Get(wa.HeaderClientID)] = req.Header.Get(wa.HeaderMCPAgent)
+			}
+
+			So(agentByClientID, ShouldResemble, map[string]string{
+				sessionClientID(sessionA.ID()): "agent-a/1",
+				sessionClientID(sessionB.ID()): "agent-b/1",
+			})
+		})
+
+		Convey("B3.5: feedback over HTTP carries its tool and agent and no username", func() {
+			respondFeedbackReceipt(stub)
+
+			cs, cleanup := connectMLWHHTTPClientWithUserAgent(t, endpoint, "agent-cli/1.2")
+			defer cleanup()
+
+			submitMinimalFeedback(t, cs)
+
+			req, ok := stub.lastRequest()
+			So(ok, ShouldBeTrue)
+			So(req.Method, ShouldEqual, http.MethodPost)
+			So(req.Path, ShouldEqual, feedbackPath)
+			So(req.Header.Get(wa.HeaderMCPTool), ShouldEqual, feedbackToolName)
+			So(req.Header.Get(wa.HeaderMCPAgent), ShouldEqual, "agent-cli/1.2")
+			So(req.Header.Values(wa.HeaderClientUser), ShouldBeEmpty)
+		})
+	})
+}
+
+// connectMLWHHTTPClientWithUserAgent connects an MCP client to endpoint whose
+// every HTTP request carries userAgent, as an agent application's would.
+func connectMLWHHTTPClientWithUserAgent(t *testing.T, endpoint, userAgent string) (*mcp.ClientSession, func()) {
+	t.Helper()
+
+	return connectMLWHHTTPClientWith(t, endpoint, &http.Client{
+		Transport: userAgentRoundTripper{userAgent: userAgent},
+	})
+}
+
+// callFreshnessConcurrently calls mlwh_freshness on every session at once and
+// returns, in session order, the protocol error or tool-error sentinel of each
+// call (nil for success).
+func callFreshnessConcurrently(sessions ...*mcp.ClientSession) []error {
+	errs := make([]error, len(sessions))
+
+	var wg sync.WaitGroup
+	for i, session := range sessions {
+		wg.Go(func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			res, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "mlwh_freshness", Arguments: map[string]any{}})
+			if err == nil && res.IsError {
+				err = errFreshnessToolError
+			}
+
+			errs[i] = err
+		})
+	}
+
+	wg.Wait()
+
+	return errs
 }
