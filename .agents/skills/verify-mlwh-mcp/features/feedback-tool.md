@@ -30,7 +30,7 @@ frontend's `/feedback` page. Contract: `.docs/feedback/spec.md`.
       Evidence: `32-http-feedback.json`.
     - Admin API and the feedback SQLite file (read-only) each hold one row per
       receipt id, equal `created_at`, every agent field verbatim,
-      `mcp_server_version` = stamped version, `wa_api_version` 1.9.0,
+      `mcp_server_version` = stamped version, `wa_api_version` 1.10.0,
       `remote_addr` 127.0.0.1. stdio: `transport stdio`, client name/version
       set, no UA. HTTP: `transport http`, UA set, no client name/version.
       Evidence: `33-admin-api-list.json`, `34-feedback-db-rows.json`,

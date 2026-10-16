@@ -34,6 +34,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -290,6 +291,15 @@ func (s *stubMLWH) lastRequest() (recordedRequest, bool) {
 	}
 
 	return s.requests[len(s.requests)-1], true
+}
+
+// recordedRequests returns a copy of every request the stub has received, in
+// arrival order, so a test can compare headers across several upstream calls.
+func (s *stubMLWH) recordedRequests() []recordedRequest {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return slices.Clone(s.requests)
 }
 
 // runMLWHServerWithClient builds the MLWH provider pointed at the stub, wraps it

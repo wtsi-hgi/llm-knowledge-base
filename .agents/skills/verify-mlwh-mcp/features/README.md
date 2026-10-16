@@ -6,6 +6,7 @@
 | [Tools and resources](tools-and-resources.md)     | `initialize`, `tools/list`, `resources/*`      | `drive-basics.sh`                                      |
 | [Streamable HTTP transport](http-transport.md)    | `--http` / `MLWH_HTTP_ADDR`, `/mcp`, `/health` | `drive-basics.sh`, `drive-feedback.sh`                 |
 | [Read tools](read-tools.md)                       | `mlwh_freshness`, `mlwh_classify_identifier`   | `drive-basics.sh`, `mcpclient call`                    |
+| [Usage identification](usage-metrics.md)          | every `tools/call` over stdio and HTTP         | `drive-usage.sh`                                       |
 
 Every feature assumes a stack from the skill's Launch step and a passing
 Doctor. Scripts live in `../scripts/`.

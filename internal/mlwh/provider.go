@@ -216,8 +216,12 @@ func (p *provider) APIVersion() string {
 // registerAvailabilityTools. The phase 7 people tools are added by
 // registerPeopleTools. The feedback tool (Story B1) is added by
 // registerFeedbackTool. The workflow / endpoint-catalogue resource (Story G1) is
-// added by registerWorkflowResource.
+// added by registerWorkflowResource. Before any of these, it adds the
+// receiving middleware that gives each tools/call's wa requests that call's
+// client ID, agent, and tool identity.
 func (p *provider) Register(_ context.Context, r core.Registrar) error {
+	r.Server().AddReceivingMiddleware(clientIdentityMiddleware())
+
 	if err := p.registerExportTool(r); err != nil {
 		return err
 	}
@@ -280,13 +284,7 @@ func New(cfg wa.RemoteConfig, opts ...Option) (core.Provider, error) {
 		return nil, ErrBaseURLRequired
 	}
 
-	client, err := wa.NewRemoteClient(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("mlwh: build remote client: %w", err)
-	}
-
 	p := &provider{
-		client:        client,
 		serverVersion: core.ServerVersion,
 		transport:     "stdio",
 	}
@@ -295,6 +293,13 @@ func New(cfg wa.RemoteConfig, opts ...Option) (core.Provider, error) {
 		opt(p)
 	}
 
+	client, err := wa.NewRemoteClient(identityRemoteConfig(cfg, p.serverVersion, p.transport))
+	if err != nil {
+		return nil, fmt.Errorf("mlwh: build remote client: %w", err)
+	}
+
+	p.client = client
+
 	return p, nil
 }
 
@@ -302,7 +307,8 @@ func New(cfg wa.RemoteConfig, opts ...Option) (core.Provider, error) {
 type Option func(*provider)
 
 // WithServerInfo sets the MCP server build version and transport name
-// ("stdio" or "http") attached to feedback reports.
+// ("stdio" or "http") attached to feedback reports and sent to wa as the
+// User-Agent version and transport header.
 func WithServerInfo(serverVersion, transport string) Option {
 	return func(p *provider) {
 		p.serverVersion = serverVersion

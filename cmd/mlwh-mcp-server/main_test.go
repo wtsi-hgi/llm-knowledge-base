@@ -56,7 +56,7 @@ var errCapturedCoreOptions = errors.New("core options captured")
 func TestRunVersionFlag(t *testing.T) {
 	Convey("Given --version and a captured stdout, with no MLWH_BASE_URL configured", t, func() {
 		t.Setenv("MLWH_BASE_URL", "")
-		So(wa.APIVersion, ShouldEqual, "1.9.0")
+		So(wa.APIVersion, ShouldEqual, "1.10.0")
 
 		var stdout bytes.Buffer
 		coreFactoryCalls := 0
@@ -501,12 +501,20 @@ func TestServeHTTPUsesSignalNotifyContext(t *testing.T) {
 	})
 }
 
-// TestServeWiresServerInfo exercises A2 acceptance test 3: serve builds the
-// MLWH provider with the server version and the resolved transport, so a
-// feedback report submitted through it carries both.
+// capturedFeedback is one /feedback request received by the stub MLWH in
+// TestServeWiresServerInfo.
+type capturedFeedback struct {
+	body   map[string]any
+	header http.Header
+}
+
+// TestServeWiresServerInfo exercises A2 acceptance test 3 and A3: serve builds
+// the MLWH provider with the server version and the resolved transport, so a
+// feedback report submitted through it carries both in its body and in the wa
+// identity headers.
 func TestServeWiresServerInfo(t *testing.T) {
 	Convey("Given a stub MLWH that stores feedback", t, func() {
-		bodies := make(chan map[string]any, 1)
+		received := make(chan capturedFeedback, 1)
 		stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var body map[string]any
 			if r.Method != http.MethodPost || r.URL.Path != "/feedback" ||
@@ -516,7 +524,7 @@ func TestServeWiresServerInfo(t *testing.T) {
 				return
 			}
 
-			bodies <- body
+			received <- capturedFeedback{body: body, header: r.Header.Clone()}
 
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusCreated)
@@ -543,7 +551,7 @@ func TestServeWiresServerInfo(t *testing.T) {
 			stub.Close()
 		})
 
-		submit := func(args []string) map[string]any {
+		submit := func(args []string) capturedFeedback {
 			cfg, _, err := parseArgs(args)
 			So(err, ShouldBeNil)
 			So(serve(cfg), ShouldEqual, errCapturedCoreOptions)
@@ -551,27 +559,43 @@ func TestServeWiresServerInfo(t *testing.T) {
 			callMinimalFeedbackThrough(t, captured)
 
 			select {
-			case body := <-bodies:
-				return body
+			case got := <-received:
+				return got
 			case <-time.After(3 * time.Second):
 				t.Fatal("stub received no feedback")
 
-				return nil
+				return capturedFeedback{}
 			}
 		}
 
-		Convey("A2.3: with --http 127.0.0.1:0 the report carries transport http and the server version", func() {
-			body := submit([]string{"--http", "127.0.0.1:0"})
+		Convey("with --http 127.0.0.1:0", func() {
+			got := submit([]string{"--http", "127.0.0.1:0"})
 
-			So(body["transport"], ShouldEqual, "http")
-			So(body["mcp_server_version"], ShouldEqual, "9.9.9-test")
+			Convey("A2.3: the report carries transport http and the server version", func() {
+				So(got.body["transport"], ShouldEqual, "http")
+				So(got.body["mcp_server_version"], ShouldEqual, "9.9.9-test")
+			})
+
+			Convey("A3.1: the request carries the http identity headers and no client user", func() {
+				So(got.header.Get("User-Agent"), ShouldEqual, "mlwh-mcp-server/9.9.9-test")
+				So(got.header.Get(wa.HeaderMCPTransport), ShouldEqual, "http")
+				So(got.header.Get(wa.HeaderMCPTool), ShouldEqual, "mlwh_provide_feedback")
+				So(got.header.Values(wa.HeaderClientUser), ShouldBeEmpty)
+			})
 		})
 
-		Convey("A2.3: without --http the report carries transport stdio and the server version", func() {
-			body := submit(nil)
+		Convey("without --http", func() {
+			got := submit(nil)
 
-			So(body["transport"], ShouldEqual, "stdio")
-			So(body["mcp_server_version"], ShouldEqual, "9.9.9-test")
+			Convey("A2.3: the report carries transport stdio and the server version", func() {
+				So(got.body["transport"], ShouldEqual, "stdio")
+				So(got.body["mcp_server_version"], ShouldEqual, "9.9.9-test")
+			})
+
+			Convey("A3.2: the request carries transport stdio and the same User-Agent", func() {
+				So(got.header.Get(wa.HeaderMCPTransport), ShouldEqual, "stdio")
+				So(got.header.Get("User-Agent"), ShouldEqual, "mlwh-mcp-server/9.9.9-test")
+			})
 		})
 	})
 }

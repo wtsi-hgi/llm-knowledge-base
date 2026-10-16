@@ -36,6 +36,36 @@ import (
 	. "github.com/smartystreets/goconvey/convey"
 )
 
+// TestAgentFacingTextOmitsUsageRecording exercises Story C1: the agent-facing
+// text this repo owns says nothing about usage recording or the wa
+// identification headers. The appended wa.EndpointReference() catalogue is
+// upstream text and is deliberately not checked.
+func TestAgentFacingTextOmitsUsageRecording(t *testing.T) {
+	Convey("Given a client connected to a core server hosting the MLWH provider", t, func() {
+		stub := newStubMLWH(t)
+
+		clientSession, cleanup := runMLWHServerWithClient(t, stub)
+		defer cleanup()
+
+		feedbackTool, ok := toolByName(t, clientSession, "mlwh_provide_feedback")
+		So(ok, ShouldBeTrue)
+
+		texts := []struct{ name, text string }{
+			{"workflowGuidance", workflowGuidance},
+			{"the server Instructions", clientSession.InitializeResult().Instructions},
+			{"the mlwh_provide_feedback description", feedbackTool.Description},
+		}
+
+		for _, checked := range texts {
+			Convey("C1.1: "+checked.name+" contains neither X-WA- nor usage", func() {
+				So(checked.text, ShouldNotBeBlank)
+				So(checked.text, ShouldNotContainSubstring, "X-WA-")
+				So(strings.ToLower(checked.text), ShouldNotContainSubstring, "usage")
+			})
+		}
+	})
+}
+
 // TestWorkflowResource exercises Story G1: the MLWH provider registers a
 // workflow / endpoint-catalogue resource at mlwh://workflow whose body is the
 // always-current wa.EndpointReference() catalogue, prefixed with short workflow

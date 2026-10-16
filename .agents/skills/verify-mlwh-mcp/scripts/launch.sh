@@ -22,7 +22,7 @@ BASE="${WA_VERIFY_PORT_BASE:-47690}"
 MCP_HTTP_PORT=$((BASE + 5))
 
 if [[ ! -x "$WA_SKILL/scripts/launch.sh" ]]; then
-  printf 'launch.sh: %s has no verify-wa skill; set WA_CHECKOUT to a wa v0.10.0+ checkout that contains .agents/skills/verify-wa\n' "$WA_CHECKOUT" >&2
+  printf 'launch.sh: %s has no verify-wa skill; set WA_CHECKOUT to a wa v0.11.0+ checkout that contains .agents/skills/verify-wa\n' "$WA_CHECKOUT" >&2
   exit 1
 fi
 
