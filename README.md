@@ -498,7 +498,7 @@ It is self-declared, so wa records what the server sends without checking it.
 There is no opt-out. HTTP mode has no authentication, so it never sends a
 username.
 
-wa counts its own requests, not tool calls. A tool call that makes two
+wa counts the requests it receives, not tool calls. A tool call that makes two
 requests to wa counts twice. MCP protocol messages such as `initialize` and
 `tools/list` are not counted. wa also records the caller's IP address, so all
 HTTP-mode users share the MCP host's IP.
