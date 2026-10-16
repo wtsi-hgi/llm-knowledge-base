@@ -36,5 +36,5 @@ text. Write the tests in `internal/mlwh/identity_test.go`, using
 `runMLWHServerWithClientOptions` with a synced `/freshness` stub for the
 harness tests. Covers all 7 acceptance tests from A2.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed

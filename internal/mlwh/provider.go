@@ -280,13 +280,7 @@ func New(cfg wa.RemoteConfig, opts ...Option) (core.Provider, error) {
 		return nil, ErrBaseURLRequired
 	}
 
-	client, err := wa.NewRemoteClient(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("mlwh: build remote client: %w", err)
-	}
-
 	p := &provider{
-		client:        client,
 		serverVersion: core.ServerVersion,
 		transport:     "stdio",
 	}
@@ -295,6 +289,13 @@ func New(cfg wa.RemoteConfig, opts ...Option) (core.Provider, error) {
 		opt(p)
 	}
 
+	client, err := wa.NewRemoteClient(identityRemoteConfig(cfg, p.serverVersion, p.transport))
+	if err != nil {
+		return nil, fmt.Errorf("mlwh: build remote client: %w", err)
+	}
+
+	p.client = client
+
 	return p, nil
 }
 
@@ -302,7 +303,8 @@ func New(cfg wa.RemoteConfig, opts ...Option) (core.Provider, error) {
 type Option func(*provider)
 
 // WithServerInfo sets the MCP server build version and transport name
-// ("stdio" or "http") attached to feedback reports.
+// ("stdio" or "http") attached to feedback reports and sent to wa as the
+// User-Agent version and transport header.
 func WithServerInfo(serverVersion, transport string) Option {
 	return func(p *provider) {
 		p.serverVersion = serverVersion
