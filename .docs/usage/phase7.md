@@ -39,5 +39,5 @@ no changes on this branch. Launch a verify-mlwh-mcp stack against a wa
 request against `develop`. Do not merge the PR and do not create a tag;
 report the PR URL to the user.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
