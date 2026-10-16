@@ -259,6 +259,57 @@ func TestREADMEFeedbackDocs(t *testing.T) {
 	})
 }
 
+func TestREADMEUsageDocs(t *testing.T) {
+	Convey("Given the README contents for usage identification", t, func() {
+		readmeBytes, err := os.ReadFile("../../README.md")
+		So(err, ShouldBeNil)
+
+		readme := string(readmeBytes)
+		usage := singleSpaced(readmeSection(readme, "## Usage metrics", "## Development"))
+		feedback := singleSpaced(readmeSection(readme, "- **Feedback**", "- **Escape hatch**"))
+		intro := singleSpaced(readmeSection(readme, "# MLWH MCP Server", "## Requirements"))
+
+		So(usage, ShouldNotBeEmpty)
+		So(feedback, ShouldNotBeEmpty)
+		So(intro, ShouldNotBeEmpty)
+
+		Convey("C2.1: the usage section names the User-Agent forms and every identification header", func() {
+			So(missingREADMETerms(usage, []string{
+				"mlwh-mcp-server/<version>",
+				"mlwh-mcp-server/dev",
+				"X-WA-MCP-Transport",
+				"X-WA-Client-ID",
+				"X-WA-MCP-Agent",
+				"X-WA-MCP-Tool",
+				"X-WA-Client-User",
+			}), ShouldBeEmpty)
+		})
+
+		Convey("C2.2: the usage section covers the username policy and the wa version, flag, and page", func() {
+			So(missingREADMETerms(usage, []string{
+				"OS username",
+				"self-declared",
+				"no opt-out",
+				"never sends a username",
+				"v0.11.0",
+				"--usage-db",
+				"/usage",
+			}), ShouldBeEmpty)
+		})
+
+		Convey("C2.3: the Feedback bullet says stdio reports carry the self-declared OS username", func() {
+			So(feedback, ShouldContainSubstring, "OS username")
+			So(feedback, ShouldContainSubstring, "self-declared")
+		})
+
+		Convey("C2.4: the intro says the feedback tool sends a report upstream and links usage metrics", func() {
+			So(intro, ShouldContainSubstring, "sends a report upstream")
+			So(intro, ShouldContainSubstring, "#usage-metrics")
+			So(intro, ShouldNotContainSubstring, "sends data upstream")
+		})
+	})
+}
+
 func singleSpaced(text string) string {
 	return strings.Join(strings.Fields(text), " ")
 }

@@ -10,8 +10,10 @@ discover programmes and study users, select merged-aware sample CRAMs, and
 report data freshness.
 
 Every tool is read-only except `mlwh_provide_feedback`, the one tool that sends
-data upstream: it lets an agent report a problem with a request to the server
-admin (see [What the server exposes](#what-the-server-exposes)).
+a report upstream: it lets an agent report a problem with a request to the
+server admin (see [What the server exposes](#what-the-server-exposes)). Every
+request to wa also carries identifying metadata (see
+[Usage metrics](#usage-metrics)).
 
 The MLWH read API is provided by the separate upstream
 [`wa`](https://github.com/wtsi-hgi/wa) project (its `wa mlwh serve` command). This
@@ -452,7 +454,9 @@ A curated, LLM-ergonomic tool surface generated from the MLWH endpoint registry
   secured wa, because this server sends no auth token; depending on
   `MLWH_BASE_URL` it fails with `feedback_unavailable`, `feedback_unsupported`,
   or `feedback_unauthorized`.
-  Admins read reports on wa's `/feedback` page.
+  Admins read reports on wa's `/feedback` page. In stdio mode the report
+  request, like every request to wa, carries the OS username (self-declared;
+  see [Usage metrics](#usage-metrics)).
 - **Escape hatch**: `mlwh_call_endpoint` dispatches any upstream Registry method
   by name. If the upstream response includes pagination headers, the tool returns
   `result`, `total`, and `next_offset`; otherwise it returns the decoded result
@@ -469,6 +473,35 @@ Upstream errors are mapped to clear, actionable tool errors: bad input, not
 found, ambiguous identifiers, unsupported identifiers, never-synced cache state,
 and impaired upstream/cache failures all keep the upstream context and add a
 caller-oriented next step.
+
+## Usage metrics
+
+wa `v0.11.0`+ run with `--usage-db` records each request it receives, and
+admins read the aggregates on wa's `/usage` page. Older wa ignores the headers
+below.
+
+Every request this server makes to wa carries the User-Agent
+`mlwh-mcp-server/<version>`, where `<version>` is the build version that
+`mlwh-mcp-server --version` prints. Unstamped builds send
+`mlwh-mcp-server/dev`. Each request also carries these headers:
+
+| Header               | stdio                                                          | HTTP                                                         |
+| -------------------- | -------------------------------------------------------------- | ------------------------------------------------------------ |
+| `X-WA-MCP-Transport` | `stdio`                                                        | `http`                                                       |
+| `X-WA-Client-ID`     | 32 random hex characters, made once per server process         | first 32 hex characters of the SHA-256 of the MCP session ID |
+| `X-WA-MCP-Agent`     | the agent application's name and version from MCP `clientInfo` | the MCP client's User-Agent                                  |
+| `X-WA-MCP-Tool`      | the name of the tool being called                              | the name of the tool being called                            |
+| `X-WA-Client-User`   | the OS username of the user running the server                 | not sent                                                     |
+
+Stdio sends the OS username, falling back to `$USER` when the OS lookup fails.
+It is self-declared, so wa records what the server sends without checking it.
+There is no opt-out. HTTP mode has no authentication, so it never sends a
+username.
+
+wa counts its own requests, not tool calls. A tool call that makes two
+requests to wa counts twice. MCP protocol messages such as `initialize` and
+`tools/list` are not counted. wa also records the caller's IP address, so all
+HTTP-mode users share the MCP host's IP.
 
 ## Development
 

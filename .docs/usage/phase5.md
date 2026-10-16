@@ -36,8 +36,8 @@ contain neither `X-WA-` nor, case-insensitively, `usage`. Do not check the
 appended upstream `wa.EndpointReference()` text. No production code
 changes. Covers the 1 acceptance test from C1.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 #### Item 5.2: C2 - README [parallel with 5.1]
 
@@ -52,8 +52,8 @@ to `cmd/mlwh-mcp-server/readme_test.go` using the `readmeSection` and
 `TestREADMEHTTPDocs` must pass unchanged. Covers all 5 acceptance tests
 from C2.
 
-- [ ] implemented
-- [ ] reviewed
+- [x] implemented
+- [x] reviewed
 
 For parallel batch items, use separate subagents per item under the
 `subagents` skill's shared concurrency limits.
