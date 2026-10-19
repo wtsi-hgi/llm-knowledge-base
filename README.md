@@ -120,6 +120,30 @@ Restart=on-failure
 WantedBy=multi-user.target
 ```
 
+### Container image
+
+Each `v*` release tag publishes a container image to
+`ghcr.io/wtsi-hgi/llm-knowledge-base`, tagged with the release tag and, unless
+it is a pre-release, `latest`. The image runs the server in HTTP mode as a
+non-root user (UID 65532), listening on `0.0.0.0:8080` by default. Configure it
+entirely with the environment variables in [Configuration](#configuration);
+`MLWH_BASE_URL` is required:
+
+```bash
+docker run --rm -p 8080:8080 \
+  -e MLWH_BASE_URL=http://mlwh.internal:8080 \
+  ghcr.io/wtsi-hgi/llm-knowledge-base:vX.Y.Z
+```
+
+Set `MLWH_HTTP_ADDR` to listen on another port. In Kubernetes, point liveness
+and readiness probes at `/health` on the container port; it reports only that
+the server is up, not that the MLWH API is reachable. To build the image
+yourself, pass the version to bake in:
+
+```bash
+docker build --build-arg VERSION=$(git describe --tags --always --dirty) -t mlwh-mcp-server .
+```
+
 ## Use the shared HTTP service from agent CLIs
 
 When an admin operates the shared HTTP service, point each MCP client at the
@@ -515,6 +539,8 @@ make help      # list all targets
 CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs `make lint` and
 `make build` + `make test` on pushes and pull requests to `main` / `develop`,
 using the same Makefile targets.
+[`.github/workflows/image.yml`](.github/workflows/image.yml) builds the
+container image on those pull requests and pushes it to GHCR on `v*` tags.
 
 See [`.docs/mcp/spec.md`](.docs/mcp/spec.md) for the original MCP server
 specification, and [`.docs/realworld3/spec.md`](.docs/realworld3/spec.md) for
@@ -533,6 +559,7 @@ auth, and (in future) transport.
 ```
 go.mod                  module github.com/wtsi-hgi/llm-knowledge-base
 Makefile                build / install / lint / test / config / start
+Dockerfile              container image (HTTP mode)
 cmd/mlwh-mcp-server/    MLWH server entrypoint (flag parsing, wiring only)
 internal/core/          service-agnostic core (provider seam, transport, version)
 internal/mlwh/          MLWH provider (imports wa/mlwh)
