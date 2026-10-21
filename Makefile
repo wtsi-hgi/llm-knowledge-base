@@ -19,7 +19,7 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -X github.com/wtsi-hgi/llm-knowledge-base/internal/core.ServerVersion=$(VERSION)
 
 # Pinned golangci-lint used only when one is not already on PATH.
-GOLANGCI_LINT_VERSION := v2.12.2
+GOLANGCI_LINT_VERSION := v2.14.0
 
 help:
 	@printf 'MLWH MCP server -- make targets:\n\n'

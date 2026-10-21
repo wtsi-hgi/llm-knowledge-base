@@ -52,6 +52,12 @@ const countFindSamplesDescription = "Count samples by an exact field value. Choo
 	"This unifies the five per-field sample-finder counts behind the same field enum as mlwh_find_samples." +
 	countFreshnessNote
 
+// singleSampleNameNote is appended to the descriptions of the tools keyed by
+// one Sanger sample name, because a supplier name or donor id given there only
+// returns a generic not-found.
+const singleSampleNameNote = " Takes one Sanger sample name; for a supplier name or donor id shared by several samples, " +
+	"use mlwh_search_samples or mlwh_export parent_kind=sample multi_sample=true."
+
 // resolver pairs one resolve/classify tool name with the Registry Method it
 // derives its description from and the typed client call it dispatches to. The
 // seven resolvers all share the resolveInput/wa.Match shape, so registering them
@@ -78,17 +84,23 @@ func resolvers() []resolver {
 	}
 }
 
-// resolveDescription derives a resolve/classify tool's LLM-facing description
-// from its Registry entry, combining the entry's short Summary and longer
-// Description so the tool's documentation tracks the upstream Registry rather
-// than being hand-maintained. A missing Registry method is an error.
+// resolveDescription derives a tool's LLM-facing description from its
+// Registry entry, combining the entry's short Summary and longer Description so
+// the tool's documentation tracks the upstream Registry rather than being
+// hand-maintained, plus singleSampleNameNote where takesSingleSampleName.
+// A missing Registry method is an error.
 func resolveDescription(method string) (string, error) {
 	entry, ok := registryEntryByMethod(method)
 	if !ok {
 		return "", fmt.Errorf("mlwh: no Registry entry for method %q", method)
 	}
 
-	return entry.Summary + ": " + entry.Description, nil
+	description := entry.Summary + ": " + entry.Description
+	if takesSingleSampleName(method) {
+		description += singleSampleNameNote
+	}
+
+	return description, nil
 }
 
 // registryEntryByMethod returns the Registry endpoint whose Method equals
@@ -103,6 +115,19 @@ func registryEntryByMethod(method string) (wa.Endpoint, bool) {
 	}
 
 	return wa.Endpoint{}, false
+}
+
+// takesSingleSampleName reports whether the Registry method's tool takes one
+// Sanger sample name and so gets singleSampleNameNote.
+func takesSingleSampleName(method string) bool {
+	switch method {
+	case "LanesForSample", "CountLanesForSample",
+		"RunsForSample", "CountRunsForSample",
+		"IRODSPathsForSample", "CountIRODSPathsForSample":
+		return true
+	default:
+		return false
+	}
 }
 
 // findSamplesInputSchema builds the pre-set input schema for mlwh_find_samples,

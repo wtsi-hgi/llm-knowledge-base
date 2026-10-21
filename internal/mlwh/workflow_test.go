@@ -256,6 +256,22 @@ func TestWorkflowResource(t *testing.T) {
 			So(guidance, ShouldContainSubstring, "study-user roles are owner, manager, data_access_contact, follower")
 		})
 
+		Convey("H1.1: a supplier name shared by several samples routes to a multi-sample export", func() {
+			guidance := workflowGuidancePrefix(t, contents.Text)
+
+			So(guidance, ShouldContainSubstring, "supplier name or donor id shared by several samples")
+			So(guidance, ShouldContainSubstring, "mlwh_export(children=lanes|irods|runs|studies,parent_kind=sample,parent_id=<supplier name>,multi_sample=true)")
+			So(guidance, ShouldContainSubstring, "`mlwh_lanes_for_sample` takes one Sanger sample name")
+			So(guidance, ShouldContainSubstring, "MLWH API 1.11.0")
+		})
+
+		Convey("H1.2: lanes export default columns and the pre-1.11.0 shape are documented", func() {
+			guidance := workflowGuidancePrefix(t, contents.Text)
+
+			So(guidance, ShouldContainSubstring, "`supplier_name,sanger_sample_id,id_run,lane,tag_index`")
+			So(guidance, ShouldContainSubstring, "`columns=id_run,lane,tag_index`")
+		})
+
 		Convey("F1.6: workflow text does not advertise removed or nonexistent tools", func() {
 			So(contents.Text, ShouldNotContainSubstring, "mlwh_study_manifest")
 			So(contents.Text, ShouldNotContainSubstring, "mlwh_count_study_manifest")

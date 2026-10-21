@@ -21,7 +21,7 @@ server is a thin, well-described bridge whose value is making those endpoints
 ergonomic and correctly usable by an LLM, not re-implementing them: it imports
 `github.com/wtsi-hgi/wa/mlwh` and reuses its typed client, response types,
 registry, and OpenAPI document directly, so there is no type drift and the server
-is compile-time-locked to the upstream API version (currently MLWH API 1.10.0).
+is compile-time-locked to the upstream API version (currently MLWH API 1.11.0).
 
 The MLWH provider serves over the **stdio** transport by default, so it can run
 as a local subprocess launched per user by an agent CLI. It can also run in
@@ -30,7 +30,7 @@ an internal network.
 
 ## Requirements
 
-- **Go 1.25+** to build and install.
+- **Go 1.27.3+** to build and install.
 - Network access to a running **`wa mlwh serve`** instance — the MLWH read API
   this server bridges to. You point the server at its base URL (see
   [Configuration](#configuration)).
@@ -52,7 +52,7 @@ below. Check the build and the versions it targets:
 ```bash
 mlwh-mcp-server --version
 # mlwh-mcp-server version <build version>
-# MLWH API version 1.10.0
+# MLWH API version 1.11.0
 ```
 
 ## Configuration
@@ -282,11 +282,17 @@ Prompt cookbook:
   - "Export the sample CRAM matrix for study `S1`."
   - "Export users and their roles for study `S1`."
   - "Export lanes for sample `S1`, or studies for programme `Cancer`."
+  - "Export lanes for every sample with supplier name `PD42487a`."
   - "Export deliverable CRAM paths for sample `S1`, newest first."
   - Chosen-column product tables route to
     `mlwh_export(children=products,parent_kind=study,...)`; products without
     iRODS objects remain rows. There is no `mlwh_count_export`; bounded `Total`
     sizes the export.
+  - A sample supplier name or donor id shared by several samples routes to
+    `mlwh_export(parent_kind=sample,...,multi_sample=true)`, which returns rows
+    for every matching sample. Lanes exports default to the
+    `supplier_name,sanger_sample_id,id_run,lane,tag_index` columns;
+    `columns=id_run,lane,tag_index` gives the pre-1.11.0 shape.
 - **Study overview and metadata**
   - "Give me a quick overview of study `S1`."
   - "What data access group is study `S1` in?"
@@ -496,7 +502,12 @@ The server also publishes two MCP resources:
 Upstream errors are mapped to clear, actionable tool errors: bad input, not
 found, ambiguous identifiers, unsupported identifiers, never-synced cache state,
 and impaired upstream/cache failures all keep the upstream context and add a
-caller-oriented next step.
+caller-oriented next step. When the ambiguous identifier is a sample supplier
+name or donor id shared by several samples, the next step is
+`mlwh_search_samples` with that value as `term` to list them, or `mlwh_export`
+with `multi_sample=true` to get rows for all of them. A wa server older than
+API 1.11.0 cannot export several samples together, so that error says to retry
+without `multi_sample`, once per Sanger sample name.
 
 ## Usage metrics
 

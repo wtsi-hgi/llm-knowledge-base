@@ -106,7 +106,7 @@ func TestREADMEHTTPDocs(t *testing.T) {
 }
 
 func TestREADMEPublicAPIDocs(t *testing.T) {
-	Convey("Given the complete public README for MLWH API 1.10.0", t, func() {
+	Convey("Given the complete public README for MLWH API 1.11.0", t, func() {
 		readmeBytes, err := os.ReadFile("../../README.md")
 		So(err, ShouldBeNil)
 
@@ -137,12 +137,23 @@ func TestREADMEPublicAPIDocs(t *testing.T) {
 			So(readme, ShouldNotContainSubstring, "manifest")
 		})
 
-		Convey("F2.2: version prose and the version example use API 1.10.0 only", func() {
-			So(prose, ShouldContainSubstring, "currently mlwh api 1.10.0")
-			So(readme, ShouldContainSubstring, "# mlwh api version 1.10.0")
+		Convey("F2.2: version prose and the version example use API 1.11.0 only", func() {
+			So(prose, ShouldContainSubstring, "currently mlwh api 1.11.0")
+			So(readme, ShouldContainSubstring, "# mlwh api version 1.11.0")
+			So(prose, ShouldNotContainSubstring, "currently mlwh api 1.10.0")
 			So(prose, ShouldNotContainSubstring, "currently mlwh api 1.9.0")
 			So(readme, ShouldNotContainSubstring, "1.8.1")
 			So(readme, ShouldNotContainSubstring, "1.7.0")
+		})
+
+		Convey("F2.8: a supplier name shared by several samples has an example and an ambiguity remedy", func() {
+			cookbook := singleSpaced(questions)
+			So(cookbook, ShouldContainSubstring, "export lanes for every sample with supplier name `pd42487a`")
+			So(cookbook, ShouldContainSubstring, "a sample supplier name or donor id shared by several samples routes to "+
+				"`mlwh_export(parent_kind=sample,...,multi_sample=true)`, which returns rows for every matching sample. "+
+				"lanes exports default to the `supplier_name,sanger_sample_id,id_run,lane,tag_index` columns; "+
+				"`columns=id_run,lane,tag_index` gives the pre-1.11.0 shape.")
+			So(prose, ShouldContainSubstring, "**go 1.27.3+**")
 		})
 
 		Convey("F2.3: product-table guidance uses bounded export and preserves products without iRODS", func() {

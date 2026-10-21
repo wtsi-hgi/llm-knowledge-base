@@ -65,6 +65,35 @@ func TestMapToolError(t *testing.T) {
 			So(msg, ShouldContainSubstring, "disambiguat")
 		})
 
+		Convey("J1.7: an ambiguous error routes a shared supplier name or donor id to multi-sample export", func() {
+			err := mapToolError(fmt.Errorf("x: %w", wa.ErrAmbiguous))
+			So(err, ShouldNotBeNil)
+
+			msg := err.Error()
+			So(msg, ShouldContainSubstring, "supplier name or donor id")
+			So(msg, ShouldContainSubstring, "mlwh_search_samples term=")
+			So(msg, ShouldNotContainSubstring, "mlwh_find_samples")
+			So(msg, ShouldContainSubstring, "multi_sample=true")
+		})
+
+		Convey("J1.8: a multi-sample-unsupported error wins over its wrapped ambiguity and advises retrying without multi_sample", func() {
+			upstream := fmt.Errorf("%w: \"PD1\" matches samples 2 and 3", wa.ErrAmbiguous)
+			err := mapToolError(&wa.MultiSampleUnsupportedError{
+				ServerURL: "http://old.example", ServerAPIVersion: "1.10.0", Err: upstream,
+			})
+			So(err, ShouldNotBeNil)
+
+			msg := err.Error()
+			So(msg, ShouldContainSubstring, "http://old.example runs API 1.10.0")
+			So(msg, ShouldContainSubstring, "needs API 1.11.0: \"PD1\" matches samples 2 and 3")
+			So(msg, ShouldContainSubstring, "retry without multi_sample")
+			So(msg, ShouldContainSubstring, "mlwh_search_samples term=")
+			So(msg, ShouldNotContainSubstring, "mlwh_find_samples")
+			So(msg, ShouldNotContainSubstring, "multi_sample=true")
+			So(strings.Count(msg, wa.ErrMultiSampleUnsupported.Error()), ShouldEqual, 1)
+			So(msg, ShouldNotContainSubstring, wa.ErrAmbiguous.Error())
+		})
+
 		Convey("J1.4: an unsupported-identifier error mentions the form is unsupported", func() {
 			err := mapToolError(fmt.Errorf("x: %w", wa.ErrUnsupportedIdentifier))
 			So(err, ShouldNotBeNil)

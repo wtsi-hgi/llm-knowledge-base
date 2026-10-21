@@ -83,6 +83,14 @@ func studyUsersInputSchema(paged bool) map[string]any {
 	}
 }
 
+// exportMultiSampleDescription tells agents when multi_sample turns an
+// ambiguity error into a multi-sample export, and when it cannot.
+const exportMultiSampleDescription = "optional, parent_kind=sample only: when true, a parent_id that is a sample " +
+	"supplier name or donor id shared by several samples returns rows for every matching sample instead of an " +
+	"ambiguous error. A value that is some sample's Sanger sample name or id, LIMS id, UUID, or accession still " +
+	"returns ambiguous when it matches several samples. Needs MLWH API 1.11.0 or later; omit for the " +
+	"single-sample contract"
+
 // exportInputSchema describes the generic relationship export input. Its three
 // vocabulary-bearing properties are generated from wa's runtime sources of
 // truth so aliases, parent kinds, defaults, and selectable columns move with
@@ -149,6 +157,9 @@ func exportInputSchema() map[string]any {
 			},
 			"format": map[string]any{
 				"type": "string", "description": "output format metadata; defaults upstream to tsv", "enum": []any{"tsv", "csv", "json"},
+			},
+			"multi_sample": map[string]any{
+				"type": "boolean", "description": exportMultiSampleDescription,
 			},
 		},
 		"required": []any{"children", "parent_kind", "parent_id"},

@@ -25,6 +25,9 @@ Pick features from [features/README.md](features/README.md).
   `<this repo>/../wa`. verify-wa's scripts act on, and write runtime files
   under, that checkout's gitignored `.tmp/`. Read its `SKILL.md` for the wa
   stack's login, fixtures, and gotchas.
+- For `mlwh_export` `multi_sample` checks, that wa checkout must be at
+  `v1.0.0` or later (API 1.11.0+);
+  an older wa answers `multi_sample=true` with the upgrade-or-retry error.
 - Go, node, pnpm, `jq`, `python3`, `curl`, `ss`. verify-wa installs
   `frontend/node_modules` (Playwright included) in the wa checkout if missing.
 
