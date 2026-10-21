@@ -56,7 +56,7 @@ var errCapturedCoreOptions = errors.New("core options captured")
 func TestRunVersionFlag(t *testing.T) {
 	Convey("Given --version and a captured stdout, with no MLWH_BASE_URL configured", t, func() {
 		t.Setenv("MLWH_BASE_URL", "")
-		So(wa.APIVersion, ShouldEqual, "1.10.0")
+		So(wa.APIVersion, ShouldEqual, "1.11.0")
 
 		var stdout bytes.Buffer
 		coreFactoryCalls := 0

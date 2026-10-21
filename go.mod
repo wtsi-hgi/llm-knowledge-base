@@ -1,13 +1,13 @@
 module github.com/wtsi-hgi/llm-knowledge-base
 
-go 1.25.5
+go 1.27.3
 
 require (
 	github.com/gin-gonic/gin v1.11.0
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/smartystreets/goconvey v1.8.1
 	github.com/wtsi-hgi/go-authserver v1.6.0
-	github.com/wtsi-hgi/wa v0.11.0
+	github.com/wtsi-hgi/wa v0.11.4-0.20261021062846-1e0d8e8a12d7
 )
 
 require (

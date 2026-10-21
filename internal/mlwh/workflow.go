@@ -80,6 +80,12 @@ const workflowGuidance = "# MLWH workflows\n\n" +
 	"`order_by=created_desc`, `since`, and `until`.\n" +
 	"- Runs for one sample: use `mlwh_runs_for_sample`; use " +
 	"`mlwh_count_runs_for_sample` only when the count alone answers the question.\n" +
+	"- Everything for a sample supplier name or donor id shared by several samples: use " +
+	"`mlwh_export(children=lanes|irods|runs|studies,parent_kind=sample,parent_id=<supplier name>,multi_sample=true)` " +
+	"(needs MLWH API 1.11.0); without `multi_sample` a shared name returns ambiguous. " +
+	"`mlwh_lanes_for_sample` takes one Sanger sample name only. Lanes exports default to " +
+	"`supplier_name,sanger_sample_id,id_run,lane,tag_index` so each row names its sample; " +
+	"`columns=id_run,lane,tag_index` gives the pre-1.11.0 shape.\n" +
 	"- Runs per month: use `mlwh_monthly_run_counts`. Use `mlwh_runs` for global " +
 	"keyset-paged drill-down and `mlwh_count_runs` for global sizing.\n" +
 	"- Sequencing by programme, faculty sponsor, platform, manufacturer, or month: " +

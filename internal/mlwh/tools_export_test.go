@@ -599,8 +599,20 @@ func TestExportToolContractB1(t *testing.T) {
 			"role": true, "qc": true, "library_type": true,
 			"organism": true, "sort": true, "since": true, "until": true,
 			"limit": true, "offset": true, "all": true, "cursor": true,
-			"format": true,
+			"format": true, "multi_sample": true,
 		})
+
+		multiSample, ok := properties["multi_sample"].(map[string]any)
+		So(ok, ShouldBeTrue)
+		So(multiSample["type"], ShouldEqual, "boolean")
+		description, ok := multiSample["description"].(string)
+		So(ok, ShouldBeTrue)
+		for _, phrase := range []string{
+			"parent_kind=sample", "supplier name", "donor id", "every matching sample",
+			"Sanger sample", "ambiguous", "1.11.0",
+		} {
+			So(description, ShouldContainSubstring, phrase)
+		}
 	})
 }
 
@@ -969,6 +981,149 @@ func TestExportToolRequestPropagationB1(t *testing.T) {
 			So(request.Path, ShouldEqual, testCase.path)
 			So(request.Query, ShouldResemble, testCase.query)
 		}
+	})
+}
+
+func TestExportToolMultiSampleB4(t *testing.T) {
+	Convey("B4.1: Given omitted, false, and true multi_sample, only true sends multi_sample=true", t, func() {
+		stub := newStubMLWH(t)
+		stub.respondJSON("/export/lanes/sample/PD42487a", http.StatusOK, emptyExportResultForTest("tsv"))
+		cs, cleanup := runMLWHServerWithClient(t, stub)
+		defer cleanup()
+
+		base := map[string]any{"children": "lanes", "parent_kind": "sample", "parent_id": "PD42487a"}
+		cases := []struct {
+			multiSample any
+			want        url.Values
+		}{
+			{multiSample: nil, want: url.Values{}},
+			{multiSample: false, want: url.Values{}},
+			{multiSample: true, want: url.Values{"multi_sample": {"true"}}},
+		}
+
+		for _, testCase := range cases {
+			arguments := map[string]any{}
+			for key, value := range base {
+				arguments[key] = value
+			}
+			if testCase.multiSample != nil {
+				arguments["multi_sample"] = testCase.multiSample
+			}
+
+			result := callTool(t, cs, "mlwh_export", arguments)
+			So(result.IsError, ShouldBeFalse)
+
+			request, ok := stub.lastRequest()
+			So(ok, ShouldBeTrue)
+			So(request.Path, ShouldEqual, "/export/lanes/sample/PD42487a")
+			So(request.Query, ShouldResemble, testCase.want)
+		}
+	})
+
+	Convey("B4.2: Given all=true and multi_sample=true over two offset pages, every page request keeps multi_sample and all rows are materialized", t, func() {
+		stub := newStubMLWH(t)
+		columns := []string{"supplier_name", "sanger_sample_id", "id_run", "lane", "tag_index"}
+		stub.respondHandler("/export/lanes/sample/PD42487a", func(w http.ResponseWriter, request *http.Request) {
+			page := wa.ExportResult{Columns: columns, Format: "tsv", Total: 3}
+			if request.URL.Query().Get("offset") == "" {
+				page.Rows = [][]string{{"PD42487a", "S1", "100", "1", "1"}, {"PD42487a", "S2", "100", "1", "2"}}
+			} else {
+				page.Rows = [][]string{{"PD42487a", "S3", "101", "2", "5"}}
+				page.Complete = true
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(page) //nolint:errchkjson
+		})
+		cs, cleanup := runMLWHServerWithClient(t, stub)
+		defer cleanup()
+
+		result := structuredObject(callTool(t, cs, "mlwh_export", map[string]any{
+			"children": "lanes", "parent_kind": "sample", "parent_id": "PD42487a",
+			"multi_sample": true, "all": true, "limit": 2,
+		}))
+
+		So(result["Rows"], ShouldResemble, []any{
+			[]any{"PD42487a", "S1", "100", "1", "1"},
+			[]any{"PD42487a", "S2", "100", "1", "2"},
+			[]any{"PD42487a", "S3", "101", "2", "5"},
+		})
+		So(result["Complete"], ShouldBeTrue)
+
+		requests := stub.recordedRequests()
+		So(len(requests), ShouldEqual, 2)
+		So(requests[0].Query, ShouldResemble, url.Values{"multi_sample": {"true"}, "limit": {"2"}})
+		So(requests[1].Query, ShouldResemble, url.Values{"multi_sample": {"true"}, "limit": {"2"}, "offset": {"2"}})
+	})
+
+	Convey("B4.3: Given a server older than API 1.11.0, multi_sample=true on a shared supplier name returns the upgrade-or-retry hint", t, func() {
+		stub := newStubMLWH(t)
+		stub.respondError("/export/lanes/sample/PD42487a", http.StatusConflict, "ambiguous", "sample PD42487a matches 3 samples")
+		stub.respondJSON("/openapi.json", http.StatusOK, map[string]any{
+			"info": map[string]any{"version": "1.10.0"},
+			"paths": map[string]any{
+				"/export/{children}/{parent_kind}/{parent_id}": map[string]any{
+					"get": map[string]any{"parameters": []any{map[string]any{"name": "columns"}}},
+				},
+			},
+		})
+		cs, cleanup := runMLWHServerWithClient(t, stub)
+		defer cleanup()
+
+		result := callTool(t, cs, "mlwh_export", map[string]any{
+			"children": "lanes", "parent_kind": "sample", "parent_id": "PD42487a", "multi_sample": true,
+		})
+
+		So(result.IsError, ShouldBeTrue)
+		text := firstTextContent(result)
+		So(text, ShouldContainSubstring, "1.10.0")
+		So(text, ShouldContainSubstring, "1.11.0")
+		So(text, ShouldContainSubstring, "retry without multi_sample")
+		So(text, ShouldContainSubstring, "mlwh_search_samples term=")
+		So(text, ShouldNotContainSubstring, "multi_sample=true")
+	})
+
+	Convey("B4.4: Given a 1.11.0 server whose identifier stays ambiguous under multi_sample, a hint to pick one Sanger name is returned", t, func() {
+		stub := newStubMLWH(t)
+		stub.respondError("/export/lanes/sample/SANG1", http.StatusConflict, "ambiguous", "sample SANG1 matches 2 samples")
+		stub.respondJSON("/openapi.json", http.StatusOK, map[string]any{
+			"info": map[string]any{"version": "1.11.0"},
+			"paths": map[string]any{
+				"/export/{children}/{parent_kind}/{parent_id}": map[string]any{
+					"get": map[string]any{"parameters": []any{map[string]any{"name": "multi_sample"}}},
+				},
+			},
+		})
+		cs, cleanup := runMLWHServerWithClient(t, stub)
+		defer cleanup()
+
+		result := callTool(t, cs, "mlwh_export", map[string]any{
+			"children": "lanes", "parent_kind": "sample", "parent_id": "SANG1", "multi_sample": true,
+		})
+
+		So(result.IsError, ShouldBeTrue)
+		text := firstTextContent(result)
+		So(text, ShouldContainSubstring, "sample SANG1 matches 2 samples")
+		So(text, ShouldContainSubstring, "multi_sample cannot span it")
+		So(text, ShouldContainSubstring, "pick one Sanger name from mlwh_search_samples term=")
+		So(text, ShouldNotContainSubstring, "multi_sample=true")
+		So(text, ShouldNotContainSubstring, "retry without multi_sample")
+	})
+
+	Convey("Given a 1.11.0 server whose identifier is ambiguous without multi_sample, the hint still offers multi_sample=true", t, func() {
+		stub := newStubMLWH(t)
+		stub.respondError("/export/lanes/sample/PD1", http.StatusConflict, "ambiguous", "sample PD1 matches 2 samples")
+		cs, cleanup := runMLWHServerWithClient(t, stub)
+		defer cleanup()
+
+		result := callTool(t, cs, "mlwh_export", map[string]any{
+			"children": "lanes", "parent_kind": "sample", "parent_id": "PD1",
+		})
+
+		So(result.IsError, ShouldBeTrue)
+		text := firstTextContent(result)
+		So(text, ShouldContainSubstring, "multi_sample=true")
+		So(text, ShouldNotContainSubstring, "multi_sample cannot span it")
 	})
 }
 

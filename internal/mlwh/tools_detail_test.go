@@ -404,6 +404,32 @@ func TestFanOutPaginatedDefaults(t *testing.T) {
 	})
 }
 
+// TestSampleNameToolDescriptions proves the Sanger-name-keyed sample tools tell
+// agents they take one Sanger sample name and route a shared supplier name or
+// donor id to the multi-sample tools, since such a value only returns not-found.
+func TestSampleNameToolDescriptions(t *testing.T) {
+	Convey("Given the MLWH server (stub-backed)", t, func() {
+		stub := newStubMLWH(t)
+		cs, cleanup := runMLWHServerWithClient(t, stub)
+		defer cleanup()
+
+		for _, name := range []string{
+			"mlwh_lanes_for_sample", "mlwh_count_lanes_for_sample",
+			"mlwh_runs_for_sample", "mlwh_count_runs_for_sample",
+			"mlwh_irods_paths_for_sample", "mlwh_count_irods_paths_for_sample",
+		} {
+			Convey(name+" says it takes one Sanger sample name and routes shared names elsewhere", func() {
+				tool, ok := toolByName(t, cs, name)
+				So(ok, ShouldBeTrue)
+				So(tool.Description, ShouldContainSubstring, "Takes one Sanger sample name")
+				So(tool.Description, ShouldContainSubstring, "supplier name or donor id shared by several samples")
+				So(tool.Description, ShouldContainSubstring, "mlwh_search_samples")
+				So(tool.Description, ShouldContainSubstring, "mlwh_export parent_kind=sample multi_sample=true")
+			})
+		}
+	})
+}
+
 // TestFanOutToolDescriptions proves the paged fan-out tools advertise the
 // bounded default and maximum, and that the curated fan-out tool set is
 // registered.

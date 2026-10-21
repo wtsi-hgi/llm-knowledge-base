@@ -88,6 +88,7 @@ type exportInput struct {
 	All              bool     `json:"all,omitempty"`
 	Cursor           string   `json:"cursor,omitempty"`
 	Format           string   `json:"format,omitempty"`
+	MultiSample      bool     `json:"multi_sample,omitempty"`
 }
 
 // registerExportTool adds the generic relationship projection tool. The
@@ -131,14 +132,15 @@ func (p *provider) registerExportTool(r core.Registrar) error {
 			All:              in.All,
 			Cursor:           in.Cursor,
 			Format:           in.Format,
+			MultiSample:      in.MultiSample,
 		})
 		if err != nil {
-			return core.ToolError[wa.ExportResult](mapToolError(err))
+			return core.ToolError[wa.ExportResult](mapExportError(err, in.MultiSample))
 		}
 		if in.All {
 			result, err = materializeExportRows(ctx, result)
 			if err != nil {
-				return core.ToolError[wa.ExportResult](mapToolError(err))
+				return core.ToolError[wa.ExportResult](mapExportError(err, in.MultiSample))
 			}
 		}
 
