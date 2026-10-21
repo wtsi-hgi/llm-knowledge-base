@@ -196,6 +196,17 @@ func TestWorkflowResource(t *testing.T) {
 			So(guidance, ShouldContainSubstring, `never report it as "synced through"`)
 		})
 
+		Convey("E3.8: freshness guidance explains each sync status and what to tell the user", func() {
+			guidance := workflowGuidancePrefix(t, contents.Text)
+
+			So(guidance, ShouldContainSubstring, "also reports a `status` per table and overall")
+			So(guidance, ShouldContainSubstring, "`stale` means the last successful sync (`last_success_at`) "+
+				"is older than `stale_after_seconds`: say the data may be out of date")
+			So(guidance, ShouldContainSubstring, "or was skipped because the tables in `blocked_by` failed")
+			So(guidance, ShouldContainSubstring, "say sync is failing, since when, that recent MLWH changes may be missing")
+			So(guidance, ShouldContainSubstring, "empty or zero results from it do not show the data is absent from MLWH")
+		})
+
 		Convey("F1.1: target questions route to their curated tool and critical options", func() {
 			guidance := workflowGuidancePrefix(t, contents.Text)
 
