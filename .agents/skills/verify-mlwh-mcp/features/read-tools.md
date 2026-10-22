@@ -35,5 +35,14 @@ verify-wa's `mlwh-query-api.md` for what the fixture cache holds.
 - Only five tables are synced in the fixture cache. A tool that depends on
   another table reflects that state; check `mlwh_freshness` before calling
   an empty answer a bug.
+- The fixture has no value shared by several samples. To check
+  `mlwh_find_samples` paging (`total`, `next_offset`), ambiguity errors that
+  name candidate samples, or `multi_sample`, copy the `--mlwh-cache` file of
+  the running `wa mlwh serve` (`ps`) into the scratchpad, insert
+  `sample_mirror`, `donor_samples`, and `sample_search_token` rows sharing a
+  `supplier_name`, and serve the copy with `$WA_RUN/wa mlwh serve --port
+  <spare> --url 127.0.0.1:<spare> --mlwh-cache <copy>`, plus an
+  `mlwh-mcp-server --http` against it on another free port. Stop both
+  yourself; Cleanup does not know them.
 - Large results hit `MLWH_MAX_TOOL_RESULT_BYTES` (default 1 MiB) and return
   a structured size error.
