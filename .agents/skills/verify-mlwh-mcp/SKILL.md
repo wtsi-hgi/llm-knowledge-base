@@ -28,6 +28,10 @@ Pick features from [features/README.md](features/README.md).
 - For `mlwh_export` `multi_sample` checks, that wa checkout must be at
   `v1.0.0` or later (API 1.11.0+);
   an older wa answers `multi_sample=true` with the upgrade-or-retry error.
+- For `mlwh_find_samples` listing every sample that shares a value, and for
+  ambiguity errors that name candidate Sanger samples, that wa checkout must
+  be at `v1.1.0` or later (API 1.13.0+); an older wa answers a shared value
+  with an ambiguous error.
 - Go, node, pnpm, `jq`, `python3`, `curl`, `ss`. verify-wa installs
   `frontend/node_modules` (Playwright included) in the wa checkout if missing.
 

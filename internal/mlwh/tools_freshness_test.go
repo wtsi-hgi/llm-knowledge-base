@@ -178,6 +178,80 @@ func TestFreshnessTool(t *testing.T) {
 			So(tool.Description, ShouldNotContainSubstring, "high_water mark and last_run timestamp")
 			So(tool.Description, ShouldNotContainSubstring, "caveat answers about data staleness")
 		})
+
+		Convey("D1.6: the description explains each sync status and what it means for the answer", func() {
+			tool, ok := toolByName(t, cs, "mlwh_freshness")
+			So(ok, ShouldBeTrue)
+
+			So(tool.Description, ShouldContainSubstring, "top-level status is the most severe table status "+
+				"(failing, then never_synced, then stale, then ok)")
+			So(tool.Description, ShouldContainSubstring, "stale: its last successful sync (last_success_at) "+
+				"is older than stale_after_seconds, so tell the user the data may be out of date")
+			So(tool.Description, ShouldContainSubstring, "failing: its most recent sync failed (last_error, "+
+				"last_error_at) or was skipped because the dependency tables in blocked_by failed")
+			So(tool.Description, ShouldContainSubstring, "tell the user sync is failing and since when")
+			So(tool.Description, ShouldContainSubstring, "never_synced: the table has no data yet, so empty or "+
+				"zero results from it do not mean the data does not exist in MLWH")
+			So(tool.Description, ShouldContainSubstring, "an empty status means a wa server older than MLWH API 1.12.0")
+		})
+
+		Convey("D1.7: a failing table's status, error, and blocked_by round-trip to StructuredContent", func() {
+			stub.respondJSON("/freshness", 200, failingFreshness())
+
+			res := callTool(t, cs, "mlwh_freshness", map[string]any{})
+			So(res.IsError, ShouldBeFalse)
+
+			obj := structuredObject(res)
+			So(obj["status"], ShouldEqual, wa.FreshnessStatusFailing)
+			So(obj["stale_after_seconds"], ShouldEqual, 7200)
+
+			tables, ok := obj["tables"].([]any)
+			So(ok, ShouldBeTrue)
+			So(len(tables), ShouldEqual, 2)
+
+			source, ok := tables[0].(map[string]any)
+			So(ok, ShouldBeTrue)
+			So(source["status"], ShouldEqual, wa.FreshnessStatusFailing)
+			So(source["last_error"], ShouldEqual, "connect to MLWH source: refused")
+			So(source["last_error_at"], ShouldEqual, "2026-10-21T10:00:00Z")
+			So(source["last_success_at"], ShouldEqual, "2026-10-21T08:00:00Z")
+			So(source["blocked_by"], ShouldResemble, []any{})
+
+			blocked, ok := tables[1].(map[string]any)
+			So(ok, ShouldBeTrue)
+			So(blocked["status"], ShouldEqual, wa.FreshnessStatusFailing)
+			So(blocked["blocked_by"], ShouldResemble, []any{"study"})
+		})
+
+		Convey("D1.8: a null or missing blocked_by is returned as an empty array, not an error", func() {
+			stub.respondJSON("/freshness", 200, map[string]any{
+				"status":              "ok",
+				"stale_after_seconds": 7200,
+				"tables": []map[string]any{
+					{"table": "study", "last_run": "2026-10-21T10:00:00Z", "ever_synced": true, "status": "ok", "blocked_by": nil},
+					{"table": "sample", "last_run": "2026-10-21T10:00:00Z", "ever_synced": true},
+				},
+			})
+
+			res := callTool(t, cs, "mlwh_freshness", map[string]any{})
+			So(res.IsError, ShouldBeFalse)
+
+			obj := structuredObject(res)
+
+			tables, ok := obj["tables"].([]any)
+			So(ok, ShouldBeTrue)
+			So(len(tables), ShouldEqual, 2)
+
+			for _, raw := range tables {
+				entry, ok := raw.(map[string]any)
+				So(ok, ShouldBeTrue)
+				So(entry["blocked_by"], ShouldResemble, []any{})
+			}
+
+			older, ok := tables[1].(map[string]any)
+			So(ok, ShouldBeTrue)
+			So(older["status"], ShouldEqual, "")
+		})
 	})
 }
 
@@ -212,6 +286,38 @@ func neverSyncedFreshness() wa.Freshness {
 	}
 
 	return wa.Freshness{Tables: tables}
+}
+
+// failingFreshness is a canned MLWH API 1.12.0 Freshness whose study sync
+// failed, so the dependent sample table was skipped and names study in
+// blocked_by. It backs D1.7, proving the sync-health fields reach the agent.
+func failingFreshness() wa.Freshness {
+	return wa.Freshness{
+		Status:            wa.FreshnessStatusFailing,
+		StaleAfterSeconds: 7200,
+		Tables: []wa.TableFreshness{
+			{
+				Table:         "study",
+				LastRun:       "2026-10-21T08:00:00Z",
+				EverSynced:    true,
+				LastSuccessAt: "2026-10-21T08:00:00Z",
+				LastError:     "connect to MLWH source: refused",
+				LastErrorAt:   "2026-10-21T10:00:00Z",
+				BlockedBy:     []string{},
+				Status:        wa.FreshnessStatusFailing,
+			},
+			{
+				Table:         "sample",
+				LastRun:       "2026-10-21T08:00:00Z",
+				EverSynced:    true,
+				LastSuccessAt: "2026-10-21T08:00:00Z",
+				LastError:     "skipped: dependency study failed",
+				LastErrorAt:   "2026-10-21T10:00:00Z",
+				BlockedBy:     []string{"study"},
+				Status:        wa.FreshnessStatusFailing,
+			},
+		},
+	}
 }
 
 // unchangedSourceFreshness is a canned Freshness for a single synced table whose

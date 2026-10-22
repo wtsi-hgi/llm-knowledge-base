@@ -46,7 +46,6 @@ const findSamplesMethodPrefix = "FindSamplesBy"
 const (
 	latestDataDefaultLimit = 10
 	pagedDefaultLimit      = 100
-	pagedDefaultOffset     = 0
 	pagedMaxLimit          = 1000
 )
 
@@ -88,7 +87,8 @@ func studyUsersInputSchema(paged bool) map[string]any {
 const exportMultiSampleDescription = "optional, parent_kind=sample only: when true, a parent_id that is a sample " +
 	"supplier name or donor id shared by several samples returns rows for every matching sample instead of an " +
 	"ambiguous error. A value that is some sample's Sanger sample name or id, LIMS id, UUID, or accession still " +
-	"returns ambiguous when it matches several samples. Needs MLWH API 1.11.0 or later; omit for the " +
+	"returns ambiguous when it matches several samples; from MLWH API 1.13.0 that error names the candidate " +
+	"Sanger samples, usable directly as parent_id. Needs MLWH API 1.11.0 or later; omit for the " +
 	"single-sample contract"
 
 // exportInputSchema describes the generic relationship export input. Its three
@@ -599,11 +599,17 @@ func outputSchemaForPagedObject(componentName string) (map[string]any, error) {
 	return schema, nil
 }
 
-// boundedPagination resolves a typed paged tool's effective limit and offset.
-// It rejects negative and over-large limits before HTTP, defaults an omitted
-// zero limit to the bounded page size, and otherwise preserves the caller's
-// offset.
+// boundedPagination resolves a typed paged tool's effective limit and offset
+// with the shared pagedDefaultLimit page size.
 func boundedPagination(limit, offset int) (int, int, error) {
+	return pagination(limit, offset, pagedDefaultLimit)
+}
+
+// pagination resolves a typed paged tool's effective limit and offset. It
+// rejects negative offsets and negative or over-large limits before HTTP,
+// defaults an omitted zero limit to defaultLimit, and otherwise preserves the
+// caller's offset.
+func pagination(limit, offset, defaultLimit int) (int, int, error) {
 	if limit < 0 {
 		return 0, 0, fmt.Errorf("limit %d must be non-negative", limit)
 	}
@@ -615,11 +621,7 @@ func boundedPagination(limit, offset int) (int, int, error) {
 	}
 
 	if limit == 0 {
-		limit = pagedDefaultLimit
-	}
-
-	if offset == 0 {
-		offset = pagedDefaultOffset
+		limit = defaultLimit
 	}
 
 	return limit, offset, nil

@@ -196,6 +196,17 @@ func TestWorkflowResource(t *testing.T) {
 			So(guidance, ShouldContainSubstring, `never report it as "synced through"`)
 		})
 
+		Convey("E3.8: freshness guidance explains each sync status and what to tell the user", func() {
+			guidance := workflowGuidancePrefix(t, contents.Text)
+
+			So(guidance, ShouldContainSubstring, "also reports a `status` per table and overall")
+			So(guidance, ShouldContainSubstring, "`stale` means the last successful sync (`last_success_at`) "+
+				"is older than `stale_after_seconds`: say the data may be out of date")
+			So(guidance, ShouldContainSubstring, "or was skipped because the tables in `blocked_by` failed")
+			So(guidance, ShouldContainSubstring, "say sync is failing, since when, that recent MLWH changes may be missing")
+			So(guidance, ShouldContainSubstring, "empty or zero results from it do not show the data is absent from MLWH")
+		})
+
 		Convey("F1.1: target questions route to their curated tool and critical options", func() {
 			guidance := workflowGuidancePrefix(t, contents.Text)
 
@@ -263,6 +274,16 @@ func TestWorkflowResource(t *testing.T) {
 			So(guidance, ShouldContainSubstring, "mlwh_export(children=lanes|irods|runs|studies,parent_kind=sample,parent_id=<supplier name>,multi_sample=true)")
 			So(guidance, ShouldContainSubstring, "`mlwh_lanes_for_sample` takes one Sanger sample name")
 			So(guidance, ShouldContainSubstring, "MLWH API 1.11.0")
+		})
+
+		Convey("H1.3: shared supplier names and library types route to mlwh_find_samples, and ambiguity candidates are usable directly", func() {
+			guidance := workflowGuidancePrefix(t, contents.Text)
+
+			So(guidance, ShouldContainSubstring, "`mlwh_find_samples field=supplier_name|library_type value=<the value>` (needs MLWH API 1.13.0)")
+			So(guidance, ShouldContainSubstring, "lists every match ordered by Sanger sample name, in pages of 50 by default")
+			So(guidance, ShouldContainSubstring, "`total` and `next_offset`")
+			So(guidance, ShouldContainSubstring, "the ambiguity error names up to 10 candidate Sanger samples")
+			So(guidance, ShouldContainSubstring, "use them directly as identifiers")
 		})
 
 		Convey("H1.2: lanes export default columns and the pre-1.11.0 shape are documented", func() {

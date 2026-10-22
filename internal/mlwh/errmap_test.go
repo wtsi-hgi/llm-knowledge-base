@@ -65,15 +65,25 @@ func TestMapToolError(t *testing.T) {
 			So(msg, ShouldContainSubstring, "disambiguat")
 		})
 
-		Convey("J1.7: an ambiguous error routes a shared supplier name or donor id to multi-sample export", func() {
+		Convey("J1.7: an ambiguous error routes a shared supplier name or donor id to find, search, or multi-sample export", func() {
 			err := mapToolError(fmt.Errorf("x: %w", wa.ErrAmbiguous))
 			So(err, ShouldNotBeNil)
 
 			msg := err.Error()
 			So(msg, ShouldContainSubstring, "supplier name or donor id")
+			So(msg, ShouldContainSubstring, "mlwh_find_samples field=supplier_name value=<the name>")
 			So(msg, ShouldContainSubstring, "mlwh_search_samples term=")
-			So(msg, ShouldNotContainSubstring, "mlwh_find_samples")
 			So(msg, ShouldContainSubstring, "multi_sample=true")
+		})
+
+		Convey("J1.9: an API 1.13.0 ambiguity keeps the named candidate Sanger samples and says to use them", func() {
+			err := mapToolError(fmt.Errorf("%s: %w", `"PD42487a" matches 2 samples: A, B`, wa.ErrAmbiguous))
+			So(err, ShouldNotBeNil)
+
+			msg := err.Error()
+			So(msg, ShouldStartWith, `"PD42487a" matches 2 samples: A, B: `+wa.ErrAmbiguous.Error()+" (")
+			So(msg, ShouldContainSubstring, "names candidate Sanger samples")
+			So(msg, ShouldContainSubstring, "use directly")
 		})
 
 		Convey("J1.8: a multi-sample-unsupported error wins over its wrapped ambiguity and advises retrying without multi_sample", func() {
@@ -103,16 +113,43 @@ func TestMapToolError(t *testing.T) {
 			So(msg, ShouldContainSubstring, "not supported")
 		})
 
-		Convey("J1.5: a 400 carried as ErrUpstreamImpaired preserves its upstream message", func() {
-			err := mapToolError(fmt.Errorf("term too short: %w", wa.ErrUpstreamImpaired))
+		Convey("J1.5: a 400 bad request keeps its upstream message once and says to fix the input", func() {
+			err := mapToolError(&wa.RemoteRequestError{StatusCode: http.StatusBadRequest, Code: "bad_request", Message: "limit must not exceed 1000"})
 			So(err, ShouldNotBeNil)
-			So(err.Error(), ShouldContainSubstring, "term too short")
+
+			msg := err.Error()
+			So(msg, ShouldStartWith, "limit must not exceed 1000: "+wa.ErrBadRequest.Error()+" (")
+			So(strings.Count(msg, wa.ErrBadRequest.Error()), ShouldEqual, 1)
+			So(msg, ShouldNotContainSubstring, wa.ErrRequestRejected.Error())
+			So(msg, ShouldNotContainSubstring, wa.ErrUpstreamImpaired.Error())
+			So(msg, ShouldContainSubstring, "fix the input")
+			So(msg, ShouldNotContainSubstring, "retry later")
 		})
 
-		Convey("a bare ErrUpstreamImpaired (502) still maps to a non-nil actionable error", func() {
+		Convey("J1.10: another rejected 4xx keeps its status, code, and message and says to fix the request", func() {
+			err := mapToolError(&wa.RemoteRequestError{StatusCode: http.StatusMethodNotAllowed, Code: "method_not_allowed", Message: "use GET"})
+			So(err, ShouldNotBeNil)
+
+			msg := err.Error()
+			So(msg, ShouldStartWith, "use GET: "+wa.ErrRequestRejected.Error()+" (405 method_not_allowed) (")
+			So(strings.Count(msg, "405 method_not_allowed"), ShouldEqual, 1)
+			So(msg, ShouldNotContainSubstring, wa.ErrBadRequest.Error())
+			So(msg, ShouldContainSubstring, "fix the request")
+			So(msg, ShouldNotContainSubstring, "retry later")
+		})
+
+		Convey("J1.11: a rejected 4xx with a non-envelope body and no message keeps just its status", func() {
+			err := mapToolError(&wa.RemoteRequestError{StatusCode: http.StatusForbidden})
+			So(err, ShouldNotBeNil)
+			So(err.Error(), ShouldStartWith, wa.ErrRequestRejected.Error()+" (403) (")
+		})
+
+		Convey("a bare ErrUpstreamImpaired (502) says to retry later, not to fix the input", func() {
 			err := mapToolError(fmt.Errorf("x: %w", wa.ErrUpstreamImpaired))
 			So(err, ShouldNotBeNil)
 			So(err.Error(), ShouldContainSubstring, wa.ErrUpstreamImpaired.Error())
+			So(err.Error(), ShouldContainSubstring, "retry later")
+			So(err.Error(), ShouldNotContainSubstring, "fix the input")
 		})
 
 		Convey("J1.6: a nil error maps to nil", func() {
@@ -221,7 +258,7 @@ func TestF1ToolErrorMapping(t *testing.T) {
 				},
 			},
 			{
-				name:    "F1.8: a new person tool advises fixing input or retrying later",
+				name:    "F1.8: a new person tool advises retrying an impaired upstream later",
 				tool:    "mlwh_studies_for_user",
 				args:    map[string]any{"person": "cwa"},
 				path:    "/studies/user/cwa",
@@ -229,7 +266,7 @@ func TestF1ToolErrorMapping(t *testing.T) {
 				code:    "upstream_impaired",
 				message: "person upstream impaired",
 				substrings: []string{
-					"fix the input",
+					"person upstream impaired",
 					"retry later",
 				},
 			},
@@ -269,7 +306,7 @@ func TestF3NewToolErrorMapping(t *testing.T) {
 			{
 				tool: "mlwh_latest_data_for_study", path: "/study/S1/latest-data",
 				arguments: map[string]any{"study_lims_id": "S1"}, status: http.StatusBadRequest,
-				code: "bad_request", message: "since must be RFC3339", substrings: []string{"since must be rfc3339", "fix the input"},
+				code: "bad_request", message: "since must be RFC3339", substrings: []string{"since must be rfc3339: mlwh: bad request (", "fix the input"},
 			},
 			{
 				tool: "mlwh_sample_crams_for_study", path: "/study/MISSING/sample-crams",
@@ -307,6 +344,38 @@ func TestF3NewToolErrorMapping(t *testing.T) {
 			}
 			So(stub.requestCount(), ShouldEqual, index+1)
 		}
+	})
+
+	Convey("F3.4: a 4xx with no sentinel code is a rejected request to fix, not an impaired upstream to retry", t, func() {
+		stub := newStubMLWH(t)
+		cs, cleanup := runMLWHServerWithClient(t, stub)
+		defer cleanup()
+
+		stub.respondError("/study/S1/users", http.StatusForbidden, "forbidden", "admins only")
+		result := callTool(t, cs, "mlwh_study_users", map[string]any{"study_lims_id": "S1"})
+		So(result.IsError, ShouldBeTrue)
+
+		text := firstTextContent(result)
+		So(text, ShouldStartWith, "admins only: mlwh: request rejected (403 forbidden) (")
+		So(text, ShouldContainSubstring, "fix the request")
+		So(text, ShouldNotContainSubstring, wa.ErrUpstreamImpaired.Error())
+		So(text, ShouldNotContainSubstring, "retry later")
+	})
+
+	Convey("F3.5: a wa v1.1.0 never-synced envelope on a list endpoint maps to the sync remedy with no not-found text", t, func() {
+		stub := newStubMLWH(t)
+		cs, cleanup := runMLWHServerWithClient(t, stub)
+		defer cleanup()
+
+		stub.respondError("/sample/S1/runs", http.StatusServiceUnavailable, "cache_never_synced", wa.ErrCacheNeverSynced.Error())
+		result := callTool(t, cs, "mlwh_runs_for_sample", map[string]any{"sanger_name": "S1"})
+		So(result.IsError, ShouldBeTrue)
+
+		text := firstTextContent(result)
+		So(text, ShouldStartWith, wa.ErrCacheNeverSynced.Error()+" (")
+		So(strings.Count(text, wa.ErrCacheNeverSynced.Error()), ShouldEqual, 1)
+		So(strings.ToLower(text), ShouldNotContainSubstring, "not found")
+		So(text, ShouldContainSubstring, "retry once a sync has run")
 	})
 
 	Convey("F3.3: cache-never-synced wins over a joined not-found sentinel without leaking the wrong remedy", t, func() {

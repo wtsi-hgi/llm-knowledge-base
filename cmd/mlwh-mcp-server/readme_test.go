@@ -106,7 +106,7 @@ func TestREADMEHTTPDocs(t *testing.T) {
 }
 
 func TestREADMEPublicAPIDocs(t *testing.T) {
-	Convey("Given the complete public README for MLWH API 1.11.0", t, func() {
+	Convey("Given the complete public README for MLWH API 1.13.0", t, func() {
 		readmeBytes, err := os.ReadFile("../../README.md")
 		So(err, ShouldBeNil)
 
@@ -137,10 +137,12 @@ func TestREADMEPublicAPIDocs(t *testing.T) {
 			So(readme, ShouldNotContainSubstring, "manifest")
 		})
 
-		Convey("F2.2: version prose and the version example use API 1.11.0 only", func() {
-			So(prose, ShouldContainSubstring, "currently mlwh api 1.11.0")
-			So(readme, ShouldContainSubstring, "# mlwh api version 1.11.0")
+		Convey("F2.2: version prose and the version example use API 1.13.0 only", func() {
+			So(prose, ShouldContainSubstring, "currently mlwh api 1.13.0")
+			So(readme, ShouldContainSubstring, "# mlwh api version 1.13.0")
+			So(prose, ShouldNotContainSubstring, "currently mlwh api 1.12.0")
 			So(prose, ShouldNotContainSubstring, "currently mlwh api 1.10.0")
+			So(prose, ShouldNotContainSubstring, "currently mlwh api 1.11.0")
 			So(prose, ShouldNotContainSubstring, "currently mlwh api 1.9.0")
 			So(readme, ShouldNotContainSubstring, "1.8.1")
 			So(readme, ShouldNotContainSubstring, "1.7.0")
@@ -154,6 +156,17 @@ func TestREADMEPublicAPIDocs(t *testing.T) {
 				"lanes exports default to the `supplier_name,sanger_sample_id,id_run,lane,tag_index` columns; "+
 				"`columns=id_run,lane,tag_index` gives the pre-1.11.0 shape.")
 			So(prose, ShouldContainSubstring, "**go 1.27.3+**")
+		})
+
+		Convey("F2.9: find_samples lists every sample sharing a value, and errors name candidates and split rejected from impaired", func() {
+			cookbook := singleSpaced(questions)
+			So(cookbook, ShouldContainSubstring, "which samples have supplier name `pd42487a`?")
+			So(cookbook, ShouldContainSubstring, "`mlwh_find_samples` returns every sample sharing the value")
+			So(cookbook, ShouldContainSubstring, "it needs mlwh api 1.13.0; older servers answer ambiguous")
+			So(prose, ShouldContainSubstring, "a bad request says to fix the input")
+			So(prose, ShouldContainSubstring, "an impaired upstream says to retry later")
+			So(prose, ShouldContainSubstring, "an ambiguity error names up to 10 candidate sanger samples")
+			So(prose, ShouldContainSubstring, "`mlwh_find_samples` with `field=supplier_name` to list every sample sharing a supplier name")
 		})
 
 		Convey("F2.3: product-table guidance uses bounded export and preserves products without iRODS", func() {

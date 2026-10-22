@@ -28,6 +28,9 @@ package mlwh
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -36,13 +39,25 @@ import (
 	"github.com/wtsi-hgi/llm-knowledge-base/internal/core"
 )
 
+// findSamplesDefaultLimit is mlwh_find_samples' page size when limit is
+// omitted. It is smaller than the shared paged default because a common
+// library type can match thousands of samples, and one page of full Sample
+// rows should not flood the agent's context.
+const findSamplesDefaultLimit = 50
+
 // findSamplesDescription is the LLM-facing description of the unified
-// mlwh_find_samples tool. It explains the exact-match semantics and lists the
-// supported field values so the agent picks one tool with a field enum instead
-// of choosing among five flat finders.
+// mlwh_find_samples tool. It explains the exact-match semantics, the paging,
+// and the API version the list behaviour needs, and lists the supported field
+// values so the agent picks one tool with a field enum instead of choosing
+// among five flat finders.
 const findSamplesDescription = "Find samples by an exact field value. Choose the field to match on " +
 	"(sanger_id, lims_id, accession, supplier_name, or library_type) and give the exact value; " +
-	"returns every sample whose chosen field equals that value (an exact match, not a search). " +
+	"returns every sample whose chosen field equals that value (an exact match, not a search), " +
+	"ordered by Sanger sample name, so it lists all samples sharing a supplier name or library type. " +
+	"Needs MLWH API 1.13.0; older servers answer ambiguous when several samples share the value. " +
+	"Returns a page of 50 samples by default, maximum 1000 (a larger limit is rejected, not clamped); " +
+	"total is the number of matching samples and next_offset is the offset of the next page, or -1 " +
+	"on the last page. Use mlwh_count_find_samples when the count alone answers the question. " +
 	"This unifies the five per-field sample finders behind one field enum." +
 	bareListFreshnessNote
 
@@ -135,11 +150,27 @@ func takesSingleSampleName(method string) bool {
 // derived from the FindSamplesBy* Registry methods in Registry order). The SDK
 // validates input against this schema before the handler runs, so an out-of-enum
 // field is rejected without an HTTP call (Story B2.3).
-func findSamplesInputSchema() map[string]any {
-	return enumStringInputSchema(
+// With paged set, it also carries mlwh_find_samples' limit and offset.
+func findSamplesInputSchema(paged bool) map[string]any {
+	schema := enumStringInputSchema(
 		"field", findSamplesFieldEnum(), "the exact sample field to match on",
 		"value", "the exact value the chosen field must equal",
 	)
+	if !paged {
+		return schema
+	}
+
+	properties, _ := schema["properties"].(map[string]any)
+	properties["limit"] = map[string]any{
+		"type": "integer",
+		"description": fmt.Sprintf("maximum samples to return; defaults to %d, maximum %d "+
+			"(a larger limit is rejected, not clamped)", findSamplesDefaultLimit, pagedMaxLimit),
+	}
+	properties["offset"] = map[string]any{
+		"type": "integer", "description": "non-negative number of leading samples to skip; defaults to 0",
+	}
+
+	return schema
 }
 
 // expandInputSchema builds the pre-set input schema for the expand tools,
@@ -283,24 +314,29 @@ func (p *provider) registerResolvers(r core.Registrar, outputSchema map[string]a
 
 // findSamplesInput is the input for the unified mlwh_find_samples tool (Story
 // B2): the exact field to match on (a constrained enum, validated against the
-// pre-set input schema before the handler runs) and the value to match. The
-// jsonschema tag supplies the property descriptions; the enum constraint is
-// injected via the pre-set input schema (findSamplesInputSchema), not this tag.
+// pre-set input schema before the handler runs), the value to match, and the
+// page bounds. The pre-set input schema (findSamplesInputSchema) supplies the
+// property descriptions and the enum constraint, not these tags.
+// mlwh_count_find_samples shares it with no limit or offset in its schema.
 type findSamplesInput struct {
-	Field string `json:"field" jsonschema:"the exact sample field to match on"`
-	Value string `json:"value" jsonschema:"the exact value the chosen field must equal"`
+	Field  string `json:"field"`
+	Value  string `json:"value"`
+	Limit  int    `json:"limit,omitempty"`
+	Offset int    `json:"offset,omitempty"`
 }
 
 // addFindSamples registers mlwh_find_samples (Story B2). Its input schema is
 // pre-set with the code-sourced field enum (findSamplesFieldEnum), so the SDK
 // rejects an out-of-enum field before the handler runs (no HTTP call). The
-// handler maps the chosen field to its FindSamplesBy* Registry method and
-// dispatches through the generic Call, so the hyphenated upstream path (e.g.
+// handler bounds the page (findSamplesDefaultLimit by default), maps the chosen
+// field to its FindSamplesBy* Registry method, and dispatches through the
+// generic CallWithHeaders, so the hyphenated upstream path (e.g.
 // /find/sample/sanger-id/:id) is produced by the Registry, not hand-built; the
-// decoded *[]wa.Sample is wrapped under {"samples":[...]} for the object-typed
-// result MCP requires.
+// decoded *[]wa.Sample is wrapped under
+// {"samples":[...],"total":N,"next_offset":M} from X-Total-Count and
+// X-Next-Offset.
 func (p *provider) addFindSamples(r core.Registrar) error {
-	outputSchema, err := outputSchemaForSlice("samples", "Sample")
+	outputSchema, err := outputSchemaForPagedSlice("samples", "Sample")
 	if err != nil {
 		return fmt.Errorf("build samples output schema: %w", err)
 	}
@@ -311,28 +347,47 @@ func (p *provider) addFindSamples(r core.Registrar) error {
 	mcp.AddTool(r.Server(), &mcp.Tool{
 		Name:         "mlwh_find_samples",
 		Description:  findSamplesDescription,
-		InputSchema:  findSamplesInputSchema(),
+		InputSchema:  findSamplesInputSchema(true),
 		OutputSchema: outputSchema,
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in findSamplesInput) (*mcp.CallToolResult, samplesResult, error) {
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in findSamplesInput) (*mcp.CallToolResult, pagedSamplesResult, error) {
 		method, ok := methods[in.Field]
 		if !ok {
-			return core.ToolError[samplesResult](fmt.Errorf("unknown field %q; choose one of the supported sample fields", in.Field))
+			return core.ToolError[pagedSamplesResult](fmt.Errorf("unknown field %q; choose one of the supported sample fields", in.Field))
 		}
 
-		result, err := client.Call(ctx, method, []string{in.Value}, nil)
+		limit, offset, err := pagination(in.Limit, in.Offset, findSamplesDefaultLimit)
 		if err != nil {
-			return core.ToolError[samplesResult](mapToolError(err))
+			return core.ToolError[pagedSamplesResult](err)
+		}
+
+		query := url.Values{"limit": {strconv.Itoa(limit)}, "offset": {strconv.Itoa(offset)}}
+
+		result, headers, err := client.CallWithHeaders(ctx, method, []string{in.Value}, query)
+		if err != nil {
+			return core.ToolError[pagedSamplesResult](mapToolError(err))
 		}
 
 		samples, ok := result.(*[]wa.Sample)
 		if !ok {
-			return core.ToolError[samplesResult](fmt.Errorf("mlwh: %s returned %T, want *[]Sample", method, result))
+			return core.ToolError[pagedSamplesResult](fmt.Errorf("mlwh: %s returned %T, want *[]Sample", method, result))
 		}
 
-		return nil, samplesResult{Samples: *samples}, nil
+		return nil, findSamplesPage(*samples, headers, offset), nil
 	})
 
 	return nil
+}
+
+// findSamplesPage wraps one find page with its X-Total-Count and X-Next-Offset
+// metadata. A server older than API 1.13.0 sends neither header and returns at
+// most one sample (it answers ambiguous for more), so the total then falls back
+// to the samples it returned past offset, with no next page.
+func findSamplesPage(samples []wa.Sample, headers http.Header, offset int) pagedSamplesResult {
+	return pagedSamplesResult{
+		Samples:    samples,
+		Total:      headerInt(headers, "X-Total-Count", offset+len(samples)),
+		NextOffset: headerInt(headers, "X-Next-Offset", -1),
+	}
 }
 
 // addCountFindSamples registers mlwh_count_find_samples (D4). It shares
@@ -352,7 +407,7 @@ func (p *provider) addCountFindSamples(r core.Registrar) error {
 	mcp.AddTool(r.Server(), &mcp.Tool{
 		Name:         "mlwh_count_find_samples",
 		Description:  countFindSamplesDescription,
-		InputSchema:  findSamplesInputSchema(),
+		InputSchema:  findSamplesInputSchema(false),
 		OutputSchema: outputSchema,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in findSamplesInput) (*mcp.CallToolResult, wa.Count, error) {
 		method, ok := methods[in.Field]

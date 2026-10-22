@@ -41,18 +41,32 @@ import (
 // (not high_water) is the cache-currency signal for "as of" caveats. high_water
 // is only wa's sync-mode-specific source-progress watermark and may stay old
 // when the source is unchanged, so it must never be phrased as "synced through".
-// It also SUCCEEDS even on a never-synced cache (every table then reporting
-// ever_synced=false with empty timestamps) so an answer can be caveated rather
-// than failing outright.
-const freshnessDescription = "Report MLWH cache freshness: for each mirrored sync table, returns its " +
+// It also explains the per-table and overall sync status (MLWH API 1.12.0+) and
+// what each status means for the user's answer, and that the tool SUCCEEDS even
+// on a never-synced cache (every table then reporting ever_synced=false with
+// empty timestamps) so an answer can be caveated rather than failing outright.
+const freshnessDescription = "Report MLWH cache freshness and sync health: for each mirrored sync table, returns its " +
 	"last_run and high_water timestamps (UTC RFC3339, empty if never synced) and an ever_synced flag. " +
 	"last_run is that table's cache sync/refresh time: use it for cache-currentness and \"as of\" caveats, " +
 	"and for a multi-table answer use the oldest relevant last_run. high_water is ONLY wa's " +
 	"sync-mode-specific source-progress watermark: it may be a source-change time, a full-refresh snapshot " +
 	"time, or empty, and it may stay old when the source data is unchanged, so never phrase it as \"synced " +
 	"through\" and never use it to judge when the cache was refreshed. Also use last_run to detect a " +
-	"never-synced cache. Takes no input. This SUCCEEDS even on a never-synced cache: every table then " +
-	"reports ever_synced=false with empty timestamps (the never-synced state), so it is not an error."
+	"never-synced cache. " +
+	"Each table also has a status, and the top-level status is the most severe table status " +
+	"(failing, then never_synced, then stale, then ok). ok: the table's last sync succeeded within " +
+	"stale_after_seconds; answer normally with the last_run caveat. stale: its last successful sync " +
+	"(last_success_at) is older than stale_after_seconds, so tell the user the data may be out of date " +
+	"and give last_success_at; recent MLWH changes may be missing. failing: its most recent sync failed " +
+	"(last_error, last_error_at) or was skipped because the dependency tables in blocked_by failed; the " +
+	"cache still serves the data from its last success, so answers may be stale or incomplete for that " +
+	"table: tell the user sync is failing and since when, and that the server admin should check it. " +
+	"never_synced: the table has no data yet, so empty or zero results from it do not mean the data does " +
+	"not exist in MLWH. Only mention status for tables relevant to the answer; an empty status means a " +
+	"wa server older than MLWH API 1.12.0, so fall back to last_run. blocked_by is always an array, " +
+	"empty unless the table was skipped. Takes no input. This SUCCEEDS even on a never-synced cache: " +
+	"every table then reports ever_synced=false with empty timestamps (the never-synced state), so it " +
+	"is not an error."
 
 // registerFreshnessTool adds the mlwh_freshness tool (Story D1) to the server
 // through the Registrar. It pre-sets the OpenAPI-sourced output schema for
@@ -82,8 +96,22 @@ func (p *provider) registerFreshnessTool(r core.Registrar) error {
 			return core.ToolError[wa.Freshness](mapToolError(err))
 		}
 
-		return nil, freshness, nil
+		return nil, normaliseFreshness(freshness), nil
 	})
 
 	return nil
+}
+
+// normaliseFreshness makes every table's blocked_by an empty array rather than
+// null. A wa server older than MLWH API 1.12.0 omits blocked_by, and a JSON
+// null decodes to a nil slice; either would marshal as null, which the
+// OpenAPI-sourced output schema (an array) rejects.
+func normaliseFreshness(freshness wa.Freshness) wa.Freshness {
+	for i := range freshness.Tables {
+		if freshness.Tables[i].BlockedBy == nil {
+			freshness.Tables[i].BlockedBy = []string{}
+		}
+	}
+
+	return freshness
 }

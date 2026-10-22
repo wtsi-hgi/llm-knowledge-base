@@ -21,7 +21,7 @@ server is a thin, well-described bridge whose value is making those endpoints
 ergonomic and correctly usable by an LLM, not re-implementing them: it imports
 `github.com/wtsi-hgi/wa/mlwh` and reuses its typed client, response types,
 registry, and OpenAPI document directly, so there is no type drift and the server
-is compile-time-locked to the upstream API version (currently MLWH API 1.11.0).
+is compile-time-locked to the upstream API version (currently MLWH API 1.13.0).
 
 The MLWH provider serves over the **stdio** transport by default, so it can run
 as a local subprocess launched per user by an agent CLI. It can also run in
@@ -52,7 +52,7 @@ below. Check the build and the versions it targets:
 ```bash
 mlwh-mcp-server --version
 # mlwh-mcp-server version <build version>
-# MLWH API version 1.11.0
+# MLWH API version 1.13.0
 ```
 
 ## Configuration
@@ -276,6 +276,11 @@ Prompt cookbook:
   - "Find samples where accession is exactly `ERS123`."
   - "Count samples with supplier name exactly `Bob`."
   - "Find samples for library type `WGS`."
+  - "Which samples have supplier name `PD42487a`?"
+  - `mlwh_find_samples` returns every sample sharing the value, ordered by
+    Sanger sample name, in pages of 50 by default (`limit` up to 1000,
+    `offset`, with `total` and `next_offset`). It needs MLWH API 1.13.0; older
+    servers answer ambiguous when several samples share the value.
 - **Product tables and relationship exports**
   - "Use `mlwh_export` with `children=products`, `parent_kind=study`, and
     `parent_id=S1` to return the chosen product columns."
@@ -350,6 +355,7 @@ Prompt cookbook:
 - **Freshness and caveats**
   - "How fresh is the MLWH cache?"
   - "Before answering, check whether the cache has synced recently."
+  - "Is MLWH sync failing or stale for the tables behind this answer?"
   - "This list has no `cache_synced_at`; use `mlwh_freshness` for the as-of caveat."
 - **Large answers and paging**
   - "Count first, then list the first 100 rows."
@@ -410,6 +416,16 @@ Notes for interpreting answers:
   tables) or an endpoint's `cache_synced_at` for cache currency and "as of"
   caveats; `high_water` is only wa's source-progress watermark that may stay old
   when the source data is unchanged, so never read it as "synced through".
+- `mlwh_freshness` also reports a `status` per table and overall (MLWH API
+  1.12.0+): `ok`; `stale` when the last successful sync (`last_success_at`) is
+  older than `stale_after_seconds`; `failing` when the latest sync failed
+  (`last_error`) or was skipped because the tables in `blocked_by` failed; and
+  `never_synced` when a table has no data yet. The overall status is the worst
+  table status. The cache keeps serving data from the last successful sync, so
+  agents tell users when the tables behind an answer are stale or failing, and
+  that empty results from a never-synced table do not show the data is absent
+  from MLWH. `blocked_by` is always an array, empty when nothing blocked the
+  table; against an older wa, `status` is empty.
 
 ## What the server exposes
 
@@ -466,8 +482,9 @@ A curated, LLM-ergonomic tool surface generated from the MLWH endpoint registry
   `mlwh_count_studies_for_faculty_sponsor`, `mlwh_studies_for_user`,
   `mlwh_count_studies_for_user`, `mlwh_resolve_person`,
   `mlwh_count_resolve_person`.
-- **Freshness**: `mlwh_freshness` reports per-table sync state so answers can be
-  caveated; it succeeds even against a never-synced cache.
+- **Freshness**: `mlwh_freshness` reports per-table sync state and sync health
+  (`ok`, `stale`, `failing`, `never_synced`) so answers can be caveated; it
+  succeeds even against a never-synced cache.
 - **Feedback**: `mlwh_provide_feedback` is the only tool that writes upstream.
   Agents call it on their own initiative to report a problem with the current
   request (`could_not_answer`, `agent_mistake`, `no_endpoint`, `user_unhappy`,
@@ -502,10 +519,15 @@ The server also publishes two MCP resources:
 Upstream errors are mapped to clear, actionable tool errors: bad input, not
 found, ambiguous identifiers, unsupported identifiers, never-synced cache state,
 and impaired upstream/cache failures all keep the upstream context and add a
-caller-oriented next step. When the ambiguous identifier is a sample supplier
-name or donor id shared by several samples, the next step is
-`mlwh_search_samples` with that value as `term` to list them, or `mlwh_export`
-with `multi_sample=true` to get rows for all of them. A wa server older than
+caller-oriented next step. A bad request says to fix the input, any other
+rejected request keeps its status and says to fix the request, and an impaired
+upstream says to retry later. From MLWH API 1.13.0 an ambiguity error names up
+to 10 candidate Sanger samples (LIMS ids for studies), which the agent can use
+directly. When the ambiguous identifier is a sample supplier name or donor id
+shared by several samples, the next step is `mlwh_find_samples` with
+`field=supplier_name` to list every sample sharing a supplier name,
+`mlwh_search_samples` with that value as `term`, or `mlwh_export` with
+`multi_sample=true` to get rows for all of them. A wa server older than
 API 1.11.0 cannot export several samples together, so that error says to retry
 without `multi_sample`, once per Sanger sample name.
 

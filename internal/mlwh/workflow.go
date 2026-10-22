@@ -86,6 +86,12 @@ const workflowGuidance = "# MLWH workflows\n\n" +
 	"`mlwh_lanes_for_sample` takes one Sanger sample name only. Lanes exports default to " +
 	"`supplier_name,sanger_sample_id,id_run,lane,tag_index` so each row names its sample; " +
 	"`columns=id_run,lane,tag_index` gives the pre-1.11.0 shape.\n" +
+	"- Which samples share a supplier name, or have a library type: use " +
+	"`mlwh_find_samples field=supplier_name|library_type value=<the value>` (needs MLWH API 1.13.0), " +
+	"which lists every match ordered by Sanger sample name, in pages of 50 by default with " +
+	"`total` and `next_offset`; use `mlwh_count_find_samples` when the count alone answers.\n" +
+	"- Ambiguous identifiers: from MLWH API 1.13.0 the ambiguity error names up to 10 candidate " +
+	"Sanger samples (LIMS ids for studies); use them directly as identifiers instead of searching again.\n" +
 	"- Runs per month: use `mlwh_monthly_run_counts`. Use `mlwh_runs` for global " +
 	"keyset-paged drill-down and `mlwh_count_runs` for global sizing.\n" +
 	"- Sequencing by programme, faculty sponsor, platform, manufacturer, or month: " +
@@ -131,7 +137,16 @@ const workflowGuidance = "# MLWH workflows\n\n" +
 	"cache_synced_at. From `mlwh_freshness` use per-table `last_run` (the oldest relevant " +
 	"across tables) for cache currency and as-of caveats; `high_water` is only a " +
 	"source-progress watermark that can lag when the source is unchanged, so never report " +
-	"it as \"synced through\" or treat it as refresh currency.\n\n" +
+	"it as \"synced through\" or treat it as refresh currency.\n" +
+	"- Sync health: `mlwh_freshness` also reports a `status` per table and overall " +
+	"(MLWH API 1.12.0+). Check it for the tables behind an answer. `stale` means the last " +
+	"successful sync (`last_success_at`) is older than `stale_after_seconds`: say the data may " +
+	"be out of date and give that time. `failing` means the latest sync failed (`last_error`) " +
+	"or was skipped because the tables in `blocked_by` failed: the cache still serves data from " +
+	"the last success, so say sync is failing, since when, that recent MLWH changes may be " +
+	"missing, and that the server admin should check it. `never_synced` means the table has no " +
+	"data yet, so empty or zero results from it do not show the data is absent from MLWH. `ok` " +
+	"needs only the usual as-of caveat.\n\n" +
 	"Feedback: call `mlwh_provide_feedback` on your own initiative, without asking the user, " +
 	"when you could not answer a question (`could_not_answer`), made a mistake " +
 	"(`agent_mistake`), found that no endpoint could answer the question (`no_endpoint`), the user " +
