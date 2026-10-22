@@ -609,7 +609,7 @@ func TestExportToolContractB1(t *testing.T) {
 		So(ok, ShouldBeTrue)
 		for _, phrase := range []string{
 			"parent_kind=sample", "supplier name", "donor id", "every matching sample",
-			"Sanger sample", "ambiguous", "1.11.0",
+			"Sanger sample", "ambiguous", "1.11.0", "names the candidate Sanger samples, usable directly as parent_id",
 		} {
 			So(description, ShouldContainSubstring, phrase)
 		}
@@ -1105,7 +1105,7 @@ func TestExportToolMultiSampleB4(t *testing.T) {
 		text := firstTextContent(result)
 		So(text, ShouldContainSubstring, "sample SANG1 matches 2 samples")
 		So(text, ShouldContainSubstring, "multi_sample cannot span it")
-		So(text, ShouldContainSubstring, "pick one Sanger name from mlwh_search_samples term=")
+		So(text, ShouldContainSubstring, "pick one of the Sanger samples the message names, or one Sanger name from mlwh_search_samples term=")
 		So(text, ShouldNotContainSubstring, "multi_sample=true")
 		So(text, ShouldNotContainSubstring, "retry without multi_sample")
 	})

@@ -166,8 +166,8 @@ github.com/ugorji/go/codec v1.3.1 h1:waO7eEiFDwidsBN6agj1vJQ4AG7lh2yqXyOXqhgQuyY
 github.com/ugorji/go/codec v1.3.1/go.mod h1:pRBVtBSKl77K30Bv8R2P+cLSGaTtex6fsA2Wjqmfxj4=
 github.com/wtsi-hgi/go-authserver v1.6.0 h1:NV6fE7xWDXOomegxzlir3TyUWu/StmoilN2yFENqv1U=
 github.com/wtsi-hgi/go-authserver v1.6.0/go.mod h1:xwaucqI4ICNZ0WF7hnT1K6ldXY9RUZM0w/rUuZ92i6Y=
-github.com/wtsi-hgi/wa v1.0.1-0.20261021215923-fa77143292e0 h1:e6QPUYH4sRZDcQaw9z7BGV0VVbD0M3sA7snzntlLYxA=
-github.com/wtsi-hgi/wa v1.0.1-0.20261021215923-fa77143292e0/go.mod h1:UWCXiRAd1M8vx2yuAuV+QRq3n2G+pPx6d9ZQ4J+/pQA=
+github.com/wtsi-hgi/wa v1.1.0 h1:DKDeEbON/7eBp7tXnwAooCGWaHiLCSCPY/GNPsz6H5A=
+github.com/wtsi-hgi/wa v1.1.0/go.mod h1:UWCXiRAd1M8vx2yuAuV+QRq3n2G+pPx6d9ZQ4J+/pQA=
 github.com/yosida95/uritemplate/v3 v3.0.2 h1:Ed3Oyj9yrmi9087+NczuL5BwkIc4wvTb5zIM+UJPGz4=
 github.com/yosida95/uritemplate/v3 v3.0.2/go.mod h1:ILOh0sOhIJR3+L/8afwt/kE++YT040gmv5BQTMR2HP4=
 github.com/youmark/pkcs8 v0.0.0-20240726163527-a2c0da244d78 h1:ilQV1hzziu+LLM3zUTJ0trRztfwgjqKnBWNtSRkbmwM=

@@ -286,6 +286,95 @@ func TestFindSamplesTool(t *testing.T) {
 			enum := inputPropertyEnum(tool, "field")
 			So(enum, ShouldResemble, []string{"sanger_id", "lims_id", "accession", "supplier_name", "library_type"})
 		})
+
+		Convey("B2.5: a shared supplier name returns every matching sample with total and next_offset, asking for a default page of 50", func() {
+			stub.respondJSONWithHeaders("/find/sample/supplier-name/PD42487a", http.StatusOK, []wa.Sample{
+				{IDSampleTmp: 1, Name: "A"}, {IDSampleTmp: 2, Name: "B"},
+			}, http.Header{"X-Total-Count": {"3"}, "X-Next-Offset": {"2"}})
+
+			res := callTool(t, cs, "mlwh_find_samples", map[string]any{"field": "supplier_name", "value": "PD42487a"})
+			So(res.IsError, ShouldBeFalse)
+
+			obj := structuredObject(res)
+			samples, ok := obj["samples"].([]any)
+			So(ok, ShouldBeTrue)
+			So(len(samples), ShouldEqual, 2)
+			So(obj["total"], ShouldEqual, 3)
+			So(obj["next_offset"], ShouldEqual, 2)
+
+			req, ok := stub.lastRequest()
+			So(ok, ShouldBeTrue)
+			So(req.Path, ShouldEqual, "/find/sample/supplier-name/PD42487a")
+			So(req.Query.Get("limit"), ShouldEqual, "50")
+			So(req.Query.Get("offset"), ShouldEqual, "0")
+		})
+
+		Convey("B2.6: limit and offset pass through to the upstream page", func() {
+			stub.respondJSONWithHeaders("/find/sample/library-type/WGS", http.StatusOK, []wa.Sample{{IDSampleTmp: 9, Name: "Z"}},
+				http.Header{"X-Total-Count": {"21"}, "X-Next-Offset": {"-1"}})
+
+			res := callTool(t, cs, "mlwh_find_samples", map[string]any{
+				"field": "library_type", "value": "WGS", "limit": 10, "offset": 20,
+			})
+			So(res.IsError, ShouldBeFalse)
+
+			obj := structuredObject(res)
+			So(obj["total"], ShouldEqual, 21)
+			So(obj["next_offset"], ShouldEqual, -1)
+
+			req, ok := stub.lastRequest()
+			So(ok, ShouldBeTrue)
+			So(req.Query.Get("limit"), ShouldEqual, "10")
+			So(req.Query.Get("offset"), ShouldEqual, "20")
+		})
+
+		Convey("B2.7: a limit above 1000 or a negative offset is rejected with no HTTP request", func() {
+			res := callTool(t, cs, "mlwh_find_samples", map[string]any{"field": "library_type", "value": "WGS", "limit": 1001})
+			So(res.IsError, ShouldBeTrue)
+			So(firstTextContent(res), ShouldContainSubstring, "exceeds the maximum of 1000")
+
+			res = callTool(t, cs, "mlwh_find_samples", map[string]any{"field": "library_type", "value": "WGS", "offset": -1})
+			So(res.IsError, ShouldBeTrue)
+			So(firstTextContent(res), ShouldContainSubstring, "offset -1 must be non-negative")
+
+			So(stub.requestCount(), ShouldEqual, 0)
+		})
+
+		Convey("B2.8: a server older than API 1.13.0 sends no paging headers, so total counts the returned sample and there is no next page", func() {
+			stub.respondJSON("/find/sample/accession/SAMEA1", http.StatusOK, []wa.Sample{{IDSampleTmp: 7, Name: "Found One"}})
+
+			res := callTool(t, cs, "mlwh_find_samples", map[string]any{"field": "accession", "value": "SAMEA1"})
+
+			obj := structuredObject(res)
+			So(obj["total"], ShouldEqual, 1)
+			So(obj["next_offset"], ShouldEqual, -1)
+		})
+
+		Convey("B2.9: the schema and description expose paging, the list semantics, and the API 1.13.0 requirement", func() {
+			tool, ok := toolByName(t, cs, "mlwh_find_samples")
+			So(ok, ShouldBeTrue)
+
+			schema, ok := tool.InputSchema.(map[string]any)
+			So(ok, ShouldBeTrue)
+			properties, ok := schema["properties"].(map[string]any)
+			So(ok, ShouldBeTrue)
+			So(properties, ShouldContainKey, "limit")
+			So(properties, ShouldContainKey, "offset")
+
+			So(tool.Description, ShouldContainSubstring, "returns every sample whose chosen field equals that value")
+			So(tool.Description, ShouldContainSubstring, "all samples sharing a supplier name or library type")
+			So(tool.Description, ShouldContainSubstring, "Needs MLWH API 1.13.0; older servers answer ambiguous")
+			So(tool.Description, ShouldContainSubstring, "page of 50 samples by default, maximum 1000")
+			So(tool.Description, ShouldContainSubstring, "next_offset")
+
+			count, ok := toolByName(t, cs, "mlwh_count_find_samples")
+			So(ok, ShouldBeTrue)
+			countSchema, ok := count.InputSchema.(map[string]any)
+			So(ok, ShouldBeTrue)
+			countProperties, ok := countSchema["properties"].(map[string]any)
+			So(ok, ShouldBeTrue)
+			So(countProperties, ShouldNotContainKey, "limit")
+		})
 	})
 }
 

@@ -276,6 +276,16 @@ func TestWorkflowResource(t *testing.T) {
 			So(guidance, ShouldContainSubstring, "MLWH API 1.11.0")
 		})
 
+		Convey("H1.3: shared supplier names and library types route to mlwh_find_samples, and ambiguity candidates are usable directly", func() {
+			guidance := workflowGuidancePrefix(t, contents.Text)
+
+			So(guidance, ShouldContainSubstring, "`mlwh_find_samples field=supplier_name|library_type value=<the value>` (needs MLWH API 1.13.0)")
+			So(guidance, ShouldContainSubstring, "lists every match ordered by Sanger sample name, in pages of 50 by default")
+			So(guidance, ShouldContainSubstring, "`total` and `next_offset`")
+			So(guidance, ShouldContainSubstring, "the ambiguity error names up to 10 candidate Sanger samples")
+			So(guidance, ShouldContainSubstring, "use them directly as identifiers")
+		})
+
 		Convey("H1.2: lanes export default columns and the pre-1.11.0 shape are documented", func() {
 			guidance := workflowGuidancePrefix(t, contents.Text)
 

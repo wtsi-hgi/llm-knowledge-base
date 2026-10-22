@@ -28,6 +28,8 @@ package mlwh
 import (
 	"errors"
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 
 	wa "github.com/wtsi-hgi/wa/mlwh"
@@ -38,7 +40,8 @@ import (
 // ambiguity when the value is also a must-be-unique sample identifier, so
 // suggesting multi_sample=true again would loop the agent.
 const multiSampleAmbiguityHint = "this value also identifies a single sample by name, id, or accession, " +
-	"so multi_sample cannot span it; pick one Sanger name from mlwh_search_samples term=<the value> and retry with it."
+	"so multi_sample cannot span it; pick one of the Sanger samples the message names, or one Sanger name " +
+	"from mlwh_search_samples term=<the value>, and retry with it."
 
 // errorHint pairs a wa/mlwh sentinel with the short actionable hint appended to
 // its mapped tool error. The hints turn an opaque upstream failure into advice
@@ -60,7 +63,7 @@ func mapErrorWithHints(err error, mappings []errorHint) error {
 			continue
 		}
 
-		base := mapping.sentinel.Error()
+		base := sentinelBase(err, mapping.sentinel)
 		if context := upstreamContext(err.Error(), mappings); context != "" {
 			return fmt.Errorf("%s: %s (%s)", context, base, mapping.hint)
 		}
@@ -91,9 +94,12 @@ func multiSampleHints() []errorHint {
 // from a genuinely absent identifier (fix the input). ErrMultiSampleUnsupported
 // is checked BEFORE ErrAmbiguous because wa's MultiSampleUnsupportedError
 // unwraps to both, and an old server needs the retry-without-multi_sample
-// remedy rather than the advice to set multi_sample. ErrUpstreamImpaired
-// covers both the 502 (impaired cache) and the 400 (bad request) cases, whose
-// preserved upstream message (e.g. "term too short") carries the detail.
+// remedy rather than the advice to set multi_sample. ErrBadRequest is checked
+// BEFORE ErrRequestRejected because wa's RemoteRequestError unwraps to both for
+// a 400, and a bad request has the more specific fix-the-input remedy. A
+// rejected request (any other unrecognised 4xx) is the caller's to fix, while
+// ErrUpstreamImpaired now only covers a server that failed to serve an accepted
+// request, so its remedy is to retry later.
 func sentinelHints() []errorHint {
 	return []errorHint{
 		{
@@ -112,28 +118,46 @@ func sentinelHints() []errorHint {
 		},
 		{
 			sentinel: wa.ErrAmbiguous,
-			hint: "the identifier matches multiple records; disambiguate it (e.g. use a more specific identifier or kind). " +
-				"A sample supplier name or donor id can span several samples: list them with " +
-				"mlwh_search_samples term=<the name> and keep rows whose supplier_name or donor_id " +
-				"equals it, or get rows for all of them with mlwh_export parent_kind=sample multi_sample=true.",
+			hint: "the identifier matches multiple records; disambiguate it. The message names candidate " +
+				"Sanger samples (LIMS ids for studies) you can use directly; otherwise use a more specific " +
+				"identifier or kind. A sample supplier name or donor id can span several samples: list every " +
+				"sample sharing a supplier name with mlwh_find_samples field=supplier_name value=<the name>, " +
+				"or search with mlwh_search_samples term=<the name> and keep rows whose supplier_name or " +
+				"donor_id equals it, or get rows for all of them with mlwh_export parent_kind=sample multi_sample=true.",
 		},
 		{
 			sentinel: wa.ErrUnsupportedIdentifier,
 			hint:     "the identifier form is not supported for this query; use a supported identifier kind.",
 		},
 		{
+			sentinel: wa.ErrBadRequest,
+			hint:     "the server rejected the input as invalid; fix the input as the message describes, then retry.",
+		},
+		{
+			sentinel: wa.ErrRequestRejected,
+			hint:     "the server rejected the request; fix the request as the status and message describe rather than retrying it unchanged.",
+		},
+		{
 			sentinel: wa.ErrUpstreamImpaired,
-			hint:     "the request could not be served (bad request or impaired upstream); fix the input if the upstream message reports a bad request, otherwise retry later after cache or upstream recovery.",
+			hint:     "the warehouse or its cache could not serve the request; retry later, after cache or upstream recovery.",
 		},
 	}
 }
+
+// requestRejectedDetail matches the "(<status> <code>)" detail wa's
+// RemoteRequestError adds after the ErrRequestRejected text.
+var requestRejectedDetail = regexp.MustCompile(regexp.QuoteMeta(wa.ErrRequestRejected.Error()) + ` \([^)]*\)`)
 
 // upstreamContext extracts any contextual text the upstream error wrapped around
 // its sentinels, by removing every known sentinel message (so a joined companion
 // sentinel does not leak through) with its following ": " separator, so a
 // sentinel in the middle leaves no doubled separator, then trimming the residual
-// separators. It returns "" when nothing but sentinel text remains.
+// separators. A rejected request's "(<status> <code>)" detail goes with its
+// sentinel text, as mapErrorWithHints restates it in the base. It returns ""
+// when nothing but sentinel text remains.
 func upstreamContext(message string, mappings []errorHint) string {
+	message = requestRejectedDetail.ReplaceAllString(message, wa.ErrRequestRejected.Error())
+
 	for _, mapping := range mappings {
 		sentinel := mapping.sentinel.Error()
 		message = strings.ReplaceAll(message, sentinel+": ", "")
@@ -141,6 +165,25 @@ func upstreamContext(message string, mappings []errorHint) string {
 	}
 
 	return strings.Trim(message, " :\n\t")
+}
+
+// sentinelBase returns the matched sentinel's message as the mapped error's
+// base. For a rejected request it adds the upstream status and code, e.g.
+// "mlwh: request rejected (403 forbidden)", since they tell the caller why.
+func sentinelBase(err, sentinel error) string {
+	base := sentinel.Error()
+
+	var rejected *wa.RemoteRequestError
+	if sentinel != wa.ErrRequestRejected || !errors.As(err, &rejected) {
+		return base
+	}
+
+	detail := strconv.Itoa(rejected.StatusCode)
+	if rejected.Code != "" {
+		detail += " " + rejected.Code
+	}
+
+	return base + " (" + detail + ")"
 }
 
 // mapExportError maps an mlwh_export error like mapToolError, except that a
@@ -164,7 +207,7 @@ func mapExportError(err error, multiSample bool) error {
 // errors.Join(ErrCacheNeverSynced, ErrNotFound) reports the cache-not-synced
 // remedy and never leaks the misleading "not found" half of the join. Any
 // genuine contextual text the upstream wrapped around the sentinel (e.g. a 400
-// "term too short" carried as ErrUpstreamImpaired) is preserved as a prefix.
+// "term too short" carried as ErrBadRequest) is preserved as a prefix.
 func mapToolError(err error) error {
 	return mapErrorWithHints(err, sentinelHints())
 }

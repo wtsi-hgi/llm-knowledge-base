@@ -86,6 +86,12 @@ const workflowGuidance = "# MLWH workflows\n\n" +
 	"`mlwh_lanes_for_sample` takes one Sanger sample name only. Lanes exports default to " +
 	"`supplier_name,sanger_sample_id,id_run,lane,tag_index` so each row names its sample; " +
 	"`columns=id_run,lane,tag_index` gives the pre-1.11.0 shape.\n" +
+	"- Which samples share a supplier name, or have a library type: use " +
+	"`mlwh_find_samples field=supplier_name|library_type value=<the value>` (needs MLWH API 1.13.0), " +
+	"which lists every match ordered by Sanger sample name, in pages of 50 by default with " +
+	"`total` and `next_offset`; use `mlwh_count_find_samples` when the count alone answers.\n" +
+	"- Ambiguous identifiers: from MLWH API 1.13.0 the ambiguity error names up to 10 candidate " +
+	"Sanger samples (LIMS ids for studies); use them directly as identifiers instead of searching again.\n" +
 	"- Runs per month: use `mlwh_monthly_run_counts`. Use `mlwh_runs` for global " +
 	"keyset-paged drill-down and `mlwh_count_runs` for global sizing.\n" +
 	"- Sequencing by programme, faculty sponsor, platform, manufacturer, or month: " +
