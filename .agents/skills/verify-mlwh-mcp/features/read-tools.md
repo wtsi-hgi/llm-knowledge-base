@@ -44,5 +44,14 @@ verify-wa's `mlwh-query-api.md` for what the fixture cache holds.
   <spare> --url 127.0.0.1:<spare> --mlwh-cache <copy>`, plus an
   `mlwh-mcp-server --http` against it on another free port. Stop both
   yourself; Cleanup does not know them.
+- The fixture has too few matches to page a search. To walk a search by
+  cursor, seed the same scratch copy with 25 `sample_mirror` rows named
+  `cursorwalk_NN` (plus their `sample_search_token` rows for `words=true`)
+  and a few `study_mirror` rows named `Cursorwalk study N`, then walk
+  `mlwh_search_samples term=cursorwalk limit=10` (and `mlwh_search_studies
+  limit=2`) by passing each `next_cursor` back as `cursor` until it is
+  empty: expect 3 pages, distinct rows, `next_offset=-1` after page 1. To
+  see `stale=true`, update the copy's `sync_state.last_run` for `sample`
+  between two pages.
 - Large results hit `MLWH_MAX_TOOL_RESULT_BYTES` (default 1 MiB) and return
   a structured size error.

@@ -80,9 +80,11 @@ func TestSearchSamplesTool(t *testing.T) {
 
 			res := callTool(t, cs, "mlwh_search_samples", map[string]any{"term": "mus"})
 
-			Convey("A1.1/A3.4: StructuredContent holds samples, total, and next_offset", func() {
+			Convey("A1.1/A3.4: StructuredContent holds samples, total, next_offset, next_cursor, and stale", func() {
 				obj := structuredObject(res)
-				So(len(obj), ShouldEqual, 3)
+				So(len(obj), ShouldEqual, 5)
+				So(obj["next_cursor"], ShouldEqual, "")
+				So(obj["stale"], ShouldEqual, false)
 
 				samples, ok := obj["samples"].([]any)
 				So(ok, ShouldBeTrue)
@@ -167,6 +169,164 @@ func TestSearchSamplesTool(t *testing.T) {
 			So(tool.Description, ShouldContainSubstring, "3")
 			So(tool.Description, ShouldContainSubstring, "1000")
 			So(lower, ShouldContainSubstring, "supplier_name")
+		})
+	})
+}
+
+// TestSearchCursorPaging covers keyset cursor paging (MLWH API 1.15.0) for
+// mlwh_search_samples and mlwh_search_studies: the cursor reaches the upstream
+// in place of offset, X-Next-Cursor and X-Search-Warning become next_cursor
+// and stale/warning, cursor+offset is rejected before HTTP, and an old server
+// that ignores the cursor is reported with an offset-paging hint.
+func TestSearchCursorPaging(t *testing.T) {
+	Convey("Given the MLWH server (stub-backed) with the search tools", t, func() {
+		stub := newStubMLWH(t)
+		cs, cleanup := runMLWHServerWithClient(t, stub)
+		defer cleanup()
+
+		Convey("an offset first page returns X-Next-Cursor as next_cursor with the offset metadata", func() {
+			stub.respondJSONWithHeaders("/search/sample/mus", 200, twoSamples(), http.Header{
+				"X-Total-Count": {"5"},
+				"X-Next-Offset": {"2"},
+				"X-Next-Cursor": {"c1"},
+			})
+
+			obj := structuredObject(callTool(t, cs, "mlwh_search_samples", map[string]any{"term": "mus", "limit": 2}))
+
+			So(obj["total"], ShouldEqual, 5)
+			So(obj["next_offset"], ShouldEqual, 2)
+			So(obj["next_cursor"], ShouldEqual, "c1")
+			So(obj["stale"], ShouldEqual, false)
+			_, hasWarning := obj["warning"]
+			So(hasWarning, ShouldBeFalse)
+		})
+
+		Convey("a cursor page sends cursor and limit but no offset, keeps options, and reports a synced cache", func() {
+			stub.respondJSONWithHeaders("/search/sample/mus", 200, twoSamples(), http.Header{
+				"X-Total-Count":        {"5"},
+				wa.SearchWarningHeader: {wa.SearchCursorStaleWarning},
+			})
+
+			res := callTool(t, cs, "mlwh_search_samples", map[string]any{
+				"term": "mus", "limit": 2, "cursor": "c2", "words": true, "offset": 0,
+			})
+			obj := structuredObject(res)
+
+			So(len(obj["samples"].([]any)), ShouldEqual, 2)
+			So(obj["total"], ShouldEqual, 5)
+			So(obj["next_offset"], ShouldEqual, -1)
+			So(obj["next_cursor"], ShouldEqual, "")
+			So(obj["stale"], ShouldEqual, true)
+			So(obj["warning"], ShouldEqual, wa.SearchCursorStaleWarning)
+
+			req, ok := stub.lastRequest()
+			So(ok, ShouldBeTrue)
+			So(req.Query.Get("cursor"), ShouldEqual, "c2")
+			So(req.Query.Get("limit"), ShouldEqual, "2")
+			So(req.Query.Has("offset"), ShouldBeFalse)
+			So(req.Query.Get("words"), ShouldEqual, "true")
+		})
+
+		Convey("a study cursor page sends the cursor and returns the next cursor", func() {
+			stub.respondJSONWithHeaders("/search/study/cancer", 200, twoCancerStudies(), http.Header{
+				"X-Total-Count":           {"6"},
+				wa.SearchNextCursorHeader: {"s3"},
+			})
+
+			obj := structuredObject(callTool(t, cs, "mlwh_search_studies", map[string]any{
+				"term": "cancer", "limit": 2, "cursor": "s2",
+			}))
+
+			So(len(obj["studies"].([]any)), ShouldEqual, 2)
+			So(obj["total"], ShouldEqual, 6)
+			So(obj["next_offset"], ShouldEqual, -1)
+			So(obj["next_cursor"], ShouldEqual, "s3")
+			So(obj["stale"], ShouldEqual, false)
+
+			req, ok := stub.lastRequest()
+			So(ok, ShouldBeTrue)
+			So(req.Query.Get("cursor"), ShouldEqual, "s2")
+			So(req.Query.Has("offset"), ShouldBeFalse)
+		})
+
+		Convey("cursor with a non-zero offset is a tool error for both tools, with no request made", func() {
+			for _, call := range []struct {
+				tool string
+				args map[string]any
+			}{
+				{"mlwh_search_samples", map[string]any{"term": "mus", "cursor": "c1", "offset": 10}},
+				{"mlwh_search_studies", map[string]any{"term": "cancer", "cursor": "s1", "offset": 10}},
+			} {
+				res := callTool(t, cs, call.tool, call.args)
+
+				So(res.IsError, ShouldBeTrue)
+				text := firstTextContent(res)
+				So(text, ShouldContainSubstring, "cursor and offset 10 cannot be combined")
+				So(text, ShouldContainSubstring, "next_cursor")
+			}
+			So(stub.requestCount(), ShouldEqual, 0)
+		})
+
+		Convey("a server older than API 1.15.0 that ignores the cursor is a tool error saying to page with offset", func() {
+			for _, call := range []struct {
+				tool, path string
+				body       any
+				args       map[string]any
+			}{
+				{"mlwh_search_samples", "/search/sample/mus", twoSamples(), map[string]any{"term": "mus", "cursor": "c1"}},
+				{"mlwh_search_studies", "/search/study/cancer", twoCancerStudies(), map[string]any{"term": "cancer", "cursor": "s1"}},
+			} {
+				stub.respondJSONWithHeaders(call.path, 200, call.body, http.Header{
+					"X-Total-Count": {"5"},
+					"X-Next-Offset": {"2"},
+				})
+
+				res := callTool(t, cs, call.tool, call.args)
+
+				So(res.IsError, ShouldBeTrue)
+				text := firstTextContent(res)
+				So(text, ShouldContainSubstring, wa.ErrSearchCursorUnsupported.Error())
+				So(text, ShouldContainSubstring, "older than API 1.15.0")
+				So(text, ShouldContainSubstring, "page with offset")
+			}
+		})
+
+		Convey("a rejected cursor keeps the upstream 400 message and says to fix the input", func() {
+			stub.respondError("/search/sample/mus", http.StatusBadRequest, "bad_request",
+				"search cursor belongs to a different search: reuse it with the same term, type and options")
+
+			res := callTool(t, cs, "mlwh_search_samples", map[string]any{"term": "mus", "cursor": "other"})
+
+			So(res.IsError, ShouldBeTrue)
+			text := firstTextContent(res)
+			So(text, ShouldContainSubstring, "search cursor belongs to a different search")
+			So(text, ShouldContainSubstring, "fix the input")
+		})
+
+		Convey("both tools describe cursor versus offset paging and expose the cursor schema", func() {
+			for _, name := range []string{"mlwh_search_samples", "mlwh_search_studies"} {
+				tool, ok := toolByName(t, cs, name)
+				So(ok, ShouldBeTrue)
+
+				So(tool.Description, ShouldContainSubstring, "To walk every page of a large search, pass the returned next_cursor back as cursor")
+				So(tool.Description, ShouldContainSubstring, "rows whose match did not change are neither repeated nor skipped")
+				So(tool.Description, ShouldContainSubstring, "Use offset (next_offset) to jump to a page")
+				So(tool.Description, ShouldContainSubstring, "Cursor and offset cannot be combined")
+				So(tool.Description, ShouldContainSubstring, "MLWH API 1.15.0")
+
+				input := tool.InputSchema.(map[string]any)["properties"].(map[string]any)
+				_, hasCursor := input["cursor"]
+				So(hasCursor, ShouldBeTrue)
+
+				output := tool.OutputSchema.(map[string]any)
+				properties := output["properties"].(map[string]any)
+				for _, field := range []string{"next_cursor", "stale", "warning", "total", "next_offset"} {
+					_, has := properties[field]
+					So(has, ShouldBeTrue)
+				}
+				So(output["required"], ShouldContain, "next_cursor")
+				So(output["required"], ShouldContain, "stale")
+			}
 		})
 	})
 }

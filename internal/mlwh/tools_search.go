@@ -28,6 +28,7 @@ package mlwh
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
@@ -37,6 +38,18 @@ import (
 
 	"github.com/wtsi-hgi/llm-knowledge-base/internal/core"
 )
+
+// searchCursorPagingNote is appended to the sample and study search tool
+// descriptions: it says how to page with cursor or offset and when to choose
+// each.
+const searchCursorPagingNote = " Page with cursor or offset. To walk every page of a large search, pass the " +
+	"returned next_cursor back as cursor with the same term and options and no offset, until next_cursor is " +
+	"empty (the last page): deep cursor pages stay fast, and if the cache syncs between pages, rows whose match " +
+	"did not change are neither repeated nor skipped. stale=true (with warning) means the cache synced since the " +
+	"first page: later pages may include newer matches, and new matches that sort before the cursor are missed " +
+	"until a fresh search. Use offset (next_offset) to jump to a page; offset pages can repeat or skip rows when " +
+	"the cache syncs between pages. Cursor and offset cannot be combined. Cursor paging needs MLWH API " +
+	wa.SearchCursorAPIVersion + "; an older server returns no next_cursor, so page it with offset."
 
 // searchTermMinLength mirrors the upstream free-text search contract. Study
 // searches and unfiltered sample searches require at least three characters;
@@ -56,17 +69,17 @@ const (
 		"whole-word common-name membership including subspecies, library type is exact, QC is the " +
 		"sample-level fail>pending>pass roll-up, and deliverables_only uses the upstream deliverable " +
 		"discriminator rather than is_spiked, with PacBio/ONT pass-through. " +
-		"Defaults to a page of 100 rows, maximum 1000 (a larger limit is rejected, not clamped); " +
-		"use offset to page." + bareListFreshnessNote
+		"Defaults to a page of 100 rows, maximum 1000 (a larger limit is rejected, not clamped)." +
+		searchCursorPagingNote + bareListFreshnessNote
 
 	searchStudiesDescription = "Search studies by substring for study-name/id lookup questions " +
 		"(for example, \"What study id matches this name?\"): returns studies whose " +
 		"name, study_title, programme, or faculty_sponsor contains the term " +
 		"(case-insensitive substring match, minimum 3 characters). " +
-		"Defaults to a page of 100 rows, maximum 1000 (a larger limit is rejected, not clamped); " +
-		"use offset to page. Rows expose study identifiers and context fields such as " +
+		"Defaults to a page of 100 rows, maximum 1000 (a larger limit is rejected, not clamped). " +
+		"Rows expose study identifiers and context fields such as " +
 		"id_study_lims, name, study_title, programme, faculty_sponsor, and accession_number " +
-		"to disambiguate candidate study ids." + bareListFreshnessNote
+		"to disambiguate candidate study ids." + searchCursorPagingNote + bareListFreshnessNote
 
 	countSamplesDescription = "Count samples matching mlwh_search_samples with identical options: the default " +
 		"is a case-insensitive literal whole-value prefix over name, supplier_name, common_name, and donor_id; " +
@@ -96,15 +109,28 @@ type sampleSearchInput struct {
 	QC               string `json:"qc,omitempty" jsonschema:"sample-level QC roll-up filter: fail, pending, or pass"`
 	DeliverablesOnly bool   `json:"deliverables_only,omitempty" jsonschema:"filter with the upstream deliverable discriminator, not is_spiked; PacBio and ONT pass through"`
 	Limit            int    `json:"limit,omitempty" jsonschema:"maximum rows to return; defaults to 100, maximum 1000 (a larger limit is rejected, not clamped)"`
-	Offset           int    `json:"offset,omitempty" jsonschema:"number of leading rows to skip before returning results; defaults to 0"`
+	Offset           int    `json:"offset,omitempty" jsonschema:"number of leading rows to skip before returning results; defaults to 0; cannot be combined with cursor"`
+	Cursor           string `json:"cursor,omitempty" jsonschema:"next_cursor from the previous page of this same search (same term and options); returns the rows after that page; cannot be combined with offset"`
 }
 
 func (in sampleSearchInput) query(limit, offset int) url.Values {
-	query := url.Values{
-		"limit":  {strconv.Itoa(limit)},
-		"offset": {strconv.Itoa(offset)},
-	}
+	query := searchPageQuery(limit, offset, in.Cursor)
 	addSampleSearchOptions(query, in.options())
+
+	return query
+}
+
+// searchPageQuery encodes a search page request: limit plus either the cursor
+// or, without one, the offset.
+func searchPageQuery(limit, offset int, cursor string) url.Values {
+	query := url.Values{"limit": {strconv.Itoa(limit)}}
+	if cursor = strings.TrimSpace(cursor); cursor != "" {
+		query.Set("cursor", cursor)
+
+		return query
+	}
+
+	query.Set("offset", strconv.Itoa(offset))
 
 	return query
 }
@@ -134,10 +160,6 @@ func (in sampleSearchInput) options() wa.SampleSearchOptions {
 	}
 }
 
-func (in sampleSearchInput) hasOptions() bool {
-	return hasSampleSearchOptions(in.options())
-}
-
 func hasSampleSearchOptions(opts wa.SampleSearchOptions) bool {
 	return opts.Words || hasSampleExactFilter(opts)
 }
@@ -152,8 +174,8 @@ func hasSampleExactFilter(opts wa.SampleSearchOptions) bool {
 }
 
 // addSearchSamples registers mlwh_search_samples. Free-text-only calls retain
-// the three-character guard and page helper. Optioned calls preserve the exact
-// query and page headers in one CallWithHeaders request.
+// the three-character guard. Every page is one CallWithHeaders request whose
+// sizing, cursor and warning headers become the page metadata.
 func (p *provider) addSearchSamples(r core.Registrar, outputSchema map[string]any) {
 	client := p.client
 
@@ -161,18 +183,18 @@ func (p *provider) addSearchSamples(r core.Registrar, outputSchema map[string]an
 		Name:         "mlwh_search_samples",
 		Description:  searchSamplesDescription,
 		OutputSchema: outputSchema,
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in sampleSearchInput) (*mcp.CallToolResult, pagedSamplesResult, error) {
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in sampleSearchInput) (*mcp.CallToolResult, searchSamplesResult, error) {
 		limit, offset, err := guardSampleSearch(in)
 		if err != nil {
-			return core.ToolError[pagedSamplesResult](err)
+			return core.ToolError[searchSamplesResult](err)
 		}
 
-		page, err := sampleSearchPage(ctx, client, in, limit, offset)
+		samples, meta, err := searchCursorPage[wa.Sample](ctx, client, "SearchSamples", in.Term, in.query(limit, offset))
 		if err != nil {
-			return core.ToolError[pagedSamplesResult](mapToolError(err))
+			return core.ToolError[searchSamplesResult](mapToolError(err))
 		}
 
-		return nil, page, nil
+		return nil, searchSamplesResult{Samples: samples, searchPageMeta: meta}, nil
 	})
 }
 
@@ -181,7 +203,7 @@ func guardSampleSearch(in sampleSearchInput) (limit, offset int, err error) {
 		return 0, 0, err
 	}
 
-	return boundedPagination(in.Limit, in.Offset)
+	return searchPagination(in.Limit, in.Offset, in.Cursor)
 }
 
 func guardSampleSearchTerm(term string, hasExactFilter bool) error {
@@ -205,32 +227,20 @@ func guardTerm(term string) error {
 	return nil
 }
 
-func sampleSearchPage(
-	ctx context.Context,
-	client *wa.RemoteClient,
-	in sampleSearchInput,
-	limit, offset int,
-) (pagedSamplesResult, error) {
-	if !in.hasOptions() {
-		page, err := client.SearchSamplesPage(ctx, in.Term, limit, offset)
-
-		return pagedSamplesResult{Samples: page.Items, Total: page.Total, NextOffset: page.NextOffset}, err
-	}
-
-	decoded, headers, err := client.CallWithHeaders(ctx, "SearchSamples", []string{in.Term}, in.query(limit, offset))
+// searchPagination resolves a search page's limit and offset like
+// boundedPagination, and rejects a cursor combined with a non-zero offset
+// before HTTP, as the upstream would.
+func searchPagination(limit, offset int, cursor string) (int, int, error) {
+	limit, offset, err := boundedPagination(limit, offset)
 	if err != nil {
-		return pagedSamplesResult{}, err
+		return 0, 0, err
+	}
+	if offset != 0 && strings.TrimSpace(cursor) != "" {
+		return 0, 0, fmt.Errorf("cursor and offset %d cannot be combined: continue a search with its next_cursor "+
+			"alone (omit offset), or page by offset without a cursor", offset)
 	}
 
-	samples, ok := decoded.(*[]wa.Sample)
-	if !ok {
-		return pagedSamplesResult{}, fmt.Errorf("%w: registry result for SearchSamples has type %T", wa.ErrUpstreamImpaired, decoded)
-	}
-
-	return pagedSamplesResult{
-		Samples: *samples, Total: headerInt(headers, "X-Total-Count", 0),
-		NextOffset: headerInt(headers, "X-Next-Offset", -1),
-	}, nil
+	return limit, offset, nil
 }
 
 // sampleSearchCountInput is the matching option vocabulary for
@@ -300,7 +310,8 @@ func (p *provider) addCountSamples(r core.Registrar, outputSchema map[string]any
 type searchInput struct {
 	Term   string `json:"term" jsonschema:"the search term; minimum 3 characters"`
 	Limit  int    `json:"limit,omitempty" jsonschema:"maximum rows to return; defaults to 100, maximum 1000 (a larger limit is rejected, not clamped)"`
-	Offset int    `json:"offset,omitempty" jsonschema:"number of leading rows to skip before returning results; defaults to 0"`
+	Offset int    `json:"offset,omitempty" jsonschema:"number of leading rows to skip before returning results; defaults to 0; cannot be combined with cursor"`
+	Cursor string `json:"cursor,omitempty" jsonschema:"next_cursor from the previous page of this same search (same term); returns the rows after that page; cannot be combined with offset"`
 }
 
 // addSearchStudies registers mlwh_search_studies (Story A3/D1), mirroring
@@ -314,37 +325,78 @@ func (p *provider) addSearchStudies(r core.Registrar, outputSchema map[string]an
 		Name:         "mlwh_search_studies",
 		Description:  searchStudiesDescription,
 		OutputSchema: outputSchema,
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, in searchInput) (*mcp.CallToolResult, pagedStudiesResult, error) {
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in searchInput) (*mcp.CallToolResult, searchStudiesResult, error) {
 		limit, offset, err := guardSearch(in)
 		if err != nil {
-			return core.ToolError[pagedStudiesResult](err)
+			return core.ToolError[searchStudiesResult](err)
 		}
 
-		page, err := client.SearchStudiesPage(ctx, in.Term, limit, offset)
+		query := searchPageQuery(limit, offset, in.Cursor)
+
+		studies, meta, err := searchCursorPage[wa.Study](ctx, client, "SearchStudies", in.Term, query)
 		if err != nil {
-			return core.ToolError[pagedStudiesResult](mapToolError(err))
+			return core.ToolError[searchStudiesResult](mapToolError(err))
 		}
 
-		return nil, pagedStudiesResult{
-			Studies:    page.Items,
-			Total:      page.Total,
-			NextOffset: page.NextOffset,
-		}, nil
+		return nil, searchStudiesResult{Studies: studies, searchPageMeta: meta}, nil
 	})
 }
 
-// guardSearch applies the cheap input bounds for the paginated study search before any
-// HTTP call: it rejects a term shorter than the minimum and a limit above the
-// maximum (matching the upstream, which rejects rather than clamps), then
-// resolves the effective limit (an omitted/zero limit becomes the default page)
-// and offset (omitted is 0). Returning an error here short-circuits the handler
-// so no request reaches the warehouse.
+// guardSearch applies the cheap input bounds for the paginated study search
+// before any HTTP call: it rejects a term shorter than the minimum, a limit
+// above the maximum (matching the upstream, which rejects rather than clamps),
+// and a cursor combined with an offset, then resolves the effective limit (an
+// omitted/zero limit becomes the default page) and offset (omitted is 0).
+// Returning an error here short-circuits the handler so no request reaches the
+// warehouse.
 func guardSearch(in searchInput) (limit, offset int, err error) {
 	if err = guardTerm(in.Term); err != nil {
 		return 0, 0, err
 	}
 
-	return boundedPagination(in.Limit, in.Offset)
+	return searchPagination(in.Limit, in.Offset, in.Cursor)
+}
+
+// searchCursorPage fetches one study or sample search page through method and
+// reads its page metadata from the response headers: X-Total-Count,
+// X-Next-Offset (an offset page only), X-Next-Cursor and X-Search-Warning. A
+// cursor request answered with X-Next-Offset came from a server that predates
+// search cursors and ignored the cursor, so it is reported as
+// wa.ErrSearchCursorUnsupported rather than returned as the first page again.
+func searchCursorPage[T any](
+	ctx context.Context,
+	client *wa.RemoteClient,
+	method, term string,
+	query url.Values,
+) ([]T, searchPageMeta, error) {
+	decoded, headers, err := client.CallWithHeaders(ctx, method, []string{term}, query)
+	if err != nil {
+		return nil, searchPageMeta{}, err
+	}
+
+	items, ok := decoded.(*[]T)
+	if !ok {
+		return nil, searchPageMeta{}, fmt.Errorf("%w: registry result for %s has type %T", wa.ErrUpstreamImpaired, method, decoded)
+	}
+
+	if query.Get("cursor") != "" && headers.Get("X-Next-Offset") != "" {
+		return nil, searchPageMeta{}, fmt.Errorf("%w: the MLWH server ignored the cursor; cursor paging needs API %s or later",
+			wa.ErrSearchCursorUnsupported, wa.SearchCursorAPIVersion)
+	}
+
+	return *items, searchPageMetaFromHeaders(headers), nil
+}
+
+func searchPageMetaFromHeaders(headers http.Header) searchPageMeta {
+	warning := headers.Get(wa.SearchWarningHeader)
+
+	return searchPageMeta{
+		Total:      headerInt(headers, "X-Total-Count", 0),
+		NextOffset: headerInt(headers, "X-Next-Offset", -1),
+		NextCursor: headers.Get(wa.SearchNextCursorHeader),
+		Stale:      warning != "",
+		Warning:    warning,
+	}
 }
 
 func hasSampleSearchTextOption(value string) bool {
@@ -361,12 +413,12 @@ func hasSampleSearchTextOption(value string) bool {
 // (the schemas come from the compiled-in OpenAPI document), so such a failure is
 // surfaced as a registration error.
 func (p *provider) registerSearchTools(r core.Registrar) error {
-	samplesSchema, err := outputSchemaForPagedSlice("samples", "Sample")
+	samplesSchema, err := outputSchemaForSearchPage("samples", "Sample")
 	if err != nil {
 		return fmt.Errorf("mlwh: build samples output schema: %w", err)
 	}
 
-	studiesSchema, err := outputSchemaForPagedSlice("studies", "Study")
+	studiesSchema, err := outputSchemaForSearchPage("studies", "Study")
 	if err != nil {
 		return fmt.Errorf("mlwh: build studies output schema: %w", err)
 	}

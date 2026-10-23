@@ -354,6 +354,31 @@ type pagedSamplesResult struct {
 	NextOffset int         `json:"next_offset"`
 }
 
+// searchPageMeta is the page metadata of a study or sample search page: the
+// offset-paging total and next_offset, the keyset next_cursor (empty on the
+// last page), and whether the cache synced since a cursor's first page.
+type searchPageMeta struct {
+	Total      int    `json:"total"`
+	NextOffset int    `json:"next_offset"`
+	NextCursor string `json:"next_cursor"`
+	Stale      bool   `json:"stale"`
+	Warning    string `json:"warning,omitempty"`
+}
+
+// searchSamplesResult wraps a sample search page as
+// {"samples":[...],"total":N,"next_offset":M,"next_cursor":C,"stale":B}.
+type searchSamplesResult struct {
+	Samples []wa.Sample `json:"samples"`
+	searchPageMeta
+}
+
+// searchStudiesResult wraps a study search page as
+// {"studies":[...],"total":N,"next_offset":M,"next_cursor":C,"stale":B}.
+type searchStudiesResult struct {
+	Studies []wa.Study `json:"studies"`
+	searchPageMeta
+}
+
 // pagedSamplesWithDataResult wraps a header-aware sample availability page as
 // {"samples":[...],"total":N,"next_offset":M}. Each row carries the sample and
 // its platform qualifiers.
@@ -566,6 +591,42 @@ func outputSchemaForPagedSlice(propertyName, componentName string) (map[string]a
 		},
 		"required": []any{propertyName, "total", "next_offset"},
 	}, nil
+}
+
+// outputSchemaForSearchPage returns the output schema for a study or sample
+// search page: outputSchemaForPagedSlice plus the cursor-paging metadata.
+func outputSchemaForSearchPage(propertyName, componentName string) (map[string]any, error) {
+	schema, err := outputSchemaForPagedSlice(propertyName, componentName)
+	if err != nil {
+		return nil, err
+	}
+
+	properties, _ := schema["properties"].(map[string]any)
+	properties["next_offset"] = map[string]any{
+		"type": "integer",
+		"description": "offset of the next page from X-Next-Offset, or -1 when absent, on the last page, " +
+			"or on a cursor page",
+	}
+	properties["next_cursor"] = map[string]any{
+		"type": "string",
+		"description": "cursor for the next page from X-Next-Cursor; pass it back as cursor with the same " +
+			"search and no offset; empty on the last page or from a server older than MLWH API " +
+			wa.SearchCursorAPIVersion,
+	}
+	properties["stale"] = map[string]any{
+		"type": "boolean",
+		"description": "true when the cache synced since this cursor walk's first page: rows whose match " +
+			"did not change are still neither repeated nor skipped, but new matches sorting before the cursor are missed",
+	}
+	properties["warning"] = map[string]any{
+		"type":        "string",
+		"description": "the X-Search-Warning text when stale is true",
+	}
+
+	required, _ := schema["required"].([]any)
+	schema["required"] = append(required, "next_cursor", "stale")
+
+	return schema, nil
 }
 
 // outputSchemaForPagedObject returns the OpenAPI-sourced object schema for an

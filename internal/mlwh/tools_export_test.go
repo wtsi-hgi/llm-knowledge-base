@@ -815,6 +815,41 @@ func exportColumnEnumForTest(vocabularies []wa.ExportColumnVocabulary) []any {
 	return values
 }
 
+// TestExportLibraryTypeColumn pins the API 1.14.0 opt-in library_type export
+// column (alias pipeline_id_lims): the MCP derives its column enum and
+// per-relationship column docs from wa, so the column must reach the products,
+// irods, sample-crams, and lanes vocabularies, and the tool description.
+func TestExportLibraryTypeColumn(t *testing.T) {
+	Convey("Given the mlwh_export tool schema", t, func() {
+		stub := newStubMLWH(t)
+		cs, cleanup := runMLWHServerWithClient(t, stub)
+		defer cleanup()
+
+		tool, ok := toolByName(t, cs, "mlwh_export")
+		So(ok, ShouldBeTrue)
+
+		columns := tool.InputSchema.(map[string]any)["properties"].(map[string]any)["columns"].(map[string]any)
+		enum := columns["items"].(map[string]any)["enum"]
+		So(enum, ShouldContain, "library_type")
+		So(enum, ShouldContain, "pipeline_id_lims")
+
+		description := columns["description"].(string)
+		withLibraryType := []string{}
+		for _, vocabulary := range wa.ExportColumnVocabularies() {
+			entry := exportColumnsDescriptionForTest(vocabulary)
+			if strings.Contains(entry, "library_type (aliases: pipeline_id_lims)") {
+				So(description, ShouldContainSubstring, entry)
+				withLibraryType = append(withLibraryType, vocabulary.Children)
+			}
+		}
+		for _, children := range []string{"products", "irods", "sample-crams", "lanes"} {
+			So(withLibraryType, ShouldContain, children)
+		}
+
+		So(tool.Description, ShouldContainSubstring, "The opt-in library_type column (alias pipeline_id_lims")
+	})
+}
+
 func exportColumnsDescriptionForTest(vocabulary wa.ExportColumnVocabulary) string {
 	columns := make([]string, len(vocabulary.Columns))
 	for index, column := range vocabulary.Columns {

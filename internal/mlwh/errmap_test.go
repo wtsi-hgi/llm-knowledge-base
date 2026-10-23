@@ -104,6 +104,19 @@ func TestMapToolError(t *testing.T) {
 			So(msg, ShouldNotContainSubstring, wa.ErrAmbiguous.Error())
 		})
 
+		Convey("J1.12: a search-cursor-unsupported error says the server predates cursors and to page with offset", func() {
+			err := mapToolError(fmt.Errorf("%w: the MLWH server ignored the cursor; cursor paging needs API %s or later",
+				wa.ErrSearchCursorUnsupported, wa.SearchCursorAPIVersion))
+			So(err, ShouldNotBeNil)
+
+			msg := err.Error()
+			So(msg, ShouldStartWith, "the MLWH server ignored the cursor; cursor paging needs API 1.15.0 or later: "+
+				wa.ErrSearchCursorUnsupported.Error()+" (")
+			So(msg, ShouldContainSubstring, "older than API 1.15.0")
+			So(msg, ShouldContainSubstring, "page with offset (next_offset)")
+			So(msg, ShouldNotContainSubstring, "retry later")
+		})
+
 		Convey("J1.4: an unsupported-identifier error mentions the form is unsupported", func() {
 			err := mapToolError(fmt.Errorf("x: %w", wa.ErrUnsupportedIdentifier))
 			So(err, ShouldNotBeNil)
