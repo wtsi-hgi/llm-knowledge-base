@@ -74,6 +74,13 @@ const workflowGuidance = "# MLWH workflows\n\n" +
 	"`organism`, `library_type`, `qc`, and `deliverables_only` filters to this tool; " +
 	"use a supported `mlwh_export` relationship only when a chosen-column table is " +
 	"also required.\n" +
+	"- Every match of a large sample or study search: page `mlwh_search_samples` or " +
+	"`mlwh_search_studies` by cursor (needs MLWH API 1.15.0). Pass each page's `next_cursor` " +
+	"back as `cursor` with the same term and options and no `offset`, until `next_cursor` is " +
+	"empty. A cursor is stable across a cache sync for rows whose match does not change; " +
+	"`stale=true` says the cache synced since the first page, so new matches sorting before " +
+	"the cursor are missed until a fresh search. Use `offset` to jump to one page, or when " +
+	"the server returns no `next_cursor`; use the count tools to size a search first.\n" +
 	"- Newest data added to iRODS: use `mlwh_latest_data_for_study` or " +
 	"`mlwh_latest_data_for_faculty_sponsor`. For sample/run scopes or a caller-defined " +
 	"window, use the matching curated iRODS path tool with " +

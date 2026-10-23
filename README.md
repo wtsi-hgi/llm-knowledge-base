@@ -21,7 +21,7 @@ server is a thin, well-described bridge whose value is making those endpoints
 ergonomic and correctly usable by an LLM, not re-implementing them: it imports
 `github.com/wtsi-hgi/wa/mlwh` and reuses its typed client, response types,
 registry, and OpenAPI document directly, so there is no type drift and the server
-is compile-time-locked to the upstream API version (currently MLWH API 1.13.0).
+is compile-time-locked to the upstream API version (currently MLWH API 1.15.0).
 
 The MLWH provider serves over the **stdio** transport by default, so it can run
 as a local subprocess launched per user by an agent CLI. It can also run in
@@ -52,7 +52,7 @@ below. Check the build and the versions it targets:
 ```bash
 mlwh-mcp-server --version
 # mlwh-mcp-server version <build version>
-# MLWH API version 1.13.0
+# MLWH API version 1.15.0
 ```
 
 ## Configuration
@@ -264,6 +264,7 @@ Prompt cookbook:
   - "Search sample names by word prefix instead of literal whole-value prefix."
   - "What study id matches the name `cancer`?"
   - "List study candidates for `rare disease`, enough to disambiguate the id."
+  - "List every sample matching `mus`, paging by cursor."
   - Sample search defaults to a case-insensitive literal whole-value prefix.
     `words=true` is the opt-in separator-agnostic word-prefix mode, not a
     substring mode.
@@ -380,6 +381,14 @@ Notes for interpreting answers:
   and unsorted iRODS export pages return `NextCursor`; pass it back as `cursor`.
   Offset-backed export relationships do not accept a cursor and continue with
   `offset + len(Rows)`. The matrix `Total` sizes a bounded export.
+- `mlwh_search_samples` and `mlwh_search_studies` also return `next_cursor`
+  (MLWH API 1.15.0+). To walk every page of a large search, pass it back as
+  `cursor` with the same term and options and no `offset` until it is empty.
+  Unlike `offset`, a cursor does not repeat or skip rows whose match is
+  unchanged when the cache syncs between pages; `stale=true` (with `warning`)
+  says the cache synced since the first page, so new matches sorting before
+  the cursor are missed until a fresh search. `cursor` and `offset` cannot be
+  combined; page an older server, which returns no `next_cursor`, by `offset`.
 - `mlwh_runs` is a separate keyset page: pass the last row's `id` as the cursor.
   It returns neither `total` nor `next_offset`.
 - If a response would be too large, the server returns a structured

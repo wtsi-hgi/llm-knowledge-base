@@ -32,6 +32,10 @@ Pick features from [features/README.md](features/README.md).
   ambiguity errors that name candidate Sanger samples, that wa checkout must
   be at `v1.1.0` or later (API 1.13.0+); an older wa answers a shared value
   with an ambiguous error.
+- For `mlwh_search_samples`/`mlwh_search_studies` cursor paging
+  (`next_cursor`, `stale`), that wa checkout must be at `v1.3.0` or later
+  (API 1.15.0+); an older wa ignores `cursor`, which the tools report as an
+  error that says to page with `offset`.
 - Go, node, pnpm, `jq`, `python3`, `curl`, `ss`. verify-wa installs
   `frontend/node_modules` (Playwright included) in the wa checkout if missing.
 

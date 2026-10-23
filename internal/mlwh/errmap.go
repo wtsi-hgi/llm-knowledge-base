@@ -43,6 +43,10 @@ const multiSampleAmbiguityHint = "this value also identifies a single sample by 
 	"so multi_sample cannot span it; pick one of the Sanger samples the message names, or one Sanger name " +
 	"from mlwh_search_samples term=<the value>, and retry with it."
 
+// requestRejectedDetail matches the "(<status> <code>)" detail wa's
+// RemoteRequestError adds after the ErrRequestRejected text.
+var requestRejectedDetail = regexp.MustCompile(regexp.QuoteMeta(wa.ErrRequestRejected.Error()) + ` \([^)]*\)`)
+
 // errorHint pairs a wa/mlwh sentinel with the short actionable hint appended to
 // its mapped tool error. The hints turn an opaque upstream failure into advice
 // the calling agent can act on (disambiguate, retry later, or fix the input).
@@ -117,6 +121,11 @@ func sentinelHints() []errorHint {
 				"supplier_name or donor_id equals it.",
 		},
 		{
+			sentinel: wa.ErrSearchCursorUnsupported,
+			hint: "this MLWH server is older than API " + wa.SearchCursorAPIVersion + " and cannot page searches " +
+				"by cursor; repeat the search without cursor and page with offset (next_offset) instead.",
+		},
+		{
 			sentinel: wa.ErrAmbiguous,
 			hint: "the identifier matches multiple records; disambiguate it. The message names candidate " +
 				"Sanger samples (LIMS ids for studies) you can use directly; otherwise use a more specific " +
@@ -143,10 +152,6 @@ func sentinelHints() []errorHint {
 		},
 	}
 }
-
-// requestRejectedDetail matches the "(<status> <code>)" detail wa's
-// RemoteRequestError adds after the ErrRequestRejected text.
-var requestRejectedDetail = regexp.MustCompile(regexp.QuoteMeta(wa.ErrRequestRejected.Error()) + ` \([^)]*\)`)
 
 // upstreamContext extracts any contextual text the upstream error wrapped around
 // its sentinels, by removing every known sentinel message (so a joined companion

@@ -286,6 +286,17 @@ func TestWorkflowResource(t *testing.T) {
 			So(guidance, ShouldContainSubstring, "use them directly as identifiers")
 		})
 
+		Convey("H1.4: walking every page of a large search routes to cursor paging, with offset for one page", func() {
+			guidance := workflowGuidancePrefix(t, contents.Text)
+
+			So(guidance, ShouldContainSubstring, "Every match of a large sample or study search: page `mlwh_search_samples` or "+
+				"`mlwh_search_studies` by cursor (needs MLWH API 1.15.0)")
+			So(guidance, ShouldContainSubstring, "Pass each page's `next_cursor` back as `cursor` with the same term and options and no `offset`")
+			So(guidance, ShouldContainSubstring, "stable across a cache sync for rows whose match does not change")
+			So(guidance, ShouldContainSubstring, "`stale=true` says the cache synced since the first page")
+			So(guidance, ShouldContainSubstring, "Use `offset` to jump to one page")
+		})
+
 		Convey("H1.2: lanes export default columns and the pre-1.11.0 shape are documented", func() {
 			guidance := workflowGuidancePrefix(t, contents.Text)
 

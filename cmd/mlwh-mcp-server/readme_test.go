@@ -106,7 +106,7 @@ func TestREADMEHTTPDocs(t *testing.T) {
 }
 
 func TestREADMEPublicAPIDocs(t *testing.T) {
-	Convey("Given the complete public README for MLWH API 1.13.0", t, func() {
+	Convey("Given the complete public README for MLWH API 1.15.0", t, func() {
 		readmeBytes, err := os.ReadFile("../../README.md")
 		So(err, ShouldBeNil)
 
@@ -137,9 +137,10 @@ func TestREADMEPublicAPIDocs(t *testing.T) {
 			So(readme, ShouldNotContainSubstring, "manifest")
 		})
 
-		Convey("F2.2: version prose and the version example use API 1.13.0 only", func() {
-			So(prose, ShouldContainSubstring, "currently mlwh api 1.13.0")
-			So(readme, ShouldContainSubstring, "# mlwh api version 1.13.0")
+		Convey("F2.2: version prose and the version example use API 1.15.0 only", func() {
+			So(prose, ShouldContainSubstring, "currently mlwh api 1.15.0")
+			So(readme, ShouldContainSubstring, "# mlwh api version 1.15.0")
+			So(prose, ShouldNotContainSubstring, "currently mlwh api 1.13.0")
 			So(prose, ShouldNotContainSubstring, "currently mlwh api 1.12.0")
 			So(prose, ShouldNotContainSubstring, "currently mlwh api 1.10.0")
 			So(prose, ShouldNotContainSubstring, "currently mlwh api 1.11.0")
@@ -220,6 +221,10 @@ func TestREADMEPublicAPIDocs(t *testing.T) {
 			So(pagination, ShouldContainSubstring, "latest-data pages default to 10 rows")
 			So(pagination, ShouldContainSubstring, "last row's `id` as the cursor")
 			So(pagination, ShouldContainSubstring, "neither `total` nor `next_offset`")
+			So(pagination, ShouldContainSubstring, "to walk every page of a large search, pass it back as `cursor`")
+			So(pagination, ShouldContainSubstring, "`stale=true` (with `warning`) says the cache synced since the first page")
+			So(pagination, ShouldContainSubstring, "`cursor` and `offset` cannot be combined")
+			So(singleSpaced(questions), ShouldContainSubstring, "list every sample matching `mus`, paging by cursor.")
 		})
 
 		Convey("F2.7: domain caveats cover attachments, CRAMs, dates, and freshness", func() {
